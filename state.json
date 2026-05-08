@@ -1,13 +1,13 @@
 {
-  "latest_seen": null,
-  "latest_title": null,
-  "latest_url": null,
-  "latest_webnovel": null,
-  "latest_webnovel_title": null,
+  "latest_seen": 2986,
+  "latest_title": "A Memory Most Dreadful",
+  "latest_url": "https://lightnovelworld.org/novel/shadow-slave",
+  "latest_webnovel": 2986,
+  "latest_webnovel_title": "A Memory Most Dreadful",
   "mode": "watch_webnovel",
   "target_chapter": null,
   "target_title": null,
   "target_url": null,
-  "last_webnovel_check": null,
-  "updated_at": null
+  "last_webnovel_check": "2026-05-08T23:55:37+00:00",
+  "updated_at": "2026-05-08T23:55:39+00:00"
 }
