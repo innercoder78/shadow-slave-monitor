@@ -1,8 +1,6 @@
 name: Shadow Slave chapter monitor
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
