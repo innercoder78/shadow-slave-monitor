@@ -42,12 +42,24 @@ PUBLIC_SITES = [
         "url": "https://lightnovelworld.org/novel/shadow-slave",
     },
     {
-        "name": "NovelFire",
-        "url": "https://novelfire.net/book/shadow-slave",
-    },
-    {
         "name": "NovelBin",
         "url": "https://novelbin.com/b/shadow-slave",
+    },
+    {
+        "name": "SSNovel",
+        "url": "https://ssnovel.app",
+    },
+    {
+        "name": "FreeWebNovel",
+        "url": "https://freewebnovel.com/novel/shadow-slave",
+    },
+    {
+        "name": "NovelFull",
+        "url": "https://novelfull.com/shadow-slave.html",
+    },
+    {
+        "name": "LightNovelUp",
+        "url": "https://lightnovelup.com/novel/shadow-slave",
     },
 ]
 
@@ -176,6 +188,150 @@ def parse_chapter_text(text: str) -> tuple[int, str | None] | None:
     return None
 
 
+def parse_bare_chapter_text(text: str) -> tuple[int, str | None] | None:
+    """Parse SSNovel-style chapter rows such as "2986 A Memory Most Dreadful"."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if re.search(r"\b(from|to)\s+chapter\b", normalized, flags=re.IGNORECASE):
+        return None
+
+    match = re.match(r"^(\d{3,5})\s+(.+)$", normalized)
+    if not match:
+        return None
+
+    title = clean_title(match.group(2))
+    if not title:
+        return None
+    if title.casefold() == "latest":
+        return int(match.group(1)), None
+    if is_non_chapter_title(title):
+        return None
+    return int(match.group(1)), title
+
+
+def is_non_chapter_title(title: str | None) -> bool:
+    if not title:
+        return False
+    normalized = re.sub(r"\s+", " ", title).strip().casefold()
+    ui_words = (
+        "chapter",
+        "latest",
+        "read",
+        "comments",
+        "comment",
+        "views",
+        "view",
+        "rating",
+        "ratings",
+        "votes",
+        "vote",
+        "words",
+        "word",
+        "pages",
+        "page",
+        "seconds",
+        "minutes",
+        "hours",
+        "days",
+        "ago",
+        "next",
+        "previous",
+    )
+    return normalized in ui_words or bool(re.fullmatch(r"[\d\W_]+", normalized))
+
+
+def parse_chapter_from_href(href: str) -> int | None:
+    lowered = href.casefold()
+    if "shadow-slave" not in lowered:
+        return None
+    patterns = [
+        r"(?:chapter|chap|ch)[\-/_.]?(\d{1,5})\b",
+        r"/(\d{3,5})(?:[\-/_.][a-z0-9]|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def chapter_candidate_from_anchor(
+    anchor: Any, base_url: str, allow_bare_text: bool = False, require_shadow_href: bool = False
+) -> ChapterReport | None:
+    text = anchor.get_text(" ", strip=True)
+    href = anchor.get("href")
+    if not href:
+        return None
+
+    parsed = parse_chapter_text(text)
+    if not parsed and allow_bare_text:
+        parsed = parse_bare_chapter_text(text)
+
+    href_chapter = parse_chapter_from_href(href)
+    if require_shadow_href and href_chapter is None:
+        return None
+    if not parsed and href_chapter is not None:
+        parsed = href_chapter, None
+    if not parsed:
+        return None
+
+    chapter, title = parsed
+    if href_chapter is not None and href_chapter != chapter:
+        return None
+    return ChapterReport("", chapter, title, urljoin(base_url, href))
+
+
+def chapter_candidates_from_text(text: str, base_url: str, allow_bare_text: bool = False) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    for line in [line.strip() for line in text.splitlines() if line.strip()]:
+        parsed = parse_chapter_text(line)
+        if not parsed and allow_bare_text:
+            parsed = parse_bare_chapter_text(line)
+        if parsed:
+            chapter, title = parsed
+            if title and is_non_chapter_title(title):
+                continue
+            candidates.append(ChapterReport("", chapter, title, base_url))
+    return candidates
+
+
+def find_section_nodes(soup: BeautifulSoup, heading_pattern: str) -> list[Any]:
+    matches = soup.find_all(string=re.compile(heading_pattern, re.IGNORECASE))
+    nodes: list[Any] = []
+    for text_node in matches:
+        element = text_node.parent
+        if not element:
+            continue
+
+        nodes.append(element)
+        nodes.extend(element.find_next_siblings(limit=1))
+
+        parent = element.parent
+        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
+            nodes.append(parent)
+            nodes.extend(parent.find_next_siblings(limit=1))
+    return nodes
+
+
+def candidates_from_nodes(nodes: list[Any], base_url: str, allow_bare_text: bool = False) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+    for node in nodes:
+        for anchor in node.find_all("a"):
+            candidate = chapter_candidate_from_anchor(anchor, base_url, allow_bare_text)
+            if not candidate:
+                continue
+            key = (candidate.chapter, candidate.url)
+            if key not in seen:
+                seen.add(key)
+                candidates.append(candidate)
+        for candidate in chapter_candidates_from_text(node.get_text("\n", strip=True), base_url, allow_bare_text):
+            key = (candidate.chapter, candidate.url)
+            if key not in seen:
+                seen.add(key)
+                candidates.append(candidate)
+    return candidates
+
+
 def parse_webnovel_latest(html: str) -> ChapterReport:
     soup = BeautifulSoup(html, "html.parser")
     lines = [line.strip() for line in soup.get_text("\n").splitlines() if line.strip()]
@@ -208,30 +364,69 @@ def check_webnovel() -> ChapterReport:
     return report
 
 
-def iter_public_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = "") -> list[ChapterReport]:
+    if site_name == "SSNovel":
+        candidates = candidates_from_nodes([soup], base_url, allow_bare_text=True)
+        titled = [candidate for candidate in candidates if candidate.title and candidate.title.casefold() != "latest"]
+        return titled or candidates
+
+    section_patterns = {
+        "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
+        "NovelFull": r"\bLatest\s+chapters\b",
+        "LightNovelUp": r"\bLATEST\s+MANGA\s+RELEASES\b",
+    }
+    if site_name in section_patterns:
+        section_candidates = candidates_from_nodes(find_section_nodes(soup, section_patterns[site_name]), base_url)
+        if section_candidates:
+            return section_candidates
+
     candidates: list[ChapterReport] = []
+    require_shadow_href = site_name in {"FreeWebNovel", "NovelFull", "LightNovelUp"}
     for anchor in soup.find_all("a"):
-        text = anchor.get_text(" ", strip=True)
-        href = anchor.get("href")
-        parsed = parse_chapter_text(text)
-        if parsed and href:
-            chapter, title = parsed
-            candidates.append(ChapterReport("", chapter, title, urljoin(base_url, href)))
+        candidate = chapter_candidate_from_anchor(anchor, base_url, require_shadow_href=require_shadow_href)
+        if candidate:
+            candidates.append(candidate)
 
     if candidates:
         return candidates
 
     # Fallback for pages that render the latest chapter as plain text.
-    text = soup.get_text("\n")
-    for match in re.finditer(r"\bChapter\s+(\d{1,5})\b\s*[:\-–—]?\s*([^\n\r|]*)", text, re.IGNORECASE):
-        candidates.append(ChapterReport("", int(match.group(1)), clean_title(match.group(2)), base_url))
-    return candidates
+    return chapter_candidates_from_text(soup.get_text("\n"), base_url)
+
+
+def parse_latest_from_chapter_page(html: str, url: str) -> ChapterReport | None:
+    soup = BeautifulSoup(html, "html.parser")
+    href_chapter = parse_chapter_from_href(url)
+    text = soup.get_text("\n", strip=True)
+
+    if href_chapter is not None:
+        for heading in soup.find_all(["h1", "h2", "title"]):
+            parsed = parse_chapter_text(heading.get_text(" ", strip=True))
+            if parsed and parsed[0] == href_chapter:
+                return ChapterReport("", href_chapter, parsed[1], url)
+        return ChapterReport("", href_chapter, None, url)
+
+    parsed = parse_chapter_text(text)
+    if not parsed:
+        return None
+    chapter, title = parsed
+    return ChapterReport("", chapter, title, url)
 
 
 def check_public_site(site: dict[str, str]) -> ChapterReport:
     logging.info("Checking %s.", site["name"])
     soup = BeautifulSoup(fetch_html(site["url"]), "html.parser")
-    candidates = iter_public_candidates(soup, site["url"])
+    candidates = iter_public_candidates(soup, site["url"], site["name"])
+
+    if not candidates and site["name"] == "LightNovelUp":
+        read_last = soup.find("a", string=re.compile(r"\bRead\s+Last\b", re.IGNORECASE))
+        if read_last and read_last.get("href"):
+            read_last_url = urljoin(site["url"], read_last["href"])
+            logging.info("Following LightNovelUp Read Last link: %s", read_last_url)
+            read_last_report = parse_latest_from_chapter_page(fetch_html(read_last_url), read_last_url)
+            if read_last_report:
+                candidates.append(read_last_report)
+
     if not candidates:
         raise MonitorError(f"Could not find any chapter links on {site['name']}.")
     best = max(candidates, key=lambda item: item.chapter)
