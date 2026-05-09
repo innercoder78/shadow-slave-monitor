@@ -39,7 +39,7 @@ This project was built with help from ChatGPT and Codex. It is mainly a personal
 
 If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the following topic: ss-alerts-ghcode. (no period)
 
-Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released.
+Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released. Moreover, the ability to check the chapters will expire Sunday, May 09, 2027 (I will extend it if *Shadow Slave* isn't over by then, obviously).
 
 ## IF YOU DECIDE TO FORK
 
@@ -51,10 +51,6 @@ Things to keep in mind if you decide to fork this repo:
 
 Although GitHub Actions says the shortest scheduled interval is once every 5 minutes, that does not mean GitHub guarantees it will actually run every 5 minutes. GitHub’s own docs say scheduled workflows can be delayed during high load, and if load is high enough, queued jobs may be dropped.
 
-What does that mean? GitHub Actions, in reality, will check once every 3-4 hours rather than 5 minutes. You might be up to 4 hours and a half hours late reading the latest chapter because of this.
+What does that mean? GitHub Actions, in reality, will check once every 3-4 hours rather than 5 minutes. You might be up to 4 and a half hours late reading the latest chapter because of this.
 
-Next step? Find a reliable scheduler website.
-
-
-
-READ SHADOW SLAVE! BEST WEB NOVEL IN THE WORLD!
+This is why I changed from GitHub Actions to cron-job.org.
