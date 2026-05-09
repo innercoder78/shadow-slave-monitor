@@ -35,7 +35,7 @@ If you’re a fellow reader and want to receive a notification when a new chapte
 If you use Android:
 https://play.google.com/store/apps/details?id=io.heckel.ntfy
 
-If you use Apple:
+If you use iOS:
 https://apps.apple.com/us/app/ntfy/id1625396347
 
 ## IF YOU DECIDE TO FORK
