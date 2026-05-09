@@ -47,6 +47,14 @@ Things to keep in mind if you decide to fork this repo:
 1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_TOPIC" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name and it obviously can't be the same name as someone else's).
 2) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications in the ntfy app.
 
+## ISSUES TO BE AWARE OF
+
+Although GitHub Actions says the shortest scheduled interval is once every 5 minutes, that does not mean GitHub guarantees it will actually run every 5 minutes. GitHub’s own docs say scheduled workflows can be delayed during high load, and if load is high enough, queued jobs may be dropped.
+
+What does that mean? GitHub Actions, in reality, will check once every 3-4 hours rather than 5 minutes. You might be up to 4 hours and a half hours late reading the latest chapter because of this.
+
+Next step? Find a reliable scheduler website.
+
 
 
 READ SHADOW SLAVE! BEST WEB NOVEL IN THE WORLD!
