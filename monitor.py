@@ -426,6 +426,91 @@ def candidates_from_nodes(nodes: list[Any], base_url: str, allow_bare_text: bool
     return candidates
 
 
+def is_light_novel_world_chapter_href(href: str) -> bool:
+    lowered = href.casefold()
+    if "shadow-slave" not in lowered:
+        return False
+    return bool(
+        re.search(r"/chapter/\d{1,5}/?(?:[?#].*)?$", lowered)
+        or re.search(r"chapter[-_/]\d{1,5}\b", lowered)
+    )
+
+
+def is_light_novel_world_ui_link(anchor: Any) -> bool:
+    text = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).strip().casefold()
+    css_classes = " ".join(anchor.get("class", [])).casefold()
+    return bool(
+        text in {"read now", "read first", "first chapter", "chapter 1", "latest chapters"}
+        or "btn-read-now" in css_classes
+        or re.fullmatch(r"(?:read\s+)?first(?:\s+chapter)?", text)
+    )
+
+
+def light_novel_world_report_from_chapter(
+    chapter: int, title: str | None, base_url: str, href: str | None = None
+) -> ChapterReport:
+    url = urljoin(base_url, href) if href else urljoin(base_url, f"/novel/shadow-slave/chapter/{chapter}/")
+    return ChapterReport("", chapter, title, url)
+
+
+def light_novel_world_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    href = anchor.get("href")
+    if not href or not is_light_novel_world_chapter_href(href):
+        return None
+    if is_light_novel_world_ui_link(anchor):
+        return None
+
+    href_chapter = parse_chapter_from_href(href)
+    if href_chapter is None:
+        return None
+
+    text = anchor.get_text(" ", strip=True)
+    parsed = parse_chapter_text(text)
+    title = parsed[1] if parsed and parsed[0] == href_chapter else None
+    if title and is_non_chapter_title(title):
+        title = None
+    return light_novel_world_report_from_chapter(href_chapter, title, base_url, href)
+
+
+def parse_light_novel_world_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+
+    def add(candidate: ChapterReport | None) -> None:
+        if not candidate:
+            return
+        if candidate.chapter < 2:
+            return
+        key = (candidate.chapter, candidate.url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    latest_nodes: list[Any] = []
+    for chapter_info in soup.select(".chapter-info"):
+        parent = chapter_info.find_parent(class_=re.compile(r"(?:^|\s)(?:content-card|card-content)(?:\s|$)"))
+        if parent:
+            latest_nodes.append(parent)
+        latest_nodes.append(chapter_info)
+
+    latest_nodes.extend(find_section_nodes(soup, r"\b(?:latest|recent|novel)\s+chapters?\b"))
+
+    for node in latest_nodes:
+        for anchor in node.find_all("a", href=True):
+            add(light_novel_world_candidate_from_anchor(anchor, base_url))
+
+        parsed = parse_chapter_text(node.get_text("\n", strip=True))
+        if parsed:
+            chapter, title = parsed
+            if not title or not is_non_chapter_title(title):
+                add(light_novel_world_report_from_chapter(chapter, title, base_url))
+
+    for anchor in soup.find_all("a", href=True):
+        add(light_novel_world_candidate_from_anchor(anchor, base_url))
+
+    return candidates
+
+
 def parse_webnovel_latest(html: str) -> ChapterReport:
     soup = BeautifulSoup(html, "html.parser")
     lines = [line.strip() for line in soup.get_text("\n").splitlines() if line.strip()]
@@ -461,6 +546,8 @@ def check_webnovel() -> ChapterReport:
 def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = "") -> list[ChapterReport]:
     if site_name == "SSNovel":
         return parse_ssnovel_candidates(soup, base_url)
+    if site_name == "Light Novel World":
+        return parse_light_novel_world_candidates(soup, base_url)
 
     section_patterns = {
         "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
@@ -523,7 +610,7 @@ def check_public_site(site: dict[str, str]) -> ChapterReport:
         raise MonitorError(f"Could not find any chapter links on {site['name']}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site["name"], best.chapter, best.title, best.url)
-    if report.source == "SSNovel":
+    if report.source in {"SSNovel", "Light Novel World"}:
         logging.info(
             "%s reports chapter %s: %s (%s)",
             report.source,
