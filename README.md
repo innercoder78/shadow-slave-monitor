@@ -1,12 +1,13 @@
 # SHADOW SLAVE NEW CHAPTER MONITOR
 
-A small automated monitor that checks for new chapters for the web novel called *Shadow Slave* and sends a notification when one becomes available.
+A small automated monitor that checks for new chapters for the web novel called *Shadow Slave* and sends a notification on your phone when a new chapter becomes available.
+I find it much better than spamming F5 on LNW whenever you see that G3 has published a new chapter.
 
 ## WEB NOVEL SOURCES
 
 Original release source:
 
-- https://www.webnovel.com/book/shadow-slave_22196546206090805
+- https://www.webnovel.com
 
 Public chapter sources:
 
@@ -28,7 +29,9 @@ To get the brand-new chapters on WebNovel, you need to pay for them. Therefore, 
 
 This project was built with help from ChatGPT and Codex. It is mainly a personal tool, but other *Shadow Slave* readers may find it useful.
 
-If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the topic: ss-alerts-ghcode. 
+If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the topic: ss-alerts-ghcode.
+
+Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released.
 
 ## APP NEEDED ON YOUR PHONE
 
