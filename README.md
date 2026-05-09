@@ -30,12 +30,6 @@ This project was built with help from ChatGPT and Codex. It is mainly a personal
 
 If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the topic: ss-alerts-ghcode. 
 
-## IF YOU DECIDE TO FORK
-
-Things to keep in mind if you decide to fork this repo:
-1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_TOPIC" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name and it obviously can't be the same name as someone else's).
-2) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications in the ntfy app.
-
 ## APP NEEDED ON YOUR PHONE
 
 If you use Android:
@@ -43,3 +37,13 @@ https://play.google.com/store/apps/details?id=io.heckel.ntfy
 
 If you use Apple:
 https://apps.apple.com/us/app/ntfy/id1625396347
+
+## IF YOU DECIDE TO FORK
+
+Things to keep in mind if you decide to fork this repo:
+1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_TOPIC" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name and it obviously can't be the same name as someone else's).
+2) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications in the ntfy app.
+
+
+
+READ SHADOW SLAVE! BEST WEB NOVEL IN THE WORLD!
