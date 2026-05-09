@@ -50,16 +50,8 @@ PUBLIC_SITES = [
         "url": "https://ssnovel.app",
     },
     {
-        "name": "FreeWebNovel",
-        "url": "https://freewebnovel.com/novel/shadow-slave",
-    },
-    {
         "name": "NovelFull",
         "url": "https://novelfull.com/shadow-slave.html",
-    },
-    {
-        "name": "LightNovelUp",
-        "url": "https://lightnovelup.com/novel/shadow-slave",
     },
 ]
 
@@ -208,6 +200,39 @@ def parse_bare_chapter_text(text: str) -> tuple[int, str | None] | None:
     return int(match.group(1)), title
 
 
+def is_ssnovel_non_chapter_title(title: str | None) -> bool:
+    if not title:
+        return True
+    normalized = re.sub(r"\s+", " ", title).strip().casefold()
+    if is_non_chapter_title(normalized):
+        return True
+    return bool(
+        re.fullmatch(r"chapters?", normalized)
+        or re.fullmatch(r"\d+\s*(?:/|of)\s*\d+", normalized)
+        or re.fullmatch(r"\d+(?:\.\d+)?\s*(?:k|m)?\s*(?:words?|views?|comments?|ratings?|votes?)", normalized)
+        or re.fullmatch(r"(?:last\s+checked|updated|update|timer|page|pages?|read|latest).*", normalized)
+        or re.fullmatch(r"(?:\d+\s+)?(?:seconds?|minutes?|hours?|days?)\b.*", normalized)
+    )
+
+
+def parse_ssnovel_leading_chapter_text(text: str) -> tuple[int, str | None] | None:
+    """Parse SSNovel chapter rows, preferring the leading row number over embedded text."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if re.search(r"\b(from|to)\s+chapter\b", normalized, flags=re.IGNORECASE):
+        return None
+    if re.match(r"^\d{1,5}\s*(?:-|–|—|to)\s*\d{1,5}\b", normalized, flags=re.IGNORECASE):
+        return None
+
+    match = re.match(r"^(\d{3,5})\s+(.+)$", normalized)
+    if not match:
+        return None
+
+    title = clean_title(match.group(2))
+    if is_ssnovel_non_chapter_title(title):
+        return None
+    return int(match.group(1)), title
+
+
 def is_non_chapter_title(title: str | None) -> bool:
     if not title:
         return False
@@ -278,6 +303,75 @@ def chapter_candidate_from_anchor(
     if href_chapter is not None and href_chapter != chapter:
         return None
     return ChapterReport("", chapter, title, urljoin(base_url, href))
+
+
+def ssnovel_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    text = anchor.get_text(" ", strip=True)
+    href = anchor.get("href")
+    if not href:
+        return None
+
+    parsed = parse_ssnovel_leading_chapter_text(text)
+    if not parsed:
+        return None
+
+    chapter, title = parsed
+    return ChapterReport("", chapter, title, urljoin(base_url, href))
+
+
+def ssnovel_candidates_from_text(text: str, base_url: str) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines:
+        parsed = parse_ssnovel_leading_chapter_text(line)
+        if parsed:
+            chapter, title = parsed
+            candidates.append(ChapterReport("", chapter, title, base_url))
+    for index, line in enumerate(lines[:-1]):
+        if not re.fullmatch(r"\d{3,5}", line):
+            continue
+        parsed = parse_ssnovel_leading_chapter_text(f"{line} {lines[index + 1]}")
+        if parsed:
+            chapter, title = parsed
+            candidates.append(ChapterReport("", chapter, title, base_url))
+    return candidates
+
+
+def parse_ssnovel_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+
+    for anchor in soup.find_all("a"):
+        candidate = ssnovel_candidate_from_anchor(anchor, base_url)
+        if not candidate:
+            continue
+        key = (candidate.chapter, candidate.url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    for node in soup.find_all(["article", "li", "tr", "div", "p"]):
+        text = node.get_text(" ", strip=True)
+        if len(text) > 200:
+            continue
+        parsed = parse_ssnovel_leading_chapter_text(text)
+        if not parsed:
+            continue
+        chapter, title = parsed
+        link = node.find("a", href=True)
+        url = urljoin(base_url, link["href"]) if link else base_url
+        key = (chapter, url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(ChapterReport("", chapter, title, url))
+
+    for candidate in ssnovel_candidates_from_text(soup.get_text("\n", strip=True), base_url):
+        key = (candidate.chapter, candidate.url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    return candidates
 
 
 def chapter_candidates_from_text(text: str, base_url: str, allow_bare_text: bool = False) -> list[ChapterReport]:
@@ -366,9 +460,7 @@ def check_webnovel() -> ChapterReport:
 
 def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = "") -> list[ChapterReport]:
     if site_name == "SSNovel":
-        candidates = candidates_from_nodes([soup], base_url, allow_bare_text=True)
-        titled = [candidate for candidate in candidates if candidate.title and candidate.title.casefold() != "latest"]
-        return titled or candidates
+        return parse_ssnovel_candidates(soup, base_url)
 
     section_patterns = {
         "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
@@ -431,7 +523,16 @@ def check_public_site(site: dict[str, str]) -> ChapterReport:
         raise MonitorError(f"Could not find any chapter links on {site['name']}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site["name"], best.chapter, best.title, best.url)
-    logging.info("%s reports chapter %s: %s", report.source, report.chapter, report.title or "(no title)")
+    if report.source == "SSNovel":
+        logging.info(
+            "%s reports chapter %s: %s (%s)",
+            report.source,
+            report.chapter,
+            report.title or "(no title)",
+            report.url,
+        )
+    else:
+        logging.info("%s reports chapter %s: %s", report.source, report.chapter, report.title or "(no title)")
     return report
 
 
