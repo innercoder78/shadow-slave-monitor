@@ -25,14 +25,6 @@ When a new chapter is found, the monitor sends a notification through the ntfy a
 
 To get the brand-new chapters on WebNovel, you need to pay for them. Therefore, I made this quick script using Codex so people who love Shadow Slave but can’t afford to pay, or don’t want to pay, for the new chapters can still read this magnificent novel!
 
-## NOTES
-
-This project was built with help from ChatGPT and Codex. It is mainly a personal tool, but other *Shadow Slave* readers may find it useful.
-
-If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the topic: ss-alerts-ghcode.
-
-Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released.
-
 ## APP NEEDED ON YOUR PHONE
 
 If you use Android:
@@ -40,6 +32,14 @@ https://play.google.com/store/apps/details?id=io.heckel.ntfy
 
 If you use iOS:
 https://apps.apple.com/us/app/ntfy/id1625396347
+
+## NOTES
+
+This project was built with help from ChatGPT and Codex. It is mainly a personal tool, but other *Shadow Slave* readers may find it useful.
+
+If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the topic: ss-alerts-ghcode.
+
+Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released.
 
 ## IF YOU DECIDE TO FORK
 
