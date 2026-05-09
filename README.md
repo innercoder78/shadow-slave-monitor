@@ -37,7 +37,7 @@ https://apps.apple.com/us/app/ntfy/id1625396347
 
 This project was built with help from ChatGPT and Codex. It is mainly a personal tool, but other *Shadow Slave* readers may find it useful.
 
-If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the topic: ss-alerts-ghcode.
+If you’re a fellow reader and want to receive a notification when a new chapter comes out, open your ntfy app and subscribe to the following topic: ss-alerts-ghcode. (no period)
 
 Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released.
 
