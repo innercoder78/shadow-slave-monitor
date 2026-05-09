@@ -33,3 +33,9 @@ To get the brand-new chapters on WebNovel, you need to pay for them. So, this ex
 This project was built with help from ChatGPT and Codex. It is mainly a personal tool, but other *Shadow Slave* readers may find it useful.
 
 If you’re a fellow reader and want to use the same notification topic, message me for the ntfy code.
+
+## IF YOU DECIDE TO FORK
+
+Things to keep in mind if you decide to fork this repo:
+1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_TOPIC" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name).
+2) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications.
