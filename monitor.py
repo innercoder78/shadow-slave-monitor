@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -42,6 +42,11 @@ PUBLIC_SITES = [
     {
         "name": "Light Novel World",
         "url": "https://lightnovelworld.org/novel/shadow-slave",
+        "enabled": True,
+    },
+    {
+        "name": "Telegram",
+        "url": "https://t.me/s/shadow_slave_fastes",
         "enabled": True,
     },
     {
@@ -531,6 +536,125 @@ def parse_light_novel_world_candidates(soup: BeautifulSoup, base_url: str) -> li
     return candidates
 
 
+def parse_telegram_doc_title(text: str) -> tuple[int, str | None] | None:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    match = re.search(r"\b(\d{3,5})\s+(.+?)\.docx\b", normalized, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    title = clean_title(match.group(2))
+    if not title or is_non_chapter_title(title):
+        return None
+    return int(match.group(1)), title
+
+
+def parse_telegram_telegra_link(href: str) -> ChapterReport | None:
+    parsed_url = urlparse(href)
+    if parsed_url.netloc.casefold() not in {"telegra.ph", "www.telegra.ph"}:
+        return None
+
+    slug = unquote(parsed_url.path.rstrip("/").rsplit("/", maxsplit=1)[-1])
+    match = re.match(r"^(\d{3,5})-(.+)$", slug)
+    if not match:
+        return None
+
+    title_slug = re.sub(r"-\d{1,2}-\d{1,2}(?:-\d{2,4})?$", "", match.group(2))
+    title = clean_title(title_slug.replace("-", " "))
+    if not title or is_non_chapter_title(title):
+        return None
+    return ChapterReport("", int(match.group(1)), title, href)
+
+
+def closest_href(node: Any, base_url: str) -> str | None:
+    if getattr(node, "name", None) == "a" and node.get("href"):
+        return urljoin(base_url, node["href"])
+
+    child_link = node.find("a", href=True) if hasattr(node, "find") else None
+    if child_link:
+        return urljoin(base_url, child_link["href"])
+
+    parent_link = node.find_parent("a", href=True) if hasattr(node, "find_parent") else None
+    if parent_link:
+        return urljoin(base_url, parent_link["href"])
+    return None
+
+
+def telegram_doc_candidates_from_node(node: Any, base_url: str) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    seen_chapters: set[int] = set()
+
+    for title_node in node.select(".tgme_widget_message_document_title") if hasattr(node, "select") else []:
+        parsed = parse_telegram_doc_title(title_node.get_text(" ", strip=True))
+        if not parsed:
+            continue
+        chapter, title = parsed
+        if chapter in seen_chapters:
+            continue
+        candidates.append(ChapterReport("", chapter, title, closest_href(title_node, base_url) or base_url))
+        seen_chapters.add(chapter)
+
+    for document_node in node.select(".tgme_widget_message_document_wrap") if hasattr(node, "select") else []:
+        parsed = parse_telegram_doc_title(document_node.get_text(" ", strip=True))
+        if not parsed:
+            continue
+        chapter, title = parsed
+        if chapter in seen_chapters:
+            continue
+        candidates.append(ChapterReport("", chapter, title, closest_href(document_node, base_url) or base_url))
+        seen_chapters.add(chapter)
+
+    for match in re.finditer(r"\b(\d{3,5})\s+(.+?)\.docx\b", node.get_text("\n", strip=True), flags=re.IGNORECASE):
+        parsed = parse_telegram_doc_title(match.group(0))
+        if not parsed:
+            continue
+        chapter, title = parsed
+        if chapter in seen_chapters:
+            continue
+        candidates.append(ChapterReport("", chapter, title, base_url))
+        seen_chapters.add(chapter)
+
+    return candidates
+
+
+def parse_telegram_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+
+    def add(candidate: ChapterReport | None) -> None:
+        if not candidate:
+            return
+        key = (candidate.chapter, candidate.url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    message_nodes = soup.select(".tgme_widget_message")
+    nodes: list[Any] = list(message_nodes) if message_nodes else [soup]
+
+    for node in nodes:
+        telegra_reports: list[ChapterReport] = []
+        for anchor in node.find_all("a", href=True):
+            href = urljoin(base_url, anchor["href"])
+            report = parse_telegram_telegra_link(href)
+            if report:
+                telegra_reports.append(report)
+
+        telegra_by_chapter = {report.chapter: report for report in telegra_reports}
+        for report in telegra_reports:
+            add(report)
+
+        for doc_candidate in telegram_doc_candidates_from_node(node, base_url):
+            add(telegra_by_chapter.get(doc_candidate.chapter, doc_candidate))
+
+    if message_nodes and not candidates:
+        for anchor in soup.find_all("a", href=True):
+            add(parse_telegram_telegra_link(urljoin(base_url, anchor["href"])))
+        for doc_candidate in telegram_doc_candidates_from_node(soup, base_url):
+            add(doc_candidate)
+
+    return candidates
+
+
 def parse_webnovel_latest(html: str) -> ChapterReport:
     soup = BeautifulSoup(html, "html.parser")
     lines = [line.strip() for line in soup.get_text("\n").splitlines() if line.strip()]
@@ -568,6 +692,8 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_ssnovel_candidates(soup, base_url)
     if site_name == "Light Novel World":
         return parse_light_novel_world_candidates(soup, base_url)
+    if site_name == "Telegram":
+        return parse_telegram_candidates(soup, base_url)
 
     section_patterns = {
         "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
@@ -630,7 +756,7 @@ def check_public_site(site: dict[str, Any]) -> ChapterReport:
         raise MonitorError(f"Could not find any chapter links on {site['name']}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site["name"], best.chapter, best.title, best.url)
-    if report.source in {"SSNovel", "Light Novel World"}:
+    if report.source in {"SSNovel", "Light Novel World", "Telegram"}:
         logging.info(
             "%s reports chapter %s: %s (%s)",
             report.source,
