@@ -9,6 +9,8 @@
   "target_title": "Cherry on Top",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "last_webnovel_check": "2026-05-10T16:15:21+00:00",
-  "last_error_alerts": {},
-  "updated_at": "2026-05-10T16:15:21+00:00"
+  "last_error_alerts": {
+    "public_site_failed:NovelBin": "2026-05-10T16:45:17+00:00"
+  },
+  "updated_at": "2026-05-10T16:45:17+00:00"
 }
