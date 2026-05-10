@@ -42,18 +42,27 @@ PUBLIC_SITES = [
     {
         "name": "Light Novel World",
         "url": "https://lightnovelworld.org/novel/shadow-slave",
+        "enabled": True,
+    },
+    {
+        "name": "NovelFire",
+        "url": "https://novelfire.net/book/shadow-slave",
+        "enabled": True,
     },
     {
         "name": "NovelBin",
         "url": "https://novelbin.com/b/shadow-slave",
+        "enabled": True,
     },
     {
         "name": "SSNovel",
         "url": "https://ssnovel.app",
+        "enabled": True,
     },
     {
         "name": "NovelFull",
         "url": "https://novelfull.com/shadow-slave.html",
+        "enabled": True,
     },
 ]
 
@@ -603,7 +612,7 @@ def parse_latest_from_chapter_page(html: str, url: str) -> ChapterReport | None:
     return ChapterReport("", chapter, title, url)
 
 
-def check_public_site(site: dict[str, str]) -> ChapterReport:
+def check_public_site(site: dict[str, Any]) -> ChapterReport:
     logging.info("Checking %s.", site["name"])
     soup = BeautifulSoup(fetch_html(site["url"]), "html.parser")
     candidates = iter_public_candidates(soup, site["url"], site["name"])
@@ -638,8 +647,17 @@ def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
     reports: list[ChapterReport] = []
     baseline = public_chapter_baseline(state)
     failed_sites = 0
+    enabled_sites = [site for site in PUBLIC_SITES if site.get("enabled", True)]
 
     for site in PUBLIC_SITES:
+        if site.get("enabled", True) is False:
+            logging.info("Skipping disabled public site: %s.", site["name"])
+
+    if not enabled_sites:
+        logging.warning("No enabled public sites are configured; no public checks will run.")
+        return []
+
+    for site in enabled_sites:
         try:
             report = check_public_site(site)
         except (requests.RequestException, MonitorError) as exc:
@@ -669,11 +687,11 @@ def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
 
     if not reports:
         logging.error("All public chapter site checks failed; no notification will be sent.")
-        if failed_sites == len(PUBLIC_SITES):
+        if failed_sites == len(enabled_sites):
             send_error_notification(
                 state,
                 "all_public_sites_failed",
-                error_alert_body("All public chapter site checks failed.", "Every configured public/free site failed."),
+                error_alert_body("All public chapter site checks failed.", "Every enabled public/free site failed."),
             )
     return reports
 
