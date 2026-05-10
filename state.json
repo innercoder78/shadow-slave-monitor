@@ -2,13 +2,13 @@
   "latest_seen": 2988,
   "latest_title": "Long Live the King",
   "latest_url": "https://ssnovel.app",
-  "latest_webnovel": 2988,
-  "latest_webnovel_title": "Long Live the King",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
-  "last_webnovel_check": "2026-05-10T15:50:25+00:00",
+  "latest_webnovel": 2990,
+  "latest_webnovel_title": "Cherry on Top",
+  "mode": "watch_free_sites",
+  "target_chapter": 2990,
+  "target_title": "Cherry on Top",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "last_webnovel_check": "2026-05-10T16:15:21+00:00",
   "last_error_alerts": {},
-  "updated_at": "2026-05-10T15:50:25+00:00"
+  "updated_at": "2026-05-10T16:15:21+00:00"
 }
