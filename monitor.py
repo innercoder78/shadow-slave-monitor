@@ -747,7 +747,6 @@ def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
 def error_alert_body(summary: str, reason: str) -> str:
     return "\n".join(
         [
-            "Shadow Slave monitor error:",
             summary,
             "",
             "Reason:",
@@ -765,10 +764,13 @@ def public_site_failures_key(failures: list[tuple[str, str]]) -> str:
 
 def public_site_failures_alert_body(failures: list[tuple[str, str]]) -> str:
     summaries = [f"{name} check failed." for name, _reason in failures]
-    reasons = [f"{name}: {reason}" for name, reason in failures]
+    reasons = []
+    for name, reason in failures:
+        if reasons:
+            reasons.append("")
+        reasons.extend([f"{name}:", reason])
     return "\n".join(
         [
-            "Shadow Slave monitor error:",
             *summaries,
             "",
             "Reason:",
