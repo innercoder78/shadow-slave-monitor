@@ -29,6 +29,7 @@ jobs:
       - name: Run monitor
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
         run: python monitor.py
 
       - name: Commit state changes
