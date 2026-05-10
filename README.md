@@ -30,7 +30,8 @@ Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel wi
 ## IF YOU DECIDE TO FORK
 
 Things to keep in mind if you decide to fork this repo:
-1.1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_TOPIC" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name and it obviously can't be the same name as someone else's, so make it unique).
-1.2) Same process but add "NTFY_ERROR_TOPIC" with the ntfy topic that is NOT THE SAME as the NTFY_TOPIC one! This one will be the one you'll get error messages (403, website layout change, etc.).
-2) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications in the ntfy app.
-3) Set up an account on cron-job.org and use your GitHub token there and set everything up because the native GitHub Actions is horrible and realistically only runs every 3-4 hours.
+
+1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_TOPIC" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name and it obviously can't be the same name as someone else's, so make it unique).
+2) Same process but add "NTFY_ERROR_TOPIC" with the ntfy topic that is NOT THE SAME as the NTFY_TOPIC one! This one will be the one you'll get error messages (403, website layout change, etc.).
+3) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications in the ntfy app.
+4) Set up an account on cron-job.org and use your GitHub token there and set everything up because the native GitHub Actions is horrible and realistically only runs every 3-4 hours.
