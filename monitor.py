@@ -645,6 +645,7 @@ def check_public_site(site: dict[str, Any]) -> ChapterReport:
 
 def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
     reports: list[ChapterReport] = []
+    public_site_failures: list[tuple[str, str]] = []
     baseline = public_chapter_baseline(state)
     failed_sites = 0
     enabled_sites = [site for site in PUBLIC_SITES if site.get("enabled", True)]
@@ -663,11 +664,7 @@ def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
         except (requests.RequestException, MonitorError) as exc:
             failed_sites += 1
             logging.warning("%s check failed: %s", site["name"], exc)
-            send_error_notification(
-                state,
-                f"public_site_failed:{site['name']}",
-                error_alert_body(f"{site['name']} check failed.", str(exc)),
-            )
+            public_site_failures.append((site["name"], str(exc)))
             continue
 
         if baseline is not None and report.chapter > baseline + SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT:
@@ -684,6 +681,13 @@ def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
             continue
 
         reports.append(report)
+
+    if public_site_failures:
+        send_error_notification(
+            state,
+            public_site_failures_key(public_site_failures),
+            public_site_failures_alert_body(public_site_failures),
+        )
 
     if not reports:
         logging.error("All public chapter site checks failed; no notification will be sent.")
@@ -748,6 +752,27 @@ def error_alert_body(summary: str, reason: str) -> str:
             "",
             "Reason:",
             reason,
+            "",
+            "This alert is throttled to once per hour for this error.",
+        ]
+    )
+
+
+def public_site_failures_key(failures: list[tuple[str, str]]) -> str:
+    names = sorted(name for name, _reason in failures)
+    return "public_site_failures:" + "|".join(names)
+
+
+def public_site_failures_alert_body(failures: list[tuple[str, str]]) -> str:
+    summaries = [f"{name} check failed." for name, _reason in failures]
+    reasons = [f"{name}: {reason}" for name, reason in failures]
+    return "\n".join(
+        [
+            "Shadow Slave monitor error:",
+            *summaries,
+            "",
+            "Reason:",
+            *reasons,
             "",
             "This alert is throttled to once per hour for this error.",
         ]
