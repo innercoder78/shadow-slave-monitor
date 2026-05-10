@@ -171,6 +171,14 @@ def clean_title(title: str | None) -> str | None:
     return title or None
 
 
+def clean_ssnovel_title(title: str | None) -> str | None:
+    title = clean_title(title)
+    if not title:
+        return None
+    title = re.split(r"\s+\d{3,5}\s+", title, maxsplit=1)[0]
+    return clean_title(title)
+
+
 def parse_chapter_text(text: str) -> tuple[int, str | None] | None:
     patterns = [
         r"\bChapter\s+(\d{1,5})\b\s*[:\-–—]?\s*([^\n\r|]*)",
@@ -230,7 +238,7 @@ def parse_ssnovel_leading_chapter_text(text: str) -> tuple[int, str | None] | No
     if not match:
         return None
 
-    title = clean_title(match.group(2))
+    title = clean_ssnovel_title(match.group(2))
     if is_ssnovel_non_chapter_title(title):
         return None
     return int(match.group(1)), title
