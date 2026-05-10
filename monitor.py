@@ -25,6 +25,8 @@ STATE_PATH = Path("state.json")
 WEBNOVEL_CATALOG_URL = "https://www.webnovel.com/book/22196546206090805/catalog"
 REQUEST_TIMEOUT_SECONDS = 20
 WEBNOVEL_CHECK_INTERVAL = timedelta(minutes=20)
+ERROR_ALERT_THROTTLE = timedelta(hours=1)
+SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT = 25
 
 HEADERS = {
     "User-Agent": (
@@ -66,6 +68,7 @@ INITIAL_STATE = {
     "target_title": None,
     "target_url": None,
     "last_webnovel_check": None,
+    "last_error_alerts": {},
     "updated_at": None,
 }
 
@@ -623,15 +626,47 @@ def check_public_site(site: dict[str, str]) -> ChapterReport:
     return report
 
 
-def check_public_sites() -> list[ChapterReport]:
+def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
     reports: list[ChapterReport] = []
+    baseline = public_chapter_baseline(state)
+    failed_sites = 0
+
     for site in PUBLIC_SITES:
         try:
-            reports.append(check_public_site(site))
+            report = check_public_site(site)
         except (requests.RequestException, MonitorError) as exc:
+            failed_sites += 1
             logging.warning("%s check failed: %s", site["name"], exc)
+            send_error_notification(
+                state,
+                f"public_site_failed:{site['name']}",
+                error_alert_body(f"{site['name']} check failed.", str(exc)),
+            )
+            continue
+
+        if baseline is not None and report.chapter > baseline + SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT:
+            reason = (
+                f"{site['name']} reported chapter {report.chapter}, which is more than "
+                f"{SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT} chapters above baseline {baseline}."
+            )
+            logging.warning("Rejecting suspicious public chapter report: %s", reason)
+            send_error_notification(
+                state,
+                f"suspicious_public_chapter_jump:{site['name']}",
+                error_alert_body(f"Suspicious public chapter report rejected for {site['name']}.", reason),
+            )
+            continue
+
+        reports.append(report)
+
     if not reports:
         logging.error("All public chapter site checks failed; no notification will be sent.")
+        if failed_sites == len(PUBLIC_SITES):
+            send_error_notification(
+                state,
+                "all_public_sites_failed",
+                error_alert_body("All public chapter site checks failed.", "Every configured public/free site failed."),
+            )
     return reports
 
 
@@ -679,6 +714,66 @@ def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
     return True
 
 
+def error_alert_body(summary: str, reason: str) -> str:
+    return "\n".join(
+        [
+            "Shadow Slave monitor error:",
+            summary,
+            "",
+            "Reason:",
+            reason,
+            "",
+            "This alert is throttled to once per hour for this error.",
+        ]
+    )
+
+
+def send_error_notification(state: dict[str, Any], key: str, body: str) -> bool:
+    last_error_alerts = state.get("last_error_alerts")
+    if not isinstance(last_error_alerts, dict):
+        last_error_alerts = {}
+        state["last_error_alerts"] = last_error_alerts
+
+    last_sent = parse_iso_datetime(last_error_alerts.get(key))
+    if last_sent is not None and now_utc() - last_sent < ERROR_ALERT_THROTTLE:
+        logging.info("Skipping throttled error alert for %s.", key)
+        return False
+
+    topic = os.environ.get("NTFY_ERROR_TOPIC")
+    if not topic:
+        logging.warning("NTFY_ERROR_TOPIC is missing; error notification for %s was not sent.", key)
+        return False
+
+    try:
+        response = requests.post(
+            f"https://ntfy.sh/{topic}",
+            data=body.encode("utf-8"),
+            headers={"Title": "Shadow Slave monitor error"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logging.warning("Error notification for %s failed: %s", key, exc)
+        return False
+
+    last_error_alerts[key] = iso_now()
+    save_state(state)
+    logging.info("Sent ntfy error notification for %s.", key)
+    return True
+
+
+def public_chapter_baseline(state: dict[str, Any]) -> int | None:
+    values = [
+        parse_int(state.get("latest_seen")),
+        parse_int(state.get("target_chapter")),
+        parse_int(state.get("latest_webnovel")),
+    ]
+    available = [value for value in values if value is not None]
+    if not available:
+        return None
+    return max(available)
+
+
 def update_webnovel_state(state: dict[str, Any], report: ChapterReport) -> None:
     state["latest_webnovel"] = report.chapter
     state["latest_webnovel_title"] = report.title
@@ -695,8 +790,13 @@ def first_setup(state: dict[str, Any]) -> None:
         update_webnovel_state(state, webnovel_report)
     except (requests.RequestException, MonitorError) as exc:
         logging.error("WebNovel first setup check failed: %s", exc)
+        send_error_notification(
+            state,
+            "webnovel_check_failed",
+            error_alert_body("WebNovel first setup check failed.", str(exc)),
+        )
 
-    public_reports = check_public_sites()
+    public_reports = check_public_sites(state)
     public_highest = highest_report(public_reports)
     if public_highest:
         state["latest_seen"] = public_highest.chapter
@@ -742,6 +842,11 @@ def run_watch_webnovel(state: dict[str, Any]) -> None:
         report = check_webnovel()
     except (requests.RequestException, MonitorError) as exc:
         logging.error("WebNovel check failed: %s; no notification will be sent.", exc)
+        send_error_notification(
+            state,
+            "webnovel_check_failed",
+            error_alert_body("WebNovel check failed.", str(exc)),
+        )
         return
 
     state["last_webnovel_check"] = iso_now()
@@ -772,7 +877,7 @@ def run_watch_free_sites(state: dict[str, Any]) -> None:
         save_state(state)
         return
 
-    public_reports = check_public_sites()
+    public_reports = check_public_sites(state)
     latest = highest_report(public_reports)
     if latest is None:
         return
