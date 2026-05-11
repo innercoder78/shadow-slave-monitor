@@ -1,13 +1,13 @@
 {
-  "latest_seen": 2990,
-  "latest_title": "Cherry on Top",
-  "latest_url": "https://telegra.ph/2990-Cherry-on-Top-05-10",
+  "latest_seen": 2992,
+  "latest_title": "Never Let Me Go",
+  "latest_url": "https://telegra.ph/2992-Never-Let-Me-Go-05-11",
   "latest_webnovel": 2992,
   "latest_webnovel_title": "Never Let Me Go",
-  "mode": "watch_free_sites",
-  "target_chapter": 2992,
-  "target_title": "Never Let Me Go",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-05-11T03:15:24+00:00",
   "last_error_alerts": {
     "public_site_failed:NovelBin": "2026-05-10T16:45:17+00:00",
@@ -15,5 +15,5 @@
     "public_site_failures:NovelFire": "2026-05-11T03:20:19+00:00",
     "public_site_failures:NovelBin|NovelFire": "2026-05-10T17:45:27+00:00"
   },
-  "updated_at": "2026-05-11T03:20:19+00:00"
+  "updated_at": "2026-05-11T04:05:17+00:00"
 }
