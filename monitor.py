@@ -174,6 +174,30 @@ def save_state(state: dict[str, Any]) -> None:
     logging.info("Saved state.json.")
 
 
+def cleanup_disabled_site_error_alerts(state: dict[str, Any]) -> bool:
+    disabled_site_names = [site["name"] for site in PUBLIC_SITES if site.get("enabled", True) is False]
+    last_error_alerts = state.get("last_error_alerts")
+    if not disabled_site_names or not isinstance(last_error_alerts, dict):
+        return False
+
+    cleanup_prefixes = (
+        "public_site_failed:",
+        "public_site_failures:",
+        "suspicious_public_chapter_jump:",
+    )
+    stale_keys = [
+        key
+        for key in last_error_alerts
+        if isinstance(key, str)
+        and key.startswith(cleanup_prefixes)
+        and any(site_name in key for site_name in disabled_site_names)
+    ]
+    for key in stale_keys:
+        del last_error_alerts[key]
+
+    return bool(stale_keys)
+
+
 def fetch_html(url: str) -> str:
     response = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
@@ -776,6 +800,8 @@ def check_public_site_result(site: dict[str, Any]) -> tuple[dict[str, Any], Chap
         return site, check_public_site(site), None
     except (requests.RequestException, MonitorError) as exc:
         return site, None, str(exc)
+    except Exception as exc:
+        return site, None, f"Unexpected error: {type(exc).__name__}: {exc}"
 
 
 def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
@@ -875,13 +901,18 @@ def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
         logging.warning("NTFY_TOPIC is missing; notification was not sent.")
         return False
 
-    response = requests.post(
-        f"https://ntfy.sh/{topic}",
-        data=body.encode("utf-8"),
-        headers={"Title": "New Shadow Slave chapters available"},
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.post(
+            f"https://ntfy.sh/{topic}",
+            data=body.encode("utf-8"),
+            headers={"Title": "New Shadow Slave chapters available"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logging.warning("ntfy notification failed: %s", exc)
+        return False
+
     logging.info("Sent ntfy notification for chapter %s.", latest.chapter)
     return True
 
@@ -1103,6 +1134,8 @@ def run_watch_free_sites(state: dict[str, Any]) -> None:
 def main() -> None:
     configure_logging()
     state, is_first_setup = load_state()
+    if cleanup_disabled_site_error_alerts(state):
+        save_state(state)
     if is_first_setup:
         first_setup(state)
         return
