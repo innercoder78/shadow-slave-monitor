@@ -879,21 +879,44 @@ def highest_report(reports: list[ChapterReport]) -> ChapterReport | None:
     return ChapterReport(sources, highest_chapter, title, url)
 
 
+def format_chapter_list(chapters: list[int]) -> str:
+    chapter_text = [str(chapter) for chapter in chapters]
+    if len(chapter_text) == 1:
+        return chapter_text[0]
+    return f"{', '.join(chapter_text[:-1])} and {chapter_text[-1]}"
+
+
 def availability_message(previous_seen: int | None, latest_chapter: int) -> str:
-    if previous_seen is None or latest_chapter <= previous_seen + 1:
-        return f"Chapter {latest_chapter} is now available."
-    return f"Chapters {previous_seen + 1} through {latest_chapter} are now available."
+    if previous_seen is None or latest_chapter <= previous_seen:
+        chapters = [latest_chapter]
+    else:
+        chapters = list(range(previous_seen + 1, latest_chapter + 1))
+
+    if len(chapters) == 1:
+        return f"Chapter {latest_chapter} is now available (1 new chapter)."
+
+    chapter_list = format_chapter_list(chapters)
+    return f"Chapters {chapter_list} are now available ({len(chapters)} new chapters)."
+
+
+def source_general_url(source: str, fallback_url: str = "") -> str:
+    first_source = source.split(",", maxsplit=1)[0].strip()
+    for site in PUBLIC_SITES:
+        if site["name"] == first_source:
+            return site["url"]
+    return fallback_url
 
 
 def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
     topic = os.environ.get("NTFY_TOPIC")
     message = availability_message(previous_seen, latest.chapter)
+    latest_chapter_line = f"Latest Chapter: {latest.chapter}" + (f" — {latest.title}" if latest.title else "")
+    general_source_url = source_general_url(latest.source, latest.url)
     body = "\n".join(
         [
             message,
-            f"Latest chapter: {latest.chapter}" + (f" - {latest.title}" if latest.title else ""),
-            f"URL: {latest.url}",
-            f"Reported by: {latest.source}",
+            latest_chapter_line,
+            f"Source: {latest.source} [{general_source_url}]",
         ]
     )
 
