@@ -1,17 +1,13 @@
 # SHADOW SLAVE NEW CHAPTER MONITOR
 
 A small automated monitor that checks for new chapters for the web novel called *Shadow Slave* and sends a notification on your phone when a new chapter becomes available.
-I find it much better than spamming F5 on various websites whenever you see that GuiltyThree (G3) has published a new chapter.
+I find it much better than spamming F5 on various websites whenever new chapters come out.
 
 ## HOW DOES IT WORK?
 
-The workflow runs on GitHub Actions. It first checks WebNovel for the latest official release. If WebNovel shows a new chapter, the monitor stops looking at WebNovel for new chapters and switches to checking other websites until that chapter(s) becomes available. Once the new chapter is found on the free websites, it goes back to looking for new chapters on WebNovel.
+The workflow runs on GitHub Actions. It the primary website shows a new chapter, the monitor stops looking at it and switches to checking other websites until that chapter(s) becomes available. Once the new chapter is found on the free websites, it goes back to looking for new chapters on the main website.
 
 When a new chapter is found, the monitor sends a notification through the ntfy app.
-
-## WHY DO THIS?
-
-To get the brand-new chapters on WebNovel, you need to pay for them. Therefore, I made this quick script using Codex and ChatGPT so people who love Shadow Slave but can’t afford to pay, or don’t want to pay, for the new chapters can still read this magnificent novel!
 
 ## APP NEEDED ON YOUR PHONE & SET UP
 
@@ -21,11 +17,13 @@ https://play.google.com/store/apps/details?id=io.heckel.ntfy
 If you use iOS:
 https://apps.apple.com/us/app/ntfy/id1625396347
 
-Open your ntfy app and subscribe to the following topic: ss-alerts-ghcode. (no period)
+THE APP IS COMPLETELY FREE! NO SIGN UP INVOLVED!
+
+If you know the topic, you can subscribe to it to receive notifications.
 
 ## REPOSITORY WITH AN EXPIRATION DATE
 
-Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released. Moreover, the ability to check the chapters will expire Sunday, May 09, 2027 (I will extend it if *Shadow Slave* isn't over by then, obviously).
+Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released. Moreover, the ability to check the chapters will expire Sunday, May 09, 2027 because that's the date when the token will expire (I will extend it if *Shadow Slave* isn't over by then, obviously).
 
 ## IF YOU DECIDE TO FORK
 
