@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +28,7 @@ REQUEST_TIMEOUT_SECONDS = 20
 WEBNOVEL_CHECK_INTERVAL = timedelta(minutes=20)
 ERROR_ALERT_THROTTLE = timedelta(hours=1)
 SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT = 25
+PUBLIC_SITE_WORKERS = 6
 
 HEADERS = {
     "User-Agent": (
@@ -52,7 +54,7 @@ PUBLIC_SITES = [
     {
         "name": "NovelFire",
         "url": "https://novelfire.net/book/shadow-slave",
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "NovelBin",
@@ -769,6 +771,13 @@ def check_public_site(site: dict[str, Any]) -> ChapterReport:
     return report
 
 
+def check_public_site_result(site: dict[str, Any]) -> tuple[dict[str, Any], ChapterReport | None, str | None]:
+    try:
+        return site, check_public_site(site), None
+    except (requests.RequestException, MonitorError) as exc:
+        return site, None, str(exc)
+
+
 def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
     reports: list[ChapterReport] = []
     public_site_failures: list[tuple[str, str]] = []
@@ -784,29 +793,36 @@ def check_public_sites(state: dict[str, Any]) -> list[ChapterReport]:
         logging.warning("No enabled public sites are configured; no public checks will run.")
         return []
 
-    for site in enabled_sites:
-        try:
-            report = check_public_site(site)
-        except (requests.RequestException, MonitorError) as exc:
-            failed_sites += 1
-            logging.warning("%s check failed: %s", site["name"], exc)
-            public_site_failures.append((site["name"], str(exc)))
-            continue
+    max_workers = min(PUBLIC_SITE_WORKERS, len(enabled_sites))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(check_public_site_result, site) for site in enabled_sites]
 
-        if baseline is not None and report.chapter > baseline + SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT:
-            reason = (
-                f"{site['name']} reported chapter {report.chapter}, which is more than "
-                f"{SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT} chapters above baseline {baseline}."
-            )
-            logging.warning("Rejecting suspicious public chapter report: %s", reason)
-            send_error_notification(
-                state,
-                f"suspicious_public_chapter_jump:{site['name']}",
-                error_alert_body(f"Suspicious public chapter report rejected for {site['name']}.", reason),
-            )
-            continue
+        for future in as_completed(futures):
+            site, report, error = future.result()
 
-        reports.append(report)
+            if error is not None:
+                failed_sites += 1
+                logging.warning("%s check failed: %s", site["name"], error)
+                public_site_failures.append((site["name"], error))
+                continue
+
+            if report is None:
+                continue
+
+            if baseline is not None and report.chapter > baseline + SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT:
+                reason = (
+                    f"{site['name']} reported chapter {report.chapter}, which is more than "
+                    f"{SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT} chapters above baseline {baseline}."
+                )
+                logging.warning("Rejecting suspicious public chapter report: %s", reason)
+                send_error_notification(
+                    state,
+                    f"suspicious_public_chapter_jump:{site['name']}",
+                    error_alert_body(f"Suspicious public chapter report rejected for {site['name']}.", reason),
+                )
+                continue
+
+            reports.append(report)
 
     if public_site_failures:
         send_error_notification(
