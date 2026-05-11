@@ -908,7 +908,7 @@ def source_general_url(source: str, fallback_url: str = "") -> str:
 
 
 def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
-    topic = os.environ.get("NTFY_TOPIC")
+    topic = os.environ.get("NTFY_NEWCHAPTER")
     message = availability_message(previous_seen, latest.chapter)
     latest_chapter_line = f"Latest Chapter: {latest.chapter}" + (f" — {latest.title}" if latest.title else "")
     general_source_url = source_general_url(latest.source, latest.url)
@@ -921,7 +921,7 @@ def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
     )
 
     if not topic:
-        logging.warning("NTFY_TOPIC is missing; notification was not sent.")
+        logging.warning("NTFY_NEWCHAPTER is missing; notification was not sent.")
         return False
 
     try:
