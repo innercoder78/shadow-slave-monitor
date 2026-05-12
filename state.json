@@ -1,16 +1,16 @@
 {
-  "latest_seen": 2992,
-  "latest_title": "Never Let Me Go",
-  "latest_url": "https://telegra.ph/2992-Never-Let-Me-Go-05-11",
+  "latest_seen": 2993,
+  "latest_title": "Soulmate",
+  "latest_url": "https://telegra.ph/2993-Soulmate-05-12",
   "latest_webnovel": 2993,
   "latest_webnovel_title": "Soulmate",
-  "mode": "watch_free_sites",
-  "target_chapter": 2993,
-  "target_title": "Soulmate",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-05-12T04:05:25+00:00",
   "last_error_alerts": {
     "public_site_failed:NovelBin": "2026-05-10T16:45:17+00:00"
   },
-  "updated_at": "2026-05-12T04:05:25+00:00"
+  "updated_at": "2026-05-12T04:25:24+00:00"
 }
