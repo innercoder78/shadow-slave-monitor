@@ -26,6 +26,7 @@ STATE_PATH = Path("state.json")
 WEBNOVEL_CATALOG_URL = "https://www.webnovel.com/book/22196546206090805/catalog"
 REQUEST_TIMEOUT_SECONDS = 20
 WEBNOVEL_CHECK_INTERVAL = timedelta(minutes=20)
+WEBNOVEL_MAX_SKIPS_BEFORE_FORCE = 3
 ERROR_ALERT_THROTTLE = timedelta(hours=1)
 SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT = 25
 PUBLIC_SITE_WORKERS = 6
@@ -84,6 +85,7 @@ INITIAL_STATE = {
     "target_title": None,
     "target_url": None,
     "last_webnovel_check": None,
+    "webnovel_skip_count": 0,
     "last_error_alerts": {},
     "updated_at": None,
 }
@@ -883,20 +885,47 @@ def format_chapter_list(chapters: list[int]) -> str:
     chapter_text = [str(chapter) for chapter in chapters]
     if len(chapter_text) == 1:
         return chapter_text[0]
-    return f"{', '.join(chapter_text[:-1])} and {chapter_text[-1]}"
+    if len(chapter_text) == 2:
+        return f"{chapter_text[0]} and {chapter_text[1]}"
+    return f"{', '.join(chapter_text[:-1])}, and {chapter_text[-1]}"
 
 
-def availability_message(previous_seen: int | None, latest_chapter: int) -> str:
+def new_chapter_numbers(previous_seen: int | None, latest_chapter: int) -> list[int]:
     if previous_seen is None or latest_chapter <= previous_seen:
-        chapters = [latest_chapter]
+        return [latest_chapter]
+    return list(range(previous_seen + 1, latest_chapter + 1))
+
+
+def notification_title(chapter_count: int) -> str:
+    if chapter_count == 1:
+        return "New Shadow Slave chapter available"
+    return "New Shadow Slave chapters available"
+
+
+def notification_body(previous_seen: int | None, latest: ChapterReport) -> str:
+    chapters = new_chapter_numbers(previous_seen, latest.chapter)
+    count = len(chapters)
+    latest_chapter_line = f"Latest Chapter: {latest.chapter}" + (f" — {latest.title}" if latest.title else "") + "."
+    general_source_url = source_general_url(latest.source, latest.url)
+
+    if count == 1:
+        availability_lines = [
+            "There is 1 new chapter.",
+            f"Chapter {latest.chapter} is now available.",
+        ]
     else:
-        chapters = list(range(previous_seen + 1, latest_chapter + 1))
+        availability_lines = [
+            f"There are {count} new chapters.",
+            f"Chapters {format_chapter_list(chapters)} are now available.",
+        ]
 
-    if len(chapters) == 1:
-        return f"Chapter {latest_chapter} is now available (1 new chapter)."
-
-    chapter_list = format_chapter_list(chapters)
-    return f"Chapters {chapter_list} are now available ({len(chapters)} new chapters)."
+    return "\n".join(
+        [
+            *availability_lines,
+            latest_chapter_line,
+            f"Source: {latest.source} [{general_source_url}]",
+        ]
+    )
 
 
 def source_general_url(source: str, fallback_url: str = "") -> str:
@@ -909,16 +938,9 @@ def source_general_url(source: str, fallback_url: str = "") -> str:
 
 def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
     topic = os.environ.get("NTFY_NEWCHAPTER")
-    message = availability_message(previous_seen, latest.chapter)
-    latest_chapter_line = f"Latest Chapter: {latest.chapter}" + (f" — {latest.title}" if latest.title else "")
-    general_source_url = source_general_url(latest.source, latest.url)
-    body = "\n".join(
-        [
-            message,
-            latest_chapter_line,
-            f"Source: {latest.source} [{general_source_url}]",
-        ]
-    )
+    chapters = new_chapter_numbers(previous_seen, latest.chapter)
+    title = notification_title(len(chapters))
+    body = notification_body(previous_seen, latest)
 
     if not topic:
         logging.warning("NTFY_NEWCHAPTER is missing; notification was not sent.")
@@ -928,7 +950,7 @@ def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
         response = requests.post(
             f"https://ntfy.sh/{topic}",
             data=body.encode("utf-8"),
-            headers={"Title": "New Shadow Slave chapters available"},
+            headers={"Title": title},
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
@@ -1035,6 +1057,7 @@ def first_setup(state: dict[str, Any]) -> None:
 
     try:
         webnovel_report = check_webnovel()
+        state["webnovel_skip_count"] = 0
         state["last_webnovel_check"] = iso_now()
         update_webnovel_state(state, webnovel_report)
     except (requests.RequestException, MonitorError) as exc:
@@ -1083,14 +1106,33 @@ def webnovel_due(state: dict[str, Any]) -> bool:
 
 
 def run_watch_webnovel(state: dict[str, Any]) -> None:
+    skip_count = parse_int(state.get("webnovel_skip_count")) or 0
+
     if not webnovel_due(state):
-        logging.info("Skipping WebNovel check because fewer than 20 minutes have passed since last_webnovel_check.")
-        return
+        if skip_count < WEBNOVEL_MAX_SKIPS_BEFORE_FORCE:
+            skip_count += 1
+            state["webnovel_skip_count"] = skip_count
+            logging.info(
+                "Skipping WebNovel check because fewer than 20 minutes have passed since last_webnovel_check "
+                "(skip %s/%s).",
+                skip_count,
+                WEBNOVEL_MAX_SKIPS_BEFORE_FORCE,
+            )
+            save_state(state)
+            return
+        logging.info(
+            "Forcing WebNovel check after %s skipped attempts.",
+            WEBNOVEL_MAX_SKIPS_BEFORE_FORCE,
+        )
+
+    state["webnovel_skip_count"] = 0
 
     try:
         report = check_webnovel()
     except (requests.RequestException, MonitorError) as exc:
         logging.error("WebNovel check failed: %s; no notification will be sent.", exc)
+        if skip_count:
+            save_state(state)
         send_error_notification(
             state,
             "webnovel_check_failed",
@@ -1098,6 +1140,7 @@ def run_watch_webnovel(state: dict[str, Any]) -> None:
         )
         return
 
+    state["webnovel_skip_count"] = 0
     state["last_webnovel_check"] = iso_now()
     update_webnovel_state(state, report)
     latest_seen = parse_int(state.get("latest_seen"))
