@@ -2,16 +2,16 @@
   "latest_seen": 2993,
   "latest_title": "Soulmate",
   "latest_url": "https://telegra.ph/2993-Soulmate-05-12",
-  "latest_webnovel": 2993,
-  "latest_webnovel_title": "Soulmate",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
-  "last_webnovel_check": "2026-05-13T03:50:25+00:00",
-  "webnovel_skip_count": 3,
+  "latest_webnovel": 2995,
+  "latest_webnovel_title": "Time to Return",
+  "mode": "watch_free_sites",
+  "target_chapter": 2995,
+  "target_title": "Time to Return",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "last_webnovel_check": "2026-05-13T04:10:28+00:00",
+  "webnovel_skip_count": 0,
   "last_error_alerts": {
     "public_site_failed:NovelBin": "2026-05-10T16:45:17+00:00"
   },
-  "updated_at": "2026-05-13T04:05:17+00:00"
+  "updated_at": "2026-05-13T04:10:28+00:00"
 }
