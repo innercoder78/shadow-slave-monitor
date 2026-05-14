@@ -1,17 +1,19 @@
-name: Shadow Slave chapter monitor
+name: Shadow Slave monitor watchdog
 
 on:
+  schedule:
+    - cron: "37 */4 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: shadow-slave-chapter-monitor
+  group: shadow-slave-monitor-watchdog
   cancel-in-progress: false
 
 jobs:
-  monitor:
+  watchdog:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -26,30 +28,26 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
-      - name: Run monitor
+      - name: Run watchdog
         env:
-          NTFY_NEWCHAPTER: ${{ secrets.NTFY_NEWCHAPTER }}
           NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
-        run: python monitor.py
+        run: python watchdog.py
 
-      - name: Update heartbeat
-        run: python heartbeat.py
-
-      - name: Commit state changes
+      - name: Commit watchdog state changes
         run: |
-          if git diff --quiet -- state.json heartbeat.json; then
-            echo "state.json and heartbeat.json unchanged; nothing to commit."
+          if git diff --quiet -- watchdog_state.json; then
+            echo "watchdog_state.json unchanged; nothing to commit."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state.json heartbeat.json
-          git commit -m "Update monitor state"
+          git add watchdog_state.json
+          git commit -m "Update watchdog state"
           for attempt in 1 2 3; do
             if git pull --rebase origin main && git push; then
               exit 0
             fi
             sleep 5
           done
-          echo "Failed to push state.json and heartbeat.json after 3 attempts."
+          echo "Failed to push watchdog_state.json after 3 attempts."
           exit 1
