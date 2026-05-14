@@ -86,6 +86,7 @@ INITIAL_STATE = {
     "target_url": None,
     "last_webnovel_check": None,
     "webnovel_skip_count": 0,
+    "pending_notification": None,
     "last_error_alerts": {},
     "updated_at": None,
 }
@@ -962,6 +963,110 @@ def send_notification(previous_seen: int | None, latest: ChapterReport) -> bool:
     return True
 
 
+def pending_notification_from_report(previous_seen: int | None, latest: ChapterReport) -> dict[str, Any]:
+    timestamp = iso_now()
+    return {
+        "previous_seen": previous_seen,
+        "source": latest.source,
+        "chapter": latest.chapter,
+        "title": latest.title,
+        "url": latest.url,
+        "created_at": timestamp,
+        "last_attempt_at": timestamp,
+        "attempts": 1,
+    }
+
+
+def report_from_pending_notification(pending: Any) -> tuple[int | None, ChapterReport] | None:
+    if not isinstance(pending, dict):
+        return None
+
+    previous_seen = pending.get("previous_seen")
+    if previous_seen is not None:
+        previous_seen = parse_int(previous_seen)
+        if previous_seen is None:
+            return None
+
+    source = pending.get("source")
+    title = pending.get("title")
+    url = pending.get("url")
+    chapter = parse_int(pending.get("chapter"))
+    attempts = parse_int(pending.get("attempts"))
+
+    if (
+        not isinstance(source, str)
+        or not source.strip()
+        or chapter is None
+        or not isinstance(url, str)
+        or not url.strip()
+        or (title is not None and not isinstance(title, str))
+        or parse_iso_datetime(pending.get("created_at")) is None
+        or parse_iso_datetime(pending.get("last_attempt_at")) is None
+        or attempts is None
+        or attempts < 0
+    ):
+        return None
+
+    return previous_seen, ChapterReport(source.strip(), chapter, clean_title(title), url.strip())
+
+
+def queue_pending_notification(state: dict[str, Any], previous_seen: int | None, latest: ChapterReport) -> None:
+    state["pending_notification"] = pending_notification_from_report(previous_seen, latest)
+    save_state(state)
+    logging.info("Queued pending notification for chapter %s.", latest.chapter)
+
+
+def clear_pending_notification(state: dict[str, Any]) -> None:
+    state["pending_notification"] = None
+
+
+def advance_state_after_notification(state: dict[str, Any], latest: ChapterReport) -> None:
+    state["latest_seen"] = latest.chapter
+    state["latest_title"] = latest.title
+    state["latest_url"] = latest.url
+    state["target_chapter"] = None
+    state["target_title"] = None
+    state["target_url"] = None
+    state["mode"] = "watch_webnovel"
+
+
+def retry_pending_notification(state: dict[str, Any]) -> bool:
+    pending = state.get("pending_notification")
+    if pending is None:
+        return True
+
+    parsed = report_from_pending_notification(pending)
+    if parsed is None:
+        logging.warning("pending_notification is invalid; clearing it.")
+        clear_pending_notification(state)
+        send_error_notification(
+            state,
+            "invalid_pending_notification",
+            error_alert_body(
+                "Pending chapter notification state was invalid.",
+                "pending_notification in state.json was malformed and has been cleared.",
+            ),
+        )
+        save_state(state)
+        return True
+
+    previous_seen, latest = parsed
+    if send_notification(previous_seen, latest):
+        clear_pending_notification(state)
+        advance_state_after_notification(state, latest)
+        save_state(state)
+        logging.info("Retried pending notification for chapter %s successfully.", latest.chapter)
+        return True
+
+    refreshed = dict(pending)
+    refreshed["attempts"] = (parse_int(refreshed.get("attempts")) or 0) + 1
+    refreshed["last_attempt_at"] = iso_now()
+    state["pending_notification"] = refreshed
+    save_state(state)
+    logging.info("Pending notification retry failed; exiting without advancing state.")
+    return False
+
+
 def error_alert_body(summary: str, reason: str) -> str:
     return "\n".join(
         [
@@ -1184,16 +1289,12 @@ def run_watch_free_sites(state: dict[str, Any]) -> None:
 
     previous_seen = parse_int(state.get("latest_seen"))
     if not send_notification(previous_seen, latest):
+        queue_pending_notification(state, previous_seen, latest)
         logging.info("State was not advanced because no notification was sent.")
         return
 
-    state["latest_seen"] = latest.chapter
-    state["latest_title"] = latest.title
-    state["latest_url"] = latest.url
-    state["target_chapter"] = None
-    state["target_title"] = None
-    state["target_url"] = None
-    state["mode"] = "watch_webnovel"
+    clear_pending_notification(state)
+    advance_state_after_notification(state, latest)
     save_state(state)
 
 
@@ -1204,6 +1305,9 @@ def main() -> None:
         save_state(state)
     if is_first_setup:
         first_setup(state)
+        return
+
+    if not retry_pending_notification(state):
         return
 
     mode = state.get("mode")
