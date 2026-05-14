@@ -2,16 +2,16 @@
   "latest_seen": 2995,
   "latest_title": "Time to Return",
   "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/2995/",
-  "latest_webnovel": 2995,
-  "latest_webnovel_title": "Time to Return",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
-  "last_webnovel_check": "2026-05-14T04:35:17+00:00",
-  "webnovel_skip_count": 3,
+  "latest_webnovel": 2997,
+  "latest_webnovel_title": "Final Confrontation",
+  "mode": "watch_free_sites",
+  "target_chapter": 2997,
+  "target_title": "Final Confrontation",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "last_webnovel_check": "2026-05-14T04:55:22+00:00",
+  "webnovel_skip_count": 0,
   "last_error_alerts": {
     "public_site_failed:NovelBin": "2026-05-10T16:45:17+00:00"
   },
-  "updated_at": "2026-05-14T04:50:16+00:00"
+  "updated_at": "2026-05-14T04:55:22+00:00"
 }
