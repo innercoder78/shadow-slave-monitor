@@ -95,15 +95,22 @@ def get_alert_reason(now: datetime, stale_hours: float) -> tuple[str | None, str
     if error:
         return error, None
 
-    last_completed_raw = heartbeat.get("last_completed_at") if heartbeat else None
+    last_completed_raw = None
+    if heartbeat:
+        last_completed_raw = heartbeat.get("last_workflow_completed_at")
+        if last_completed_raw is None:
+            last_completed_raw = heartbeat.get("last_completed_at")
     last_completed = parse_timestamp(last_completed_raw)
     if last_completed is None:
-        return "heartbeat.json is missing last_completed_at or it is invalid", None
+        return "heartbeat.json is missing last_workflow_completed_at or it is invalid", None
 
     stale_after = timedelta(hours=stale_hours)
     if now - last_completed > stale_after:
         return (
-            f"heartbeat.json has not been updated for over {format_hours(stale_hours)} hours",
+            (
+                "heartbeat.json has not recorded a completed monitor workflow "
+                f"for over {format_hours(stale_hours)} hours"
+            ),
             last_completed_raw,
         )
 
@@ -127,7 +134,7 @@ def build_alert_body(reason: str, last_completed_at: str | None) -> str:
         f"{reason}.",
     ]
     if last_completed_at:
-        lines.append(f"Last completed run: {last_completed_at}")
+        lines.append(f"Last completed workflow run: {last_completed_at}")
     lines.extend(
         [
             "",
