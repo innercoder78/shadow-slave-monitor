@@ -14,7 +14,7 @@ def main() -> None:
     """Write a successful monitor heartbeat."""
     timestamp = datetime.now(timezone.utc).isoformat()
     heartbeat = {
-        "last_completed_at": timestamp,
+        "last_workflow_completed_at": timestamp,
         "last_status": "success",
         "workflow": "monitor",
         "github_run_id": os.environ.get("GITHUB_RUN_ID"),
