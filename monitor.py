@@ -53,6 +53,11 @@ PUBLIC_SITES = [
         "enabled": True,
     },
     {
+        "name": "Novel Buddy",
+        "url": "https://novelbuddy.io/shadow-slave",
+        "enabled": True,
+    },
+    {
         "name": "NovelFire",
         "url": "https://novelfire.net/book/shadow-slave",
         "enabled": False,
@@ -565,6 +570,78 @@ def parse_light_novel_world_candidates(soup: BeautifulSoup, base_url: str) -> li
     return candidates
 
 
+def parse_novel_buddy_chapter_text(text: str) -> tuple[int, str | None] | None:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    match = re.search(
+        r"\bChapter\s+(\d{1,5})\b\s*[:\-–—]?\s*(.*)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    title = re.sub(
+        r"\s+(?:about\s+)?\d+\s+"
+        r"(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago"
+        r"(?:\s+\d+)?\s*$",
+        "",
+        match.group(2),
+        flags=re.IGNORECASE,
+    )
+    title = clean_title(title)
+    if title and is_non_chapter_title(title):
+        title = None
+    return int(match.group(1)), title
+
+
+def novel_buddy_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    href = anchor.get("href")
+    if not href:
+        return None
+
+    parsed = parse_novel_buddy_chapter_text(anchor.get_text(" ", strip=True))
+    href_chapter = parse_chapter_from_href(href)
+    if not parsed and href_chapter is not None:
+        return ChapterReport("", href_chapter, None, urljoin(base_url, href))
+    if not parsed:
+        return None
+
+    chapter, title = parsed
+    if href_chapter is not None and href_chapter != chapter:
+        return None
+    return ChapterReport("", chapter, title, urljoin(base_url, href))
+
+
+def parse_novel_buddy_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+
+    for anchor in soup.find_all("a", href=True):
+        candidate = novel_buddy_candidate_from_anchor(anchor, base_url)
+        if not candidate:
+            continue
+        key = (candidate.chapter, candidate.url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(candidate)
+
+    if candidates:
+        return candidates
+
+    lines = [line.strip() for line in soup.get_text("\n", strip=True).splitlines() if line.strip()]
+    for line in lines:
+        parsed = parse_novel_buddy_chapter_text(line)
+        if not parsed:
+            continue
+        chapter, title = parsed
+        key = (chapter, base_url)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(ChapterReport("", chapter, title, base_url))
+
+    return candidates
+
+
 def parse_telegram_doc_title(text: str) -> tuple[int, str | None] | None:
     normalized = re.sub(r"\s+", " ", text).strip()
     match = re.search(r"\b(\d{3,5})\s+(.+?)\.docx\b", normalized, flags=re.IGNORECASE)
@@ -723,6 +800,8 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_light_novel_world_candidates(soup, base_url)
     if site_name == "Telegram":
         return parse_telegram_candidates(soup, base_url)
+    if site_name == "Novel Buddy":
+        return parse_novel_buddy_candidates(soup, base_url)
 
     section_patterns = {
         "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
@@ -785,7 +864,7 @@ def check_public_site(site: dict[str, Any]) -> ChapterReport:
         raise MonitorError(f"Could not find any chapter links on {site['name']}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site["name"], best.chapter, best.title, best.url)
-    if report.source in {"SSNovel", "Light Novel World", "Telegram"}:
+    if report.source in {"SSNovel", "Light Novel World", "Telegram", "Novel Buddy"}:
         logging.info(
             "%s reports chapter %s: %s (%s)",
             report.source,
