@@ -65,7 +65,7 @@ PUBLIC_SITES = [
     {
         "name": "NovelBin",
         "url": "https://novelbin.com/b/shadow-slave",
-        "enabled": True,
+        "enabled": False,
     },
     {
         "name": "SSNovel",
