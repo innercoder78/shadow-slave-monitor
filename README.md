@@ -1,3 +1,9 @@
+# ONE WEEK BREAK
+
+Since the author is taking a one-week break from writing, this script is disabled for a week. I'll remove this notice once this web novel resumes.
+
+
+
 # SHADOW SLAVE NEW CHAPTER MONITOR
 
 A small automated monitor that checks for new chapters for the web novel called *Shadow Slave* and sends a notification on your phone when a new chapter becomes available.
