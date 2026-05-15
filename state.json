@@ -1,16 +1,16 @@
 {
-  "latest_seen": 2999,
-  "latest_title": "Fallen Tyrant",
-  "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/2999/",
+  "latest_seen": 3000,
+  "latest_title": "Memories of Oblivion",
+  "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/3000/",
   "latest_webnovel": 3000,
   "latest_webnovel_title": "Memories of Oblivion",
-  "mode": "watch_free_sites",
-  "target_chapter": 3000,
-  "target_title": "Memories of Oblivion",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-05-15T21:25:18+00:00",
   "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {},
-  "updated_at": "2026-05-15T21:25:18+00:00"
+  "updated_at": "2026-05-15T21:35:15+00:00"
 }
