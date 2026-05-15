@@ -2,18 +2,18 @@
   "latest_seen": 2997,
   "latest_title": "Final Confrontation",
   "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/2997/",
-  "latest_webnovel": 2997,
-  "latest_webnovel_title": "Final Confrontation",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
-  "last_webnovel_check": "2026-05-15T03:35:17+00:00",
-  "webnovel_skip_count": 3,
+  "latest_webnovel": 2999,
+  "latest_webnovel_title": "Fallen Tyrant",
+  "mode": "watch_free_sites",
+  "target_chapter": 2999,
+  "target_title": "Fallen Tyrant",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "last_webnovel_check": "2026-05-15T03:55:16+00:00",
+  "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "public_site_failed:NovelBin": "2026-05-10T16:45:17+00:00",
     "public_site_failures:NovelBin": "2026-05-14T05:00:23+00:00"
   },
-  "updated_at": "2026-05-15T03:50:20+00:00"
+  "updated_at": "2026-05-15T03:55:16+00:00"
 }
