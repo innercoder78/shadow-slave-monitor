@@ -1,16 +1,16 @@
 {
-  "latest_seen": 3000,
-  "latest_title": "Memories of Oblivion",
-  "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/3000/",
+  "latest_seen": 3001,
+  "latest_title": "The Apocalypse",
+  "latest_url": "https://novelbuddy.io/shadow-slave/chapter-3001-the-apocalypse",
   "latest_webnovel": 3001,
   "latest_webnovel_title": "The Apocalypse",
-  "mode": "watch_free_sites",
-  "target_chapter": 3001,
-  "target_title": "The Apocalypse",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-05-24T03:00:17+00:00",
   "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {},
-  "updated_at": "2026-05-24T03:00:17+00:00"
+  "updated_at": "2026-05-24T03:05:16+00:00"
 }
