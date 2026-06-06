@@ -1,18 +1,18 @@
 {
-  "latest_seen": 3024,
-  "latest_title": "Weaving 101",
-  "latest_url": "https://ssnovel.app",
+  "latest_seen": 3026,
+  "latest_title": "All Over Again",
+  "latest_url": "https://telegra.ph/3026-All-Over-Again-06-06",
   "latest_webnovel": 3026,
   "latest_webnovel_title": "All Over Again",
-  "mode": "watch_free_sites",
-  "target_chapter": 3026,
-  "target_title": "All Over Again",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-06-06T03:30:23+00:00",
   "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "webnovel_check_failed": "2026-06-04T02:50:29+00:00"
   },
-  "updated_at": "2026-06-06T03:30:23+00:00"
+  "updated_at": "2026-06-06T04:30:21+00:00"
 }
