@@ -2,17 +2,17 @@
   "latest_seen": 3027,
   "latest_title": "Sudden Realization",
   "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/3027/",
-  "latest_webnovel": 3027,
-  "latest_webnovel_title": "Sudden Realization",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
-  "last_webnovel_check": "2026-06-07T15:40:20+00:00",
-  "webnovel_skip_count": 3,
+  "latest_webnovel": 3028,
+  "latest_webnovel_title": "Remembrance Day",
+  "mode": "watch_free_sites",
+  "target_chapter": 3028,
+  "target_title": "Remembrance Day",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "last_webnovel_check": "2026-06-07T16:00:25+00:00",
+  "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "webnovel_check_failed": "2026-06-04T02:50:29+00:00"
   },
-  "updated_at": "2026-06-07T15:55:15+00:00"
+  "updated_at": "2026-06-07T16:00:25+00:00"
 }
