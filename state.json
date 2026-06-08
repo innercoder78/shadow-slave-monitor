@@ -1,18 +1,18 @@
 {
-  "latest_seen": 3028,
-  "latest_title": "Remembrance Day",
-  "latest_url": "https://ssnovel.app",
+  "latest_seen": 3030,
+  "latest_title": "Vague Boundaries",
+  "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/3030/",
   "latest_webnovel": 3030,
   "latest_webnovel_title": "Vague Boundaries",
-  "mode": "watch_free_sites",
-  "target_chapter": 3030,
-  "target_title": "Vague Boundaries",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-06-08T02:15:25+00:00",
   "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "webnovel_check_failed": "2026-06-04T02:50:29+00:00"
   },
-  "updated_at": "2026-06-08T02:15:25+00:00"
+  "updated_at": "2026-06-08T02:45:17+00:00"
 }
