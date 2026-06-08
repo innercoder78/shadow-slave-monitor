@@ -2,17 +2,17 @@
   "latest_seen": 3028,
   "latest_title": "Remembrance Day",
   "latest_url": "https://ssnovel.app",
-  "latest_webnovel": 3028,
-  "latest_webnovel_title": "Fire Bringer",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
-  "last_webnovel_check": "2026-06-08T01:55:20+00:00",
-  "webnovel_skip_count": 3,
+  "latest_webnovel": 3030,
+  "latest_webnovel_title": "Vague Boundaries",
+  "mode": "watch_free_sites",
+  "target_chapter": 3030,
+  "target_title": "Vague Boundaries",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "last_webnovel_check": "2026-06-08T02:15:25+00:00",
+  "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "webnovel_check_failed": "2026-06-04T02:50:29+00:00"
   },
-  "updated_at": "2026-06-08T02:10:21+00:00"
+  "updated_at": "2026-06-08T02:15:25+00:00"
 }
