@@ -1,18 +1,18 @@
 {
-  "latest_seen": 3031,
-  "latest_title": "The End is Nigh",
-  "latest_url": "https://telegra.ph/3031-The-End-is-Nigh-06-09",
+  "latest_seen": 3032,
+  "latest_title": "Escalating Peril",
+  "latest_url": "https://ssnovel.app",
   "latest_webnovel": 3032,
   "latest_webnovel_title": "Escalating Peril",
-  "mode": "watch_free_sites",
-  "target_chapter": 3032,
-  "target_title": "Escalating Peril",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-06-09T15:55:32+00:00",
   "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "webnovel_check_failed": "2026-06-04T02:50:29+00:00"
   },
-  "updated_at": "2026-06-09T15:55:32+00:00"
+  "updated_at": "2026-06-09T18:00:30+00:00"
 }
