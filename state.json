@@ -1,18 +1,18 @@
 {
-  "latest_seen": 3030,
-  "latest_title": "Vague Boundaries",
-  "latest_url": "https://lightnovelworld.org/novel/shadow-slave/chapter/3030/",
+  "latest_seen": 3031,
+  "latest_title": "The End is Nigh",
+  "latest_url": "https://telegra.ph/3031-The-End-is-Nigh-06-09",
   "latest_webnovel": 3031,
   "latest_webnovel_title": "The End is Nigh",
-  "mode": "watch_free_sites",
-  "target_chapter": 3031,
-  "target_title": "The End is Nigh",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "last_webnovel_check": "2026-06-09T02:10:20+00:00",
   "webnovel_skip_count": 0,
   "pending_notification": null,
   "last_error_alerts": {
     "webnovel_check_failed": "2026-06-04T02:50:29+00:00"
   },
-  "updated_at": "2026-06-09T02:10:20+00:00"
+  "updated_at": "2026-06-09T03:25:18+00:00"
 }
