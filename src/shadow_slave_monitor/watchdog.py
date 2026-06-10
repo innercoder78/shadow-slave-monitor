@@ -103,6 +103,15 @@ def run_id(run: dict[str, Any] | None) -> str | None:
 def run_timestamp(run: dict[str, Any]) -> Any:
     return parse_run_time(run, "updated_at") or parse_run_time(run, "created_at")
 
+def run_timestamp_string(run: dict[str, Any] | None) -> str | None:
+    if not run:
+        return None
+    for key in ("updated_at", "created_at"):
+        value = run.get(key)
+        if isinstance(value, str) and parse_iso_datetime(value) is not None:
+            return value
+    return None
+
 def latest_success(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     successes = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success" and run_timestamp(r) is not None]
     return max(successes, key=run_timestamp) if successes else None
@@ -152,12 +161,22 @@ def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[st
         state["resolved_at"] = now.isoformat(timespec="seconds")
         changed = True
     state["current_outage_id"] = ident
-    last_success_time = parse_run_time(success, "updated_at") if success else None
+    last_success_time = run_timestamp(success) if success else None
+    last_success_at = run_timestamp_string(success)
     stale = last_success_time is None or now - last_success_time >= timedelta(hours=WATCHDOG_STALE_HOURS)
     if active and stale:
         logging.info("Recent monitor run is active; suppressing stale alert within grace period.")
         return state, changed, "suppressed_active_run"
     if not stale:
+        recovery_updates = {
+            "last_success_at": last_success_at,
+            "latest_failed_conclusion": None,
+            "latest_failed_run_url": None,
+        }
+        for key, value in recovery_updates.items():
+            if state.get(key) != value:
+                state[key] = value
+                changed = True
         if state.get("open_outage_id"):
             state["open_outage_id"] = None
             state["resolved_at"] = now.isoformat(timespec="seconds")
@@ -181,7 +200,7 @@ def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[st
         return state, changed, "alert_failed"
     state["last_alert_at"] = now.isoformat(timespec="seconds")
     state["last_alert_outage_id"] = ident
-    state["last_success_at"] = success.get("updated_at") if success else None
+    state["last_success_at"] = last_success_at
     state["latest_failed_conclusion"] = latest.get("conclusion") if latest else None
     state["latest_failed_run_url"] = run_url(latest)
     state["resolved_at"] = None
