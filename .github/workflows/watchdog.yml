@@ -34,30 +34,61 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install --require-hashes -r requirements.lock
+        run: python -m pip install --require-hashes -r dependencies/requirements.lock
+
+      - name: Synchronize checker checkout
+        run: |
+          git fetch --depth=1 origin main
+          git reset --hard origin/main
+          git status --porcelain=v1
+          test -z "$(git status --porcelain=v1)"
 
       - name: Record base state metadata
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
+          mkdir -p "$ARTIFACT_DIR"
           python - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, os, subprocess
           from pathlib import Path
-          state_path = Path('watchdog_state.json')
+          state_path = Path('state/watchdog_state.json')
+          artifact_dir = Path(os.environ['ARTIFACT_DIR'])
           metadata = {
               "artifact_type": "watchdog",
-              "state_file": "watchdog_state.json",
+              "state_file": "state/watchdog_state.json",
               "base_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
-              "checkout_sha": os.environ["GITHUB_SHA"],
+              "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
           }
-          Path('state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
+          (artifact_dir / 'state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
           PY
+
+      - name: Verify checker checkout is current before side effects
+        run: |
+          git fetch --depth=1 origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          git status --porcelain=v1
+          test -z "$(git status --porcelain=v1)"
 
       - name: Run watchdog
         env:
           NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: python watchdog.py
+          PYTHONPATH: ${{ github.workspace }}/src
+          SHADOW_SLAVE_WATCHDOG_RESULT_PATH: ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}/watchdog_result.json
+        run: python -m shadow_slave_monitor.watchdog
+
+      - name: Stage watchdog artifact state
+        if: always()
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          mkdir -p "$ARTIFACT_DIR"
+          if [ ! -f "$ARTIFACT_DIR/watchdog_result.json" ]; then
+            printf '{"changed":false,"status":"failed","error_type":"watchdog result missing"}\n' > "$ARTIFACT_DIR/watchdog_result.json"
+          fi
+          cp state/watchdog_state.json "$ARTIFACT_DIR/watchdog_state.json"
 
       - name: Upload watchdog state artifact
         if: always()
@@ -66,9 +97,9 @@ jobs:
         with:
           name: watchdog-state
           path: |
-            watchdog_state.json
-            watchdog_result.json
-            state_artifact_metadata.json
+            ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}/watchdog_state.json
+            ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}/watchdog_result.json
+            ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}/state_artifact_metadata.json
           if-no-files-found: error
           retention-days: 1
 
@@ -101,7 +132,7 @@ jobs:
           path: ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Validate, version-check, and persist watchdog state
-        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}" watchdog_state.json
+        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}" state/watchdog_state.json
 
       - name: Remove downloaded watchdog artifact
         if: always()
