@@ -11,13 +11,16 @@ from urllib.parse import quote
 
 import requests
 
-from config import MONITOR_WORKFLOW_PATH, WATCHDOG_IN_PROGRESS_GRACE_MINUTES, WATCHDOG_REPEAT_ALERT_HOURS, WATCHDOG_RESULT_PATH, WATCHDOG_STALE_HOURS, WATCHDOG_STATE_PATH
+from config import MONITOR_WORKFLOW_FILE, MONITOR_WORKFLOW_PATH, WATCHDOG_IN_PROGRESS_GRACE_MINUTES, WATCHDOG_REPEAT_ALERT_HOURS, WATCHDOG_RESULT_PATH, WATCHDOG_STALE_HOURS, WATCHDOG_STATE_PATH
 from http_client import safe_exception_category
 from notifications import NotificationConfigError, NotificationDeliveryError, send_watchdog
-from state_manager import load_json_object, save_watchdog_state
+from state_manager import load_json_object, save_watchdog_state, validate_watchdog_state
 from timeutil import parse_iso_datetime, utc_now
 
 API = "https://api.github.com"
+MONITOR_WORKFLOW_NAME = "Shadow Slave chapter monitor"
+WATCHDOG_LOOKBACK_MARGIN = timedelta(minutes=30)
+MAX_WORKFLOW_RUN_PAGES = 10
 
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -34,16 +37,53 @@ def github_get(path: str) -> dict[str, Any]:
         raise RuntimeError("GitHub API returned non-object JSON")
     return data
 
+def is_monitor_workflow_run(run: dict[str, Any]) -> bool:
+    path = run.get("path")
+    name = run.get("name")
+    event = run.get("event")
+    if path is not None and path != MONITOR_WORKFLOW_PATH:
+        return False
+    if name is not None and name != MONITOR_WORKFLOW_NAME:
+        return False
+    if event in {"pull_request", "pull_request_target", "dependabot"}:
+        return False
+    return True
+
+def should_continue_paging(runs: list[dict[str, Any]], found_success: bool) -> bool:
+    if found_success:
+        return False
+    cutoff = utc_now() - timedelta(hours=WATCHDOG_STALE_HOURS) - WATCHDOG_LOOKBACK_MARGIN
+    oldest: Any = None
+    for run in runs:
+        timestamp = parse_run_time(run, "created_at") or parse_run_time(run, "updated_at")
+        if timestamp and (oldest is None or timestamp < oldest):
+            oldest = timestamp
+    return oldest is None or oldest > cutoff
+
 def fetch_monitor_runs() -> list[dict[str, Any]]:
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo:
         raise RuntimeError("GITHUB_REPOSITORY is missing")
-    path = f"/repos/{repo}/actions/workflows/{quote(MONITOR_WORKFLOW_PATH, safe='')}/runs?branch=main&per_page=50"
-    data = github_get(path)
-    runs = data.get("workflow_runs", [])
-    if not isinstance(runs, list):
-        raise RuntimeError("GitHub workflow_runs payload is malformed")
-    return [run for run in runs if isinstance(run, dict)]
+    collected: list[dict[str, Any]] = []
+    for page in range(1, MAX_WORKFLOW_RUN_PAGES + 1):
+        path = (
+            f"/repos/{repo}/actions/workflows/{quote(MONITOR_WORKFLOW_FILE, safe='')}/runs"
+            f"?branch=main&per_page=100&page={page}"
+        )
+        try:
+            data = github_get(path)
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else None
+            logging.error("GitHub workflow-runs API failed safely: status=%s", status)
+            raise RuntimeError(f"GitHub workflow-runs API request failed with status {status}") from exc
+        runs = data.get("workflow_runs")
+        if not isinstance(runs, list):
+            raise RuntimeError("GitHub workflow_runs payload is malformed")
+        page_runs = [run for run in runs if isinstance(run, dict) and is_monitor_workflow_run(run)]
+        collected.extend(page_runs)
+        if len(runs) < 100 or not should_continue_paging(collected, any(r.get("status") == "completed" and r.get("conclusion") == "success" for r in collected)):
+            break
+    return collected
 
 def parse_run_time(run: dict[str, Any], key: str) -> Any:
     return parse_iso_datetime(run.get(key))
@@ -60,13 +100,16 @@ def run_id(run: dict[str, Any] | None) -> str | None:
     value = run.get("id")
     return str(value) if value is not None else None
 
+def run_timestamp(run: dict[str, Any]) -> Any:
+    return parse_run_time(run, "updated_at") or parse_run_time(run, "created_at")
+
 def latest_success(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    successes = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"]
-    return max(successes, key=lambda r: parse_run_time(r, "updated_at") or parse_run_time(r, "created_at")) if successes else None
+    successes = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success" and run_timestamp(r) is not None]
+    return max(successes, key=run_timestamp) if successes else None
 
 def latest_completed(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
-    completed = [r for r in runs if r.get("status") == "completed"]
-    return max(completed, key=lambda r: parse_run_time(r, "updated_at") or parse_run_time(r, "created_at")) if completed else None
+    completed = [r for r in runs if r.get("status") == "completed" and run_timestamp(r) is not None]
+    return max(completed, key=run_timestamp) if completed else None
 
 def active_recent_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     now = utc_now()
@@ -149,7 +192,7 @@ def main() -> None:
     result = {"changed": False, "status": "ok"}
     try:
         runs = fetch_monitor_runs()
-        state = load_json_object(WATCHDOG_STATE_PATH)
+        state = validate_watchdog_state(load_json_object(WATCHDOG_STATE_PATH))
         new_state, changed, status = evaluate(runs, state)
         result = {"changed": changed, "status": status}
         if changed:

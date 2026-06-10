@@ -29,6 +29,23 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --require-hashes -r requirements.lock
 
+      - name: Record base state metadata
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          state_path = Path('watchdog_state.json')
+          metadata = {
+              "artifact_type": "watchdog",
+              "state_file": "watchdog_state.json",
+              "base_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
+              "checkout_sha": os.environ["GITHUB_SHA"],
+              "workflow_run_id": os.environ["GITHUB_RUN_ID"],
+              "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+          }
+          Path('state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
+          PY
+
       - name: Run watchdog
         env:
           NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
@@ -44,6 +61,7 @@ jobs:
           path: |
             watchdog_state.json
             watchdog_result.json
+            state_artifact_metadata.json
           if-no-files-found: error
           retention-days: 1
 
@@ -57,12 +75,16 @@ jobs:
     concurrency:
       group: shadow-slave-state-writer
       cancel-in-progress: false
+      queue: max
     steps:
       - name: Check out repository
         # actions/checkout v6
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           ref: main
+
+      - name: Update to latest main
+        run: git pull --ff-only origin main
 
       - name: Download watchdog state artifact
         # actions/download-artifact v4
@@ -71,21 +93,9 @@ jobs:
           name: watchdog-state
           path: .state-artifact
 
-      - name: Apply meaningful watchdog state if changed
-        run: |
-          python - <<'PY'
-          import json, shutil
-          from pathlib import Path
-          result = json.loads(Path('.state-artifact/watchdog_result.json').read_text(encoding='utf-8'))
-          if not isinstance(result, dict):
-              raise SystemExit('watchdog_result.json must be an object')
-          if result.get('changed'):
-              data = json.loads(Path('.state-artifact/watchdog_state.json').read_text(encoding='utf-8'))
-              if not isinstance(data, dict):
-                  raise SystemExit('watchdog_state.json must be an object')
-              shutil.copyfile('.state-artifact/watchdog_state.json', 'watchdog_state.json')
-          PY
-          rm -rf .state-artifact
+      - name: Validate, version-check, and persist watchdog state
+        run: python scripts/state_writer.py --artifact-dir .state-artifact watchdog_state.json
 
-      - name: Commit permitted watchdog state changes
-        run: python scripts/state_writer.py watchdog_state.json
+      - name: Remove downloaded watchdog artifact
+        if: always()
+        run: rm -rf .state-artifact

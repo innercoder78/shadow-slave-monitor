@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from enum import StrEnum
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,11 @@ from parsers import ParseError, check_public_site, check_webnovel
 from state_manager import StateError, load_state, parse_int, save_state
 from timeutil import iso_now, parse_iso_datetime, utc_now
 
+
+class PendingDeliveryOutcome(StrEnum):
+    NONE = "none"
+    NOT_DELIVERED = "not_delivered"
+    DELIVERED = "delivered"
 
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -114,18 +120,18 @@ def required_webnovel_check(state: dict[str, Any], result: RunResult) -> Chapter
         return None
     return report
 
-def try_deliver_pending(state: dict[str, Any], result: RunResult) -> None:
+def try_deliver_pending(state: dict[str, Any], result: RunResult) -> PendingDeliveryOutcome:
     pending = state.get("pending_notification")
     if pending is None:
-        return
+        return PendingDeliveryOutcome.NONE
     previous_seen, report = report_from_pending(pending)
     latest_seen = parse_int(state.get("latest_seen"))
     if latest_seen is not None and report.chapter <= latest_seen:
         result.fail("pending notification is not newer than latest_seen")
-        return
+        return PendingDeliveryOutcome.NOT_DELIVERED
     if not pending_due(pending):
         result.fail("required pending chapter notification remains undelivered")
-        return
+        return PendingDeliveryOutcome.NOT_DELIVERED
     try:
         send_new_chapter(os.environ.get("NTFY_NEWCHAPTER"), previous_seen, report)
     except (NotificationDeliveryError, NotificationConfigError) as exc:
@@ -133,12 +139,13 @@ def try_deliver_pending(state: dict[str, Any], result: RunResult) -> None:
         logging.warning("Pending ntfy delivery failed safely: category=%s status=%s", category, getattr(exc, "status_code", None))
         update_pending_after_failure(pending, exc)
         result.fail("required pending chapter notification remains undelivered")
-        return
+        return PendingDeliveryOutcome.NOT_DELIVERED
     state["latest_seen"] = report.chapter
     state["latest_title"] = report.title
     state["latest_url"] = report.url
     state["pending_notification"] = None
     set_watch_webnovel(state)
+    return PendingDeliveryOutcome.DELIVERED
 
 def queue_or_send(state: dict[str, Any], report: ChapterReport, result: RunResult) -> None:
     previous_seen = parse_int(state.get("latest_seen"))
@@ -185,10 +192,13 @@ def first_setup(state: dict[str, Any], result: RunResult) -> None:
         set_watch_webnovel(state)
 
 def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
-    try_deliver_pending(state, result)
+    pending_outcome = try_deliver_pending(state, result)
+    if pending_outcome == PendingDeliveryOutcome.DELIVERED:
+        return
     skip = parse_int(state.get("webnovel_skip_count")) or 0
     if not webnovel_due(state) and skip < WEBNOVEL_MAX_SKIPS_BEFORE_FORCE:
-        logging.info("Skipping WebNovel check because fewer than 20 minutes have passed; timestamp tolerance prevents recurring 25-minute drift.")
+        state["webnovel_skip_count"] = skip + 1
+        logging.info("Skipping WebNovel check because fewer than 20 minutes have passed; skip count is %s/%s.", state["webnovel_skip_count"], WEBNOVEL_MAX_SKIPS_BEFORE_FORCE)
         return
     official = required_webnovel_check(state, result)
     if official is None:
@@ -207,7 +217,9 @@ def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
         logging.info("WebNovel is ahead; now watching public sites for chapter %s.", official.chapter)
 
 def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
-    try_deliver_pending(state, result)
+    pending_outcome = try_deliver_pending(state, result)
+    if pending_outcome == PendingDeliveryOutcome.DELIVERED:
+        return
     target = parse_int(state.get("target_chapter"))
     if target is None:
         result.fail("critical configuration value target_chapter is missing")

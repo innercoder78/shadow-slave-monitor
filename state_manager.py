@@ -9,10 +9,62 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from config import MAX_CHAPTER, MIN_CHAPTER, STATE_PATH, WATCHDOG_STATE_PATH
+from config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
 from timeutil import iso_now, parse_iso_datetime
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
+
+WATCHDOG_STATE_FIELDS = {
+    "current_outage_id",
+    "open_outage_id",
+    "last_alert_at",
+    "last_alert_outage_id",
+    "last_success_at",
+    "latest_failed_conclusion",
+    "latest_failed_run_url",
+    "resolved_at",
+}
+WATCHDOG_TIMESTAMP_FIELDS = {"last_alert_at", "last_success_at", "resolved_at"}
+WATCHDOG_STRING_FIELDS = WATCHDOG_STATE_FIELDS - WATCHDOG_TIMESTAMP_FIELDS
+
+def initial_watchdog_state() -> dict[str, Any]:
+    return {key: None for key in sorted(WATCHDOG_STATE_FIELDS)}
+
+def validate_source_config() -> None:
+    expected = {
+        "Light Novel World": True,
+        "Telegram": True,
+        "Novel Buddy": True,
+        "NovelFire": False,
+        "NovelBin": False,
+        "SSNovel": True,
+        "NovelFull": True,
+    }
+    actual = {site.name: site.enabled for site in PUBLIC_SITES}
+    if actual != expected:
+        raise StateError("configured public source list or enabled statuses are invalid")
+
+def validate_watchdog_state(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise StateError("watchdog_state.json must contain a JSON object")
+    unknown = set(data) - WATCHDOG_STATE_FIELDS
+    missing = WATCHDOG_STATE_FIELDS - set(data)
+    if unknown:
+        raise StateError(f"watchdog_state.json contains unknown fields: {sorted(unknown)}")
+    if missing:
+        raise StateError(f"watchdog_state.json is missing fields: {sorted(missing)}")
+    clean: dict[str, Any] = {}
+    for key in WATCHDOG_TIMESTAMP_FIELDS:
+        value = data.get(key)
+        if value is not None and (not isinstance(value, str) or parse_iso_datetime(value) is None):
+            raise StateError(f"{key} must be a valid timestamp string or null")
+        clean[key] = value
+    for key in WATCHDOG_STRING_FIELDS:
+        value = data.get(key)
+        if value is not None and not isinstance(value, str):
+            raise StateError(f"{key} must be a string or null")
+        clean[key] = value
+    return {key: clean.get(key) for key in sorted(WATCHDOG_STATE_FIELDS)}
 
 class StateError(RuntimeError):
     pass
@@ -82,6 +134,15 @@ def validate_pending(pending: Any, latest_seen: int | None) -> dict[str, Any] | 
     created_at = pending.get("created_at")
     if parse_iso_datetime(created_at) is None:
         raise StateError("pending created_at must be a valid timestamp")
+    retry_fields: dict[str, Any] = {}
+    for key in ("first_failure_at", "last_attempt_at", "next_retry_at"):
+        value = pending.get(key, created_at)
+        if parse_iso_datetime(value) is None:
+            raise StateError(f"pending {key} must be a valid timestamp")
+        retry_fields[key] = value
+    last_http_status = parse_int(pending.get("last_http_status")) if pending.get("last_http_status") is not None else None
+    if pending.get("last_http_status") is not None and last_http_status is None:
+        raise StateError("pending last_http_status must be an integer or null")
     migrated = {
         "previous_seen": previous_seen,
         "first_pending_chapter": first,
@@ -90,18 +151,22 @@ def validate_pending(pending: Any, latest_seen: int | None) -> dict[str, Any] | 
         "sources": [str(s) for s in pending.get("sources", [pending.get("source")]) if isinstance(s, str) and s.strip()],
         "url": _optional_str(pending.get("url"), "pending.url") or "",
         "created_at": created_at,
-        "first_failure_at": pending.get("first_failure_at") if parse_iso_datetime(pending.get("first_failure_at")) else created_at,
-        "last_attempt_at": pending.get("last_attempt_at") if parse_iso_datetime(pending.get("last_attempt_at")) else created_at,
-        "next_retry_at": pending.get("next_retry_at") if parse_iso_datetime(pending.get("next_retry_at")) else created_at,
+        "first_failure_at": retry_fields["first_failure_at"],
+        "last_attempt_at": retry_fields["last_attempt_at"],
+        "next_retry_at": retry_fields["next_retry_at"],
         "attempt_count": attempts,
         "last_error_category": _optional_str(pending.get("last_error_category"), "pending.last_error_category"),
-        "last_http_status": parse_int(pending.get("last_http_status")) if pending.get("last_http_status") is not None else None,
+        "last_http_status": last_http_status,
     }
     if not migrated["sources"]:
         raise StateError("pending sources must contain at least one source")
     return migrated
 
 def validate_state(data: dict[str, Any]) -> dict[str, Any]:
+    validate_source_config()
+    unknown = set(data) - set(initial_state())
+    if unknown:
+        raise StateError(f"state.json contains unknown fields: {sorted(unknown)}")
     state = initial_state()
     for key in state:
         if key in data:
@@ -121,8 +186,9 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
         raise StateError("target_chapter cannot be greater than latest_webnovel")
     for key in ("latest_title", "latest_url", "latest_webnovel_title", "target_title", "target_url"):
         state[key] = _optional_str(state.get(key), key)
-    if state.get("last_webnovel_check") is not None and parse_iso_datetime(state.get("last_webnovel_check")) is None:
-        raise StateError("last_webnovel_check must be a valid timestamp or null")
+    for key in ("last_webnovel_check", "updated_at"):
+        if state.get(key) is not None and parse_iso_datetime(state.get(key)) is None:
+            raise StateError(f"{key} must be a valid timestamp or null")
     skip = parse_int(state.get("webnovel_skip_count"))
     if skip is None or skip < 0 or skip > 1000:
         raise StateError("webnovel_skip_count must be a reasonable non-negative integer")
@@ -188,4 +254,4 @@ def load_json_object(path: Path) -> dict[str, Any]:
     return data
 
 def save_watchdog_state(state: dict[str, Any], path: Path = WATCHDOG_STATE_PATH) -> None:
-    atomic_write_json(path, state)
+    atomic_write_json(path, validate_watchdog_state(state))
