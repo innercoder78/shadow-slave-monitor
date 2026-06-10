@@ -27,6 +27,13 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Synchronize checker checkout
+        run: |
+          git fetch --depth=1 origin main
+          git reset --hard origin/main
+          git status --porcelain=v1
+          test -z "$(git status --porcelain=v1)"
+
       - name: Set up Python
         # Pinned to an immutable commit SHA.
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
@@ -35,13 +42,6 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install --require-hashes -r dependencies/requirements.lock
-
-      - name: Synchronize checker checkout
-        run: |
-          git fetch --depth=1 origin main
-          git reset --hard origin/main
-          git status --porcelain=v1
-          test -z "$(git status --porcelain=v1)"
 
       - name: Record base state metadata
         env:

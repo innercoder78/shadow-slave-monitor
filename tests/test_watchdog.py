@@ -52,5 +52,29 @@ class WatchdogEvaluateTests(unittest.TestCase):
         self.assertEqual(new_state["current_outage_id"], "12345")
 
 
+class WatchdogBuildBodyTests(unittest.TestCase):
+    def test_build_body_uses_created_at_when_updated_at_is_missing(self) -> None:
+        success = {
+            "id": 12345,
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": "2026-06-10T10:49:30Z",
+            "html_url": "https://github.com/innercoder78/shadow-slave-monitor/actions/runs/12345",
+        }
+        latest = {
+            "id": 12346,
+            "status": "completed",
+            "conclusion": "failure",
+            "created_at": "2026-06-10T11:49:30Z",
+            "updated_at": "2026-06-10T11:50:00Z",
+            "html_url": "https://github.com/innercoder78/shadow-slave-monitor/actions/runs/12346",
+        }
+
+        body = watchdog.build_body(success, latest)
+
+        self.assertIn("Latest successful monitor workflow: 2026-06-10T10:49:30Z", body)
+        self.assertNotIn("Latest successful monitor workflow: never", body)
+
+
 if __name__ == "__main__":
     unittest.main()
