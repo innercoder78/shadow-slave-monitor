@@ -136,7 +136,7 @@ def outage_identity(success: dict[str, Any] | None) -> str:
     return run_id(success) or str(success.get("updated_at"))
 
 def build_body(success: dict[str, Any] | None, latest: dict[str, Any] | None) -> str:
-    last_success_at = success.get("updated_at") if success else "never"
+    last_success_at = run_timestamp_string(success) or "never"
     latest_conclusion = latest.get("conclusion") if latest else "unknown"
     latest_url = run_url(latest) or "unavailable"
     return "\n".join([
