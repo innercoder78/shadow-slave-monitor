@@ -1,0 +1,1 @@
+"""Shadow Slave monitor package."""

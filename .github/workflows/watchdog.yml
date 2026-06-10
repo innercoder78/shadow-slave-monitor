@@ -27,6 +27,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Synchronize latest main before reading state
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          git reset --hard origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
+
       - name: Set up Python
         # actions/setup-python v6
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
@@ -34,30 +42,57 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install --require-hashes -r requirements.lock
+        run: python -m pip install --require-hashes -r dependencies/requirements.lock
+
+      - name: Prepare runner-temporary artifact staging
+        env:
+          STAGING_DIR: ${{ runner.temp }}/shadow-slave-watchdog-staging-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          rm -rf -- "$STAGING_DIR"
+          mkdir -p -- "$STAGING_DIR"
+          echo "SHADOW_SLAVE_WATCHDOG_STAGING_DIR=$STAGING_DIR" >> "$GITHUB_ENV"
+          echo "SHADOW_SLAVE_WATCHDOG_RESULT_PATH=$STAGING_DIR/watchdog_result.json" >> "$GITHUB_ENV"
 
       - name: Record base state metadata
         run: |
           python - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, os, subprocess
           from pathlib import Path
-          state_path = Path('watchdog_state.json')
+          staging = Path(os.environ["SHADOW_SLAVE_WATCHDOG_STAGING_DIR"])
+          state_path = Path('state/watchdog_state.json')
           metadata = {
               "artifact_type": "watchdog",
-              "state_file": "watchdog_state.json",
+              "state_file": "state/watchdog_state.json",
               "base_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
-              "checkout_sha": os.environ["GITHUB_SHA"],
+              "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
           }
-          Path('state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
+          (staging / 'state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
           PY
+
+      - name: Verify latest main before watchdog side effects
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
 
       - name: Run watchdog
         env:
           NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: python watchdog.py
+        run: PYTHONPATH="$GITHUB_WORKSPACE/src" python -m shadow_slave_monitor.watchdog
+
+      - name: Stage watchdog artifact files
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f "$SHADOW_SLAVE_WATCHDOG_RESULT_PATH" ]; then
+            printf '{"changed":false,"status":"failed","error_type":"MissingResult"}\n' > "$SHADOW_SLAVE_WATCHDOG_RESULT_PATH"
+          fi
+          cp state/watchdog_state.json "$SHADOW_SLAVE_WATCHDOG_STAGING_DIR/watchdog_state.json"
 
       - name: Upload watchdog state artifact
         if: always()
@@ -66,9 +101,9 @@ jobs:
         with:
           name: watchdog-state
           path: |
-            watchdog_state.json
-            watchdog_result.json
-            state_artifact_metadata.json
+            ${{ env.SHADOW_SLAVE_WATCHDOG_STAGING_DIR }}/watchdog_state.json
+            ${{ env.SHADOW_SLAVE_WATCHDOG_STAGING_DIR }}/watchdog_result.json
+            ${{ env.SHADOW_SLAVE_WATCHDOG_STAGING_DIR }}/state_artifact_metadata.json
           if-no-files-found: error
           retention-days: 1
 
@@ -90,8 +125,13 @@ jobs:
         with:
           ref: main
 
-      - name: Update to latest main
-        run: git pull --ff-only origin main
+      - name: Synchronize latest main before writing state
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
 
       - name: Download watchdog state artifact
         # actions/download-artifact v4
@@ -101,7 +141,7 @@ jobs:
           path: ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Validate, version-check, and persist watchdog state
-        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}" watchdog_state.json
+        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}" state/watchdog_state.json
 
       - name: Remove downloaded watchdog artifact
         if: always()

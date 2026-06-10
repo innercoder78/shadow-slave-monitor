@@ -11,11 +11,11 @@ from urllib.parse import quote
 
 import requests
 
-from config import MONITOR_WORKFLOW_FILE, MONITOR_WORKFLOW_PATH, WATCHDOG_IN_PROGRESS_GRACE_MINUTES, WATCHDOG_REPEAT_ALERT_HOURS, WATCHDOG_RESULT_PATH, WATCHDOG_STALE_HOURS, WATCHDOG_STATE_PATH
-from http_client import safe_exception_category
-from notifications import NotificationConfigError, NotificationDeliveryError, send_watchdog
-from state_manager import load_json_object, save_watchdog_state, validate_watchdog_state
-from timeutil import parse_iso_datetime, utc_now
+from shadow_slave_monitor.config import MONITOR_WORKFLOW_FILE, MONITOR_WORKFLOW_PATH, WATCHDOG_IN_PROGRESS_GRACE_MINUTES, WATCHDOG_REPEAT_ALERT_HOURS, WATCHDOG_RESULT_PATH, WATCHDOG_STALE_HOURS, WATCHDOG_STATE_PATH
+from shadow_slave_monitor.http_client import safe_exception_category
+from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, send_watchdog
+from shadow_slave_monitor.state_manager import load_json_object, save_watchdog_state, validate_watchdog_state
+from shadow_slave_monitor.timeutil import parse_iso_datetime, utc_now
 
 API = "https://api.github.com"
 MONITOR_WORKFLOW_NAME = "Shadow Slave chapter monitor"
@@ -202,6 +202,7 @@ def main() -> None:
         logging.error("Watchdog failed safely: category=%s type=%s", safe_exception_category(exc), type(exc).__name__)
         raise
     finally:
+        WATCHDOG_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
         WATCHDOG_RESULT_PATH.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
 
 if __name__ == "__main__":

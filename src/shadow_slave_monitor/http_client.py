@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from config import CONNECT_TIMEOUT_SECONDS, HEADERS, HTTP_BACKOFF_SECONDS, HTTP_RETRIES, MAX_HTML_BYTES, READ_TIMEOUT_SECONDS, SourceConfig
+from shadow_slave_monitor.config import CONNECT_TIMEOUT_SECONDS, HEADERS, HTTP_BACKOFF_SECONDS, HTTP_RETRIES, MAX_HTML_BYTES, READ_TIMEOUT_SECONDS, SourceConfig
 
 TEMPORARY_STATUSES = {429, 500, 502, 503, 504}
 HTML_TYPES = {"text/html", "application/xhtml+xml", "application/xml", "text/xml"}

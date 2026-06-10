@@ -3,12 +3,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+import os
 from pathlib import Path
 
-STATE_PATH = Path("state.json")
-WATCHDOG_STATE_PATH = Path("watchdog_state.json")
-MONITOR_RESULT_PATH = Path("run_result.json")
-WATCHDOG_RESULT_PATH = Path("watchdog_result.json")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+STATE_PATH = REPOSITORY_ROOT / "state" / "state.json"
+WATCHDOG_STATE_PATH = REPOSITORY_ROOT / "state" / "watchdog_state.json"
+DEFAULT_RUNTIME_DIR = Path(os.environ.get("RUNNER_TEMP", "/tmp"))
+MONITOR_RESULT_PATH = Path(os.environ.get("SHADOW_SLAVE_MONITOR_RESULT_PATH", DEFAULT_RUNTIME_DIR / "shadow-slave-monitor" / "run_result.json"))
+WATCHDOG_RESULT_PATH = Path(os.environ.get("SHADOW_SLAVE_WATCHDOG_RESULT_PATH", DEFAULT_RUNTIME_DIR / "shadow-slave-watchdog" / "watchdog_result.json"))
 PYTHON_VERSION = "3.12"
 
 WEBNOVEL_CATALOG_URL = "https://www.webnovel.com/book/22196546206090805/catalog"

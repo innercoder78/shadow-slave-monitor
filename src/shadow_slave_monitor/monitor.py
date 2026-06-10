@@ -10,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from config import MONITOR_RESULT_PATH, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_MAX_SKIPS_BEFORE_FORCE, WEBNOVEL_SKIP_TOLERANCE, WEBNOVEL_SOURCE
-from http_client import HttpFetchError, safe_exception_category
-from models import ChapterReport, Health, RunResult
-from notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
-from parsers import ParseError, check_public_site, check_webnovel
-from state_manager import StateError, load_state, parse_int, save_state
-from timeutil import iso_now, parse_iso_datetime, utc_now
+from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_MAX_SKIPS_BEFORE_FORCE, WEBNOVEL_SKIP_TOLERANCE, WEBNOVEL_SOURCE
+from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category
+from shadow_slave_monitor.models import ChapterReport, Health, RunResult
+from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
+from shadow_slave_monitor.parsers import ParseError, check_public_site, check_webnovel
+from shadow_slave_monitor.state_manager import StateError, load_state, parse_int, save_state
+from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime, utc_now
 
 
 class PendingDeliveryOutcome(StrEnum):
@@ -28,6 +28,7 @@ def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 def write_result(result: RunResult) -> None:
+    MONITOR_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
     MONITOR_RESULT_PATH.write_text(json.dumps({"result": result.status.value, "reasons": result.reasons, "degraded_reasons": result.degraded_reasons}, indent=2) + "\n", encoding="utf-8")
 
 def fail_and_save(result: RunResult, state: dict[str, Any] | None, reason: str) -> None:

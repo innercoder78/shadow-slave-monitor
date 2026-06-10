@@ -8,11 +8,11 @@ from typing import Any
 
 import requests
 
-from config import NTFY_BASE_URL, NTFY_BODY_MAX_BYTES, NTFY_CONNECT_TIMEOUT_SECONDS, NTFY_READ_TIMEOUT_SECONDS, PENDING_RETRY_DELAYS_SECONDS, PENDING_RETRY_MAX_DELAY_SECONDS, PUBLIC_SITES
-from http_client import safe_exception_category
-from models import ChapterReport
-from state_manager import parse_int
-from timeutil import iso_now, parse_iso_datetime, utc_now
+from shadow_slave_monitor.config import NTFY_BASE_URL, NTFY_BODY_MAX_BYTES, NTFY_CONNECT_TIMEOUT_SECONDS, NTFY_READ_TIMEOUT_SECONDS, PENDING_RETRY_DELAYS_SECONDS, PENDING_RETRY_MAX_DELAY_SECONDS, PUBLIC_SITES
+from shadow_slave_monitor.http_client import safe_exception_category
+from shadow_slave_monitor.models import ChapterReport
+from shadow_slave_monitor.state_manager import parse_int
+from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime, utc_now
 
 class NotificationConfigError(RuntimeError):
     pass

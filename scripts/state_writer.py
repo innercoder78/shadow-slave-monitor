@@ -13,12 +13,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
-from state_manager import StateError, atomic_write_json, validate_state, validate_watchdog_state  # noqa: E402
-from timeutil import parse_iso_datetime  # noqa: E402
+from shadow_slave_monitor.state_manager import StateError, atomic_write_json, validate_state, validate_watchdog_state  # noqa: E402
+from shadow_slave_monitor.timeutil import parse_iso_datetime  # noqa: E402
 
-ALLOWED = {"state.json", "watchdog_state.json"}
+ARTIFACT_TO_REPOSITORY_STATE = {
+    "state.json": "state/state.json",
+    "watchdog_state.json": "state/watchdog_state.json",
+}
+REPOSITORY_TO_ARTIFACT_STATE = {v: k for k, v in ARTIFACT_TO_REPOSITORY_STATE.items()}
+ALLOWED = set(REPOSITORY_TO_ARTIFACT_STATE)
 METADATA_NAME = "state_artifact_metadata.json"
 MONITOR_RESULT_NAME = "run_result.json"
 WATCHDOG_RESULT_NAME = "watchdog_result.json"
@@ -70,15 +75,26 @@ def load_json_object(path: Path) -> dict[str, Any]:
     return data
 
 
-def validate_state_file(path: Path, state_file: str) -> dict[str, Any]:
+def artifact_state_name(repository_state_file: str) -> str:
+    try:
+        return REPOSITORY_TO_ARTIFACT_STATE[repository_state_file]
+    except KeyError as exc:
+        raise SystemExit(f"unsupported repository state path: {repository_state_file}") from exc
+
+
+def artifact_type(repository_state_file: str) -> str:
+    return "monitor" if repository_state_file == "state/state.json" else "watchdog"
+
+
+def validate_state_file(path: Path, repository_state_file: str) -> dict[str, Any]:
     data = load_json_object(path)
     try:
-        return validate_state(data) if state_file == "state.json" else validate_watchdog_state(data)
+        return validate_state(data) if repository_state_file == "state/state.json" else validate_watchdog_state(data)
     except StateError as exc:
-        raise SystemExit(f"{state_file} schema validation failed: {exc}") from exc
+        raise SystemExit(f"{repository_state_file} schema validation failed: {exc}") from exc
 
 
-def validate_metadata(path: Path, state_file: str) -> dict[str, str]:
+def validate_metadata(path: Path, repository_state_file: str) -> dict[str, str]:
     metadata = load_json_object(path)
     unknown = set(metadata) - METADATA_FIELDS
     missing = METADATA_FIELDS - set(metadata)
@@ -89,11 +105,10 @@ def validate_metadata(path: Path, state_file: str) -> dict[str, str]:
     for key in METADATA_FIELDS:
         if not isinstance(metadata.get(key), str):
             raise SystemExit(f"artifact metadata field {key} must be a string")
-    expected_type = "monitor" if state_file == "state.json" else "watchdog"
-    if metadata["artifact_type"] != expected_type:
+    if metadata["artifact_type"] != artifact_type(repository_state_file):
         raise SystemExit("artifact metadata has the wrong artifact_type")
-    if metadata["state_file"] != state_file:
-        raise SystemExit("artifact metadata has the wrong state_file")
+    if metadata["state_file"] != repository_state_file:
+        raise SystemExit("artifact metadata has the wrong canonical state_file")
     if not HEX64_RE.fullmatch(metadata["base_sha256"]):
         raise SystemExit("artifact metadata base_sha256 must be exactly 64 hexadecimal characters")
     if not GIT_SHA_RE.fullmatch(metadata["checkout_sha"]):
@@ -144,19 +159,23 @@ def validate_watchdog_result(path: Path) -> dict[str, Any]:
     return result
 
 
-def validate_artifact_boundary(artifact_dir: Path, state_file: str) -> tuple[Path, dict[str, Any], dict[str, str]]:
+def validate_artifact_boundary(artifact_dir: Path, repository_state_file: str) -> tuple[Path, dict[str, Any], dict[str, str]]:
     if not artifact_dir.is_dir():
         raise SystemExit(f"artifact directory does not exist: {artifact_dir}")
-    state_path = artifact_dir / state_file
-    result_name = MONITOR_RESULT_NAME if state_file == "state.json" else WATCHDOG_RESULT_NAME
-    required = {state_file, result_name, METADATA_NAME}
+    logical_state_name = artifact_state_name(repository_state_file)
+    state_path = artifact_dir / logical_state_name
+    result_name = MONITOR_RESULT_NAME if repository_state_file == "state/state.json" else WATCHDOG_RESULT_NAME
+    required = {logical_state_name, result_name, METADATA_NAME}
     present = {child.name for child in artifact_dir.iterdir() if child.is_file()}
     missing = required - present
+    unexpected = present - required
     if missing:
         raise SystemExit(f"artifact is missing required files: {sorted(missing)}")
-    artifact_state = validate_state_file(state_path, state_file)
-    metadata = validate_metadata(artifact_dir / METADATA_NAME, state_file)
-    if state_file == "state.json":
+    if unexpected:
+        raise SystemExit(f"artifact contains unexpected files: {sorted(unexpected)}")
+    artifact_state = validate_state_file(state_path, repository_state_file)
+    metadata = validate_metadata(artifact_dir / METADATA_NAME, repository_state_file)
+    if repository_state_file == "state/state.json":
         validate_monitor_result(artifact_dir / result_name)
     else:
         validate_watchdog_result(artifact_dir / result_name)
@@ -283,7 +302,7 @@ def watchdog_artifact_superseded(current: dict[str, Any], artifact: dict[str, An
 
 
 def artifact_superseded(state_file: str, current: dict[str, Any], artifact: dict[str, Any]) -> bool:
-    if state_file == "state.json":
+    if state_file == "state/state.json":
         return monitor_artifact_superseded(current, artifact)
     return watchdog_artifact_superseded(current, artifact)
 

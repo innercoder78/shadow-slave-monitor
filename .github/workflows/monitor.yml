@@ -25,6 +25,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Synchronize latest main before reading state
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          git reset --hard origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
+
       - name: Set up Python
         # actions/setup-python v6
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
@@ -32,42 +40,62 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install --require-hashes -r requirements.lock
+        run: python -m pip install --require-hashes -r dependencies/requirements.lock
+
+      - name: Prepare runner-temporary artifact staging
+        env:
+          STAGING_DIR: ${{ runner.temp }}/shadow-slave-monitor-staging-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          rm -rf -- "$STAGING_DIR"
+          mkdir -p -- "$STAGING_DIR"
+          echo "SHADOW_SLAVE_MONITOR_STAGING_DIR=$STAGING_DIR" >> "$GITHUB_ENV"
+          echo "SHADOW_SLAVE_MONITOR_RESULT_PATH=$STAGING_DIR/run_result.json" >> "$GITHUB_ENV"
 
       - name: Record base state metadata
         run: |
           python - <<'PY'
-          import hashlib, json, os
+          import hashlib, json, os, subprocess
           from pathlib import Path
-          state_path = Path('state.json')
+          staging = Path(os.environ["SHADOW_SLAVE_MONITOR_STAGING_DIR"])
+          state_path = Path('state/state.json')
           metadata = {
               "artifact_type": "monitor",
-              "state_file": "state.json",
+              "state_file": "state/state.json",
               "base_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
-              "checkout_sha": os.environ["GITHUB_SHA"],
+              "checkout_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "workflow_run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
           }
-          Path('state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
+          (staging / 'state_artifact_metadata.json').write_text(json.dumps(metadata, indent=2) + "\n", encoding='utf-8')
           PY
+
+      - name: Verify latest main before monitor side effects
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
 
       - name: Run monitor
         id: run_monitor
         continue-on-error: true
         env:
           NTFY_NEWCHAPTER: ${{ secrets.NTFY_NEWCHAPTER }}
-        run: python monitor.py
+        run: PYTHONPATH="$GITHUB_WORKSPACE/src" python -m shadow_slave_monitor.monitor
 
       - name: Capture monitor result
         id: result
         if: always()
         run: |
-          if [ -f run_result.json ]; then
-            result=$(python -c 'import json; print(json.load(open("run_result.json", encoding="utf-8")).get("result", "failed"))')
+          set -euo pipefail
+          if [ -f "$SHADOW_SLAVE_MONITOR_RESULT_PATH" ]; then
+            result=$(python -c 'import json, os; print(json.load(open(os.environ["SHADOW_SLAVE_MONITOR_RESULT_PATH"], encoding="utf-8")).get("result", "failed"))')
           else
             result=failed
-            printf '{"result":"failed","reasons":["monitor did not produce run_result.json"],"degraded_reasons":[]}\n' > run_result.json
+            printf '{"result":"failed","reasons":["monitor did not produce run_result.json"],"degraded_reasons":[]}\n' > "$SHADOW_SLAVE_MONITOR_RESULT_PATH"
           fi
+          cp state/state.json "$SHADOW_SLAVE_MONITOR_STAGING_DIR/state.json"
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
       - name: Upload validated state artifact
@@ -77,9 +105,9 @@ jobs:
         with:
           name: monitor-state
           path: |
-            state.json
-            run_result.json
-            state_artifact_metadata.json
+            ${{ env.SHADOW_SLAVE_MONITOR_STAGING_DIR }}/state.json
+            ${{ env.SHADOW_SLAVE_MONITOR_STAGING_DIR }}/run_result.json
+            ${{ env.SHADOW_SLAVE_MONITOR_STAGING_DIR }}/state_artifact_metadata.json
           if-no-files-found: error
           retention-days: 1
 
@@ -101,8 +129,13 @@ jobs:
         with:
           ref: main
 
-      - name: Update to latest main
-        run: git pull --ff-only origin main
+      - name: Synchronize latest main before writing state
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          test -z "$(git status --porcelain=v1)"
 
       - name: Download monitor state artifact
         # actions/download-artifact v4
@@ -112,7 +145,7 @@ jobs:
           path: ${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Validate, version-check, and persist monitor state
-        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}" state.json
+        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}" state/state.json
 
       - name: Remove downloaded monitor artifact
         if: always()

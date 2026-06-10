@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local workflow/runtime artifacts
+run_result.json
+watchdog_result.json
+state_artifact_metadata.json
+shadow-slave-monitor-*/
+shadow-slave-watchdog-*/
