@@ -9,8 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
-from timeutil import iso_now, parse_iso_datetime
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
+from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
 

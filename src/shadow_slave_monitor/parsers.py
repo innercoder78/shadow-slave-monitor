@@ -8,10 +8,10 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
-from http_client import fetch_html
-from models import ChapterReport
-from state_manager import valid_chapter
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
+from shadow_slave_monitor.http_client import fetch_html
+from shadow_slave_monitor.models import ChapterReport
+from shadow_slave_monitor.state_manager import valid_chapter
 
 class ParseError(RuntimeError):
     pass
