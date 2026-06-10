@@ -6,6 +6,11 @@ on:
     - cron: "47 1-22/3 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: shadow-slave-watchdog-workflow
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   watchdog:
     runs-on: ubuntu-latest
@@ -91,11 +96,11 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: watchdog-state
-          path: .state-artifact
+          path: ${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Validate, version-check, and persist watchdog state
-        run: python scripts/state_writer.py --artifact-dir .state-artifact watchdog_state.json
+        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}" watchdog_state.json
 
       - name: Remove downloaded watchdog artifact
         if: always()
-        run: rm -rf .state-artifact
+        run: rm -rf -- "${{ runner.temp }}/shadow-slave-watchdog-state-${{ github.run_id }}-${{ github.run_attempt }}"
