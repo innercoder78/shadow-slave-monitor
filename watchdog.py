@@ -1,211 +1,165 @@
-"""Watch for stale Shadow Slave monitor heartbeats and alert via ntfy."""
-
+#!/usr/bin/env python3
+"""Watchdog that alerts after five hours without a successful monitor workflow."""
 from __future__ import annotations
 
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import timedelta
 from typing import Any
+from urllib.parse import quote
 
 import requests
 
-HEARTBEAT_PATH = Path("heartbeat.json")
-WATCHDOG_STATE_PATH = Path("watchdog_state.json")
-DEFAULT_STALE_HOURS = 5.0
-DEFAULT_ALERT_THROTTLE_HOURS = 12.0
-NTFY_URL_TEMPLATE = "https://ntfy.sh/{topic}"
-NOTIFICATION_TITLE = "Shadow Slave monitor watchdog"
+from config import MONITOR_WORKFLOW_PATH, WATCHDOG_IN_PROGRESS_GRACE_MINUTES, WATCHDOG_REPEAT_ALERT_HOURS, WATCHDOG_RESULT_PATH, WATCHDOG_STALE_HOURS, WATCHDOG_STATE_PATH
+from http_client import safe_exception_category
+from notifications import NotificationConfigError, NotificationDeliveryError, send_watchdog
+from state_manager import load_json_object, save_watchdog_state
+from timeutil import parse_iso_datetime, utc_now
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+API = "https://api.github.com"
 
+def configure_logging() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-def parse_hours(value: str | None, default: float) -> float:
-    """Parse a positive hour value from an environment variable."""
-    if value is None:
-        return default
-    try:
-        hours = float(value)
-    except ValueError:
-        logging.warning("Invalid hour value %r; using %.0f.", value, default)
-        return default
-    if hours <= 0:
-        logging.warning("Invalid hour value %r; using %.0f.", value, default)
-        return default
-    return hours
-
-
-def format_hours(hours: float) -> str:
-    """Format hours plainly for alert text."""
-    if hours.is_integer():
-        return str(int(hours))
-    return str(hours)
-
-
-def utc_now() -> datetime:
-    """Return the current UTC time."""
-    return datetime.now(timezone.utc)
-
-
-def parse_timestamp(value: Any) -> datetime | None:
-    """Parse an ISO timestamp, normalizing UTC values to timezone-aware datetimes."""
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def load_json_file(path: Path) -> tuple[dict[str, Any] | None, str | None]:
-    """Load a JSON object from a file, returning an error message on failure."""
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None, f"{path.name} is missing"
-    except OSError as exc:
-        return None, f"{path.name} could not be read: {exc}"
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return None, f"{path.name} is malformed: {exc}"
-
+def github_get(path: str) -> dict[str, Any]:
+    token = os.environ.get("GITHUB_TOKEN")
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    response = requests.get(API + path, headers=headers, timeout=(5, 20))
+    response.raise_for_status()
+    data = response.json()
     if not isinstance(data, dict):
-        return None, f"{path.name} is malformed: expected a JSON object"
-    return data, None
+        raise RuntimeError("GitHub API returned non-object JSON")
+    return data
 
+def fetch_monitor_runs() -> list[dict[str, Any]]:
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo:
+        raise RuntimeError("GITHUB_REPOSITORY is missing")
+    path = f"/repos/{repo}/actions/workflows/{quote(MONITOR_WORKFLOW_PATH, safe='')}/runs?branch=main&per_page=50"
+    data = github_get(path)
+    runs = data.get("workflow_runs", [])
+    if not isinstance(runs, list):
+        raise RuntimeError("GitHub workflow_runs payload is malformed")
+    return [run for run in runs if isinstance(run, dict)]
 
-def load_watchdog_state() -> dict[str, Any]:
-    """Load watchdog alert state if available."""
-    data, error = load_json_file(WATCHDOG_STATE_PATH)
-    if error:
-        logging.info("%s; continuing with empty watchdog state.", error)
-        return {}
-    return data or {}
+def parse_run_time(run: dict[str, Any], key: str) -> Any:
+    return parse_iso_datetime(run.get(key))
 
+def run_url(run: dict[str, Any] | None) -> str | None:
+    if not run:
+        return None
+    url = run.get("html_url")
+    return url if isinstance(url, str) else None
 
-def get_alert_reason(now: datetime, stale_hours: float) -> tuple[str | None, str | None]:
-    """Return an alert reason and last completed timestamp when heartbeat is unhealthy."""
-    heartbeat, error = load_json_file(HEARTBEAT_PATH)
-    if error:
-        return error, None
+def run_id(run: dict[str, Any] | None) -> str | None:
+    if not run:
+        return None
+    value = run.get("id")
+    return str(value) if value is not None else None
 
-    last_completed_raw = None
-    if heartbeat:
-        last_completed_raw = heartbeat.get("last_workflow_completed_at")
-        if last_completed_raw is None:
-            last_completed_raw = heartbeat.get("last_completed_at")
-    last_completed = parse_timestamp(last_completed_raw)
-    if last_completed is None:
-        return "heartbeat.json is missing last_workflow_completed_at or it is invalid", None
+def latest_success(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    successes = [r for r in runs if r.get("status") == "completed" and r.get("conclusion") == "success"]
+    return max(successes, key=lambda r: parse_run_time(r, "updated_at") or parse_run_time(r, "created_at")) if successes else None
 
-    stale_after = timedelta(hours=stale_hours)
-    if now - last_completed > stale_after:
-        return (
-            (
-                "heartbeat.json has not recorded a completed monitor workflow "
-                f"for over {format_hours(stale_hours)} hours"
-            ),
-            last_completed_raw,
-        )
+def latest_completed(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    completed = [r for r in runs if r.get("status") == "completed"]
+    return max(completed, key=lambda r: parse_run_time(r, "updated_at") or parse_run_time(r, "created_at")) if completed else None
 
-    logging.info("heartbeat.json is fresh; no watchdog alert needed.")
-    return None, last_completed_raw
+def active_recent_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    now = utc_now()
+    active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested", "pending"}]
+    recent = []
+    for run in active:
+        created = parse_run_time(run, "created_at")
+        if created and now - created <= timedelta(minutes=WATCHDOG_IN_PROGRESS_GRACE_MINUTES):
+            recent.append(run)
+    return max(recent, key=lambda r: parse_run_time(r, "created_at")) if recent else None
 
+def outage_identity(success: dict[str, Any] | None) -> str:
+    if success is None:
+        return "no-success-yet"
+    return run_id(success) or str(success.get("updated_at"))
 
-def is_throttled(state: dict[str, Any], now: datetime, throttle_hours: float) -> bool:
-    """Return True if a previous alert is still inside the throttle window."""
-    last_alert = parse_timestamp(state.get("last_alert_at"))
-    if last_alert is None:
-        return False
-    return now - last_alert < timedelta(hours=throttle_hours)
-
-
-def build_alert_body(reason: str, last_completed_at: str | None) -> str:
-    """Build a plain watchdog alert body."""
-    lines = [
-        "Shadow Slave monitor may not be running.",
+def build_body(success: dict[str, Any] | None, latest: dict[str, Any] | None) -> str:
+    last_success_at = success.get("updated_at") if success else "never"
+    latest_conclusion = latest.get("conclusion") if latest else "unknown"
+    latest_url = run_url(latest) or "unavailable"
+    return "\n".join([
+        "Shadow Slave monitor has not completed successfully for at least five hours.",
         "",
-        f"{reason}.",
-    ]
-    if last_completed_at:
-        lines.append(f"Last completed workflow run: {last_completed_at}")
-    lines.extend(
-        [
-            "",
-            "cron-job.org may be down, disabled, blocked, or unable to trigger GitHub Actions.",
-        ]
-    )
-    return "\n".join(lines)
+        f"Latest successful monitor workflow: {last_success_at}",
+        f"Latest completed monitor conclusion: {latest_conclusion}",
+        f"Latest relevant monitor run: {latest_url}",
+        "",
+        "cron-job.org, GitHub Actions, external sources, notification delivery, or repository state persistence may be involved.",
+    ])
 
-
-def send_watchdog_alert(body: str) -> bool:
-    """Send a watchdog alert to the configured ntfy error topic."""
-    topic = os.environ.get("NTFY_ERROR_TOPIC")
-    if not topic:
-        logging.warning("NTFY_ERROR_TOPIC is missing; watchdog alert was not sent.")
-        return False
-
+def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[str, Any], bool, str]:
+    now = utc_now()
+    success = latest_success(runs)
+    latest = latest_completed(runs)
+    active = active_recent_run(runs)
+    changed = False
+    ident = outage_identity(success)
+    previous = state.get("current_outage_id")
+    if previous and previous != ident and not state.get("resolved_at"):
+        state["resolved_at"] = now.isoformat(timespec="seconds")
+        changed = True
+    state["current_outage_id"] = ident
+    last_success_time = parse_run_time(success, "updated_at") if success else None
+    stale = last_success_time is None or now - last_success_time >= timedelta(hours=WATCHDOG_STALE_HOURS)
+    if active and stale:
+        logging.info("Recent monitor run is active; suppressing stale alert within grace period.")
+        return state, changed, "suppressed_active_run"
+    if not stale:
+        if state.get("open_outage_id"):
+            state["open_outage_id"] = None
+            state["resolved_at"] = now.isoformat(timespec="seconds")
+            changed = True
+        logging.info("Latest successful monitor workflow is fresh.")
+        return state, changed, "fresh"
+    state["open_outage_id"] = ident
+    if previous != ident:
+        changed = True
+    last_alert_at = parse_iso_datetime(state.get("last_alert_at"))
+    last_alert_outage = state.get("last_alert_outage_id")
+    if last_alert_outage == ident and last_alert_at and now - last_alert_at < timedelta(hours=WATCHDOG_REPEAT_ALERT_HOURS):
+        logging.info("Watchdog alert throttled for current unresolved outage.")
+        return state, changed, "throttled"
+    body = build_body(success, latest)
     try:
-        response = requests.post(
-            NTFY_URL_TEMPLATE.format(topic=topic),
-            data=body.encode("utf-8"),
-            headers={"Title": NOTIFICATION_TITLE},
-            timeout=15,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        logging.warning("Failed to send watchdog alert: %s", exc)
-        return False
-
-    logging.info("Watchdog alert sent.")
-    return True
-
-
-def write_watchdog_state(now: datetime, reason: str) -> None:
-    """Persist the last successfully sent watchdog alert."""
-    timestamp = now.isoformat()
-    state = {
-        "last_alert_at": timestamp,
-        "last_alert_reason": reason,
-        "updated_at": timestamp,
-    }
-    WATCHDOG_STATE_PATH.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
+        send_watchdog(os.environ.get("NTFY_ERROR_TOPIC"), body)
+    except (NotificationDeliveryError, NotificationConfigError) as exc:
+        category = exc.category if isinstance(exc, NotificationDeliveryError) else "configuration_error"
+        logging.warning("Watchdog ntfy delivery failed safely: category=%s status=%s", category, getattr(exc, "status_code", None))
+        return state, changed, "alert_failed"
+    state["last_alert_at"] = now.isoformat(timespec="seconds")
+    state["last_alert_outage_id"] = ident
+    state["last_success_at"] = success.get("updated_at") if success else None
+    state["latest_failed_conclusion"] = latest.get("conclusion") if latest else None
+    state["latest_failed_run_url"] = run_url(latest)
+    state["resolved_at"] = None
+    return state, True, "alert_sent"
 
 def main() -> None:
-    """Run the watchdog check."""
-    now = utc_now()
-    stale_hours = parse_hours(os.environ.get("WATCHDOG_STALE_HOURS"), DEFAULT_STALE_HOURS)
-    throttle_hours = parse_hours(
-        os.environ.get("WATCHDOG_ALERT_THROTTLE_HOURS"),
-        DEFAULT_ALERT_THROTTLE_HOURS,
-    )
-
-    reason, last_completed_at = get_alert_reason(now, stale_hours)
-    if reason is None:
-        return
-
-    state = load_watchdog_state()
-    if is_throttled(state, now, throttle_hours):
-        logging.info(
-            "Watchdog alert suppressed because a previous alert was sent within %.0f hours.",
-            throttle_hours,
-        )
-        return
-
-    body = build_alert_body(reason, last_completed_at)
-    if send_watchdog_alert(body):
-        write_watchdog_state(now, reason)
-
+    configure_logging()
+    result = {"changed": False, "status": "ok"}
+    try:
+        runs = fetch_monitor_runs()
+        state = load_json_object(WATCHDOG_STATE_PATH)
+        new_state, changed, status = evaluate(runs, state)
+        result = {"changed": changed, "status": status}
+        if changed:
+            save_watchdog_state(new_state, WATCHDOG_STATE_PATH)
+    except Exception as exc:
+        result = {"changed": False, "status": "failed", "error_type": type(exc).__name__}
+        logging.error("Watchdog failed safely: category=%s type=%s", safe_exception_category(exc), type(exc).__name__)
+        raise
+    finally:
+        WATCHDOG_RESULT_PATH.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
 
 if __name__ == "__main__":
     main()

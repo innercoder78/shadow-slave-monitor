@@ -1,9 +1,0 @@
-{
-  "last_workflow_completed_at": "2026-06-10T01:45:22.083935+00:00",
-  "last_status": "success",
-  "workflow": "monitor",
-  "github_run_id": "27247535174",
-  "github_run_attempt": "1",
-  "github_sha": "eb60f3adf0e17f1d4392f398a93ac6795a728759",
-  "updated_at": "2026-06-10T01:45:22.083935+00:00"
-}

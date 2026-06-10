@@ -2,52 +2,90 @@ name: Shadow Slave monitor watchdog
 
 on:
   schedule:
-    - cron: "37 */4 * * *"
+    - cron: "17 0-21/3 * * *"
+    - cron: "47 1-22/3 * * *"
   workflow_dispatch:
-
-permissions:
-  contents: write
-
-concurrency:
-  group: shadow-slave-monitor-watchdog
-  cancel-in-progress: false
 
 jobs:
   watchdog:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        # actions/checkout v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        # actions/setup-python v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        run: python -m pip install --require-hashes -r requirements.lock
 
       - name: Run watchdog
         env:
           NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: python watchdog.py
 
-      - name: Commit watchdog state changes
+      - name: Upload watchdog state artifact
+        if: always()
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: watchdog-state
+          path: |
+            watchdog_state.json
+            watchdog_result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  state-writer:
+    needs: watchdog
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: shadow-slave-state-writer
+      cancel-in-progress: false
+    steps:
+      - name: Check out repository
+        # actions/checkout v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: main
+
+      - name: Download watchdog state artifact
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: watchdog-state
+          path: .state-artifact
+
+      - name: Apply meaningful watchdog state if changed
         run: |
-          if git diff --quiet -- watchdog_state.json; then
-            echo "watchdog_state.json unchanged; nothing to commit."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add watchdog_state.json
-          git commit -m "Update watchdog state"
-          for attempt in 1 2 3; do
-            if git pull --rebase origin main && git push; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Failed to push watchdog_state.json after 3 attempts."
-          exit 1
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          result = json.loads(Path('.state-artifact/watchdog_result.json').read_text(encoding='utf-8'))
+          if not isinstance(result, dict):
+              raise SystemExit('watchdog_result.json must be an object')
+          if result.get('changed'):
+              data = json.loads(Path('.state-artifact/watchdog_state.json').read_text(encoding='utf-8'))
+              if not isinstance(data, dict):
+                  raise SystemExit('watchdog_state.json must be an object')
+              shutil.copyfile('.state-artifact/watchdog_state.json', 'watchdog_state.json')
+          PY
+          rm -rf .state-artifact
+
+      - name: Commit permitted watchdog state changes
+        run: python scripts/state_writer.py watchdog_state.json

@@ -1,5 +1,10 @@
 {
+  "current_outage_id": null,
+  "open_outage_id": null,
   "last_alert_at": null,
-  "last_alert_reason": null,
-  "updated_at": null
+  "last_alert_outage_id": null,
+  "last_success_at": null,
+  "latest_failed_conclusion": null,
+  "latest_failed_run_url": null,
+  "resolved_at": null
 }

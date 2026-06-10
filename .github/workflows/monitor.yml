@@ -3,53 +3,106 @@ name: Shadow Slave chapter monitor
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
-concurrency:
-  group: shadow-slave-chapter-monitor
-  cancel-in-progress: false
-
 jobs:
   monitor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      result: ${{ steps.result.outputs.result }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        # actions/checkout v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        # actions/setup-python v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
-          python-version: "3.x"
+          python-version: "3.12"
 
       - name: Install dependencies
-        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+        run: python -m pip install --require-hashes -r requirements.lock
 
       - name: Run monitor
+        id: run_monitor
+        continue-on-error: true
         env:
           NTFY_NEWCHAPTER: ${{ secrets.NTFY_NEWCHAPTER }}
-          NTFY_ERROR_TOPIC: ${{ secrets.NTFY_ERROR_TOPIC }}
         run: python monitor.py
 
-      - name: Update heartbeat
-        run: python heartbeat.py
-
-      - name: Commit state changes
+      - name: Capture monitor result
+        id: result
+        if: always()
         run: |
-          if git diff --quiet -- state.json heartbeat.json; then
-            echo "state.json and heartbeat.json unchanged; nothing to commit."
-            exit 0
+          if [ -f run_result.json ]; then
+            result=$(python -c 'import json; print(json.load(open("run_result.json", encoding="utf-8")).get("result", "failed"))')
+          else
+            result=failed
+            printf '{"result":"failed","reasons":["monitor did not produce run_result.json"]}\n' > run_result.json
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state.json heartbeat.json
-          git commit -m "Update monitor state"
-          for attempt in 1 2 3; do
-            if git pull --rebase origin main && git push; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Failed to push state.json and heartbeat.json after 3 attempts."
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated state artifact
+        if: always()
+        # actions/upload-artifact v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: monitor-state
+          path: |
+            state.json
+            run_result.json
+          if-no-files-found: error
+          retention-days: 1
+
+  state-writer:
+    needs: monitor
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: shadow-slave-state-writer
+      cancel-in-progress: false
+    steps:
+      - name: Check out repository
+        # actions/checkout v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+        with:
+          ref: main
+
+      - name: Download monitor state artifact
+        # actions/download-artifact v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: monitor-state
+          path: .state-artifact
+
+      - name: Validate and copy expected state
+        run: |
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          src = Path('.state-artifact/state.json')
+          data = json.loads(src.read_text(encoding='utf-8'))
+          if not isinstance(data, dict):
+              raise SystemExit('state.json artifact must be a JSON object')
+          shutil.copyfile(src, 'state.json')
+          result = json.loads(Path('.state-artifact/run_result.json').read_text(encoding='utf-8'))
+          if not isinstance(result, dict):
+              raise SystemExit('run_result.json artifact must be a JSON object')
+          PY
+          rm -rf .state-artifact
+
+      - name: Commit permitted state changes
+        run: python scripts/state_writer.py state.json
+
+      - name: Propagate monitor failure result
+        if: needs.monitor.outputs.result == 'failed'
+        run: |
+          echo "Monitor recorded a failed health result."
           exit 1
