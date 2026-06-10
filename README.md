@@ -1,35 +1,56 @@
 # SHADOW SLAVE NEW CHAPTER MONITOR
 
-A small automated monitor that checks for new chapters for the web novel called *Shadow Slave* and sends a notification on your phone when a new chapter becomes available.
-I find it much better than spamming F5 on various websites whenever new chapters come out.
+A small automated monitor that checks for new chapters of the web novel *Shadow Slave* and sends a notification to your phone when they become available.
+
+I find it much better than repeatedly refreshing several websites whenever new chapters are expected.
 
 ## HOW DOES IT WORK?
 
-The workflow runs on GitHub Actions. It the primary website shows a new chapter, the monitor stops looking at it and switches to checking other websites until that chapter(s) becomes available. Once the new chapter is found on the free websites, it goes back to looking for new chapters on the main website.
+The main workflow is triggered every five minutes through cron-job.org.
 
-When a new chapter is found, the monitor sends a notification through the ntfy app.
+While waiting for a new chapter, the monitor checks WebNovel approximately every 20 minutes. When WebNovel confirms a new chapter, the monitor begins checking public sources until that exact chapter becomes available.
 
-## APP NEEDED ON YOUR PHONE & SET UP
+Once the chapter is found, the monitor sends a notification through ntfy and returns to watching WebNovel.
 
-If you use Android:
-https://play.google.com/store/apps/details?id=io.heckel.ntfy
+If an ntfy notification fails, it is saved and retried later. The monitor continues checking for newer chapters in the meantime and can combine several pending chapters into one notification.
 
-If you use iOS:
-https://apps.apple.com/us/app/ntfy/id1625396347
+A separate watchdog runs through GitHub Actions approximately every 90 minutes. It sends an error notification only if the main monitor has not completed successfully for at least five hours.
 
-THE APP IS COMPLETELY FREE! NO SIGN UP INVOLVED!
+## PHONE APP
 
-If you know the topic, you can subscribe to it to receive notifications.
+The ntfy app is available for both Android and iOS:
+
+* [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)
+* [iOS](https://apps.apple.com/us/app/ntfy/id1625396347)
+
+The app is free and open source. Subscribe to the ntfy topic used by the repository to receive notifications.
 
 ## REPOSITORY WITH AN EXPIRATION DATE
 
-Once *Shadow Slave* finally comes to an end (and I’ve heard that this novel will conclude by the end of 2026 or early 2027), this repo will be abandoned, since there won’t be any reason to maintain it anymore, as no more chapters will be released. Moreover, the ability to check the chapters will expire Sunday, May 09, 2027 because that's the date when the token will expire (I will extend it if *Shadow Slave* isn't over by then, obviously).
+This is a temporary repository. Once *Shadow Slave* comes to an end, there will no longer be any new chapters to monitor, so the repository will be retired.
+
+The GitHub token used by my cron-job.org task expires on May 9, 2027. I will extend it if the novel is still ongoing at that time.
 
 ## IF YOU DECIDE TO FORK
 
-Things to keep in mind if you decide to fork this repo:
+Keep the following in mind if you fork this repository:
 
-1) Go to the repository's "Settings," then go to "Secrets and variables," and then add a "New repository secret" and for the "Name" have it set as "NTFY_NEWCHAPTER" and in the "Secret" box set the name of the ntfy topic (you can make up any name in ntfy app, but it must match that name and it obviously can't be the same name as someone else's, so make it unique).
-2) Same process but add "NTFY_ERROR_TOPIC" with the ntfy topic that is NOT THE SAME as the NTFY_NEWCHAPTER one! This one will be the one you'll get error messages (403, website layout change, etc.).
-3) Go to the repository's Actions, and then click on the name of the project, and then "Run workflow" with "Branch: main"; otherwise, you won't get notifications in the ntfy app.
-4) Set up an account on cron-job.org and use your GitHub token there and set everything up because the native GitHub Actions is horrible and, although they say it can run every 5 minutes, realistically only runs every 3-4 hours. To run every 5 minutes, you need an outside source telling it to run every 5 minutes, hence the need for the cron-job.org account.
+1. Go to **Settings → Secrets and variables → Actions** and create a repository secret named `NTFY_NEWCHAPTER`.
+
+   Set its value to a long, random ntfy topic name. Subscribe to the same topic in the ntfy app. Do not share this topic publicly.
+
+2. Create another repository secret named `NTFY_ERROR_TOPIC`.
+
+   Use a different long, random ntfy topic. This topic receives watchdog alerts when the monitor has not completed successfully for at least five hours.
+
+3. Open the repository’s **Actions** tab, select **Shadow Slave chapter monitor**, and run it manually once on the `main` branch.
+
+   The first run initializes the monitor without sending a new-chapter notification.
+
+4. Create one cron-job.org task that triggers the **Shadow Slave chapter monitor** workflow every five minutes.
+
+   GitHub’s native scheduler has not been reliable enough for frequent chapter checks, so an external trigger is used for the main monitor.
+
+5. Do not create a second cron-job.org task for the watchdog.
+
+   The **Shadow Slave monitor watchdog** workflow is scheduled through GitHub Actions.
