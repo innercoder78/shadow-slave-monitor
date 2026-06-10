@@ -6,11 +6,16 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
       time: "09:30"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 1
+    groups:
+      all-github-actions:
+        patterns:
+          - "*"
