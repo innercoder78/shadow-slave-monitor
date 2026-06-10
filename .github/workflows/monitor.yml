@@ -3,6 +3,11 @@ name: Shadow Slave chapter monitor
 on:
   workflow_dispatch:
 
+concurrency:
+  group: shadow-slave-monitor-workflow
+  cancel-in-progress: false
+  queue: max
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -59,7 +64,7 @@ jobs:
             result=$(python -c 'import json; print(json.load(open("run_result.json", encoding="utf-8")).get("result", "failed"))')
           else
             result=failed
-            printf '{"result":"failed","reasons":["monitor did not produce run_result.json"]}\n' > run_result.json
+            printf '{"result":"failed","reasons":["monitor did not produce run_result.json"],"degraded_reasons":[]}\n' > run_result.json
           fi
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
@@ -102,14 +107,14 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: monitor-state
-          path: .state-artifact
+          path: ${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Validate, version-check, and persist monitor state
-        run: python scripts/state_writer.py --artifact-dir .state-artifact state.json
+        run: python scripts/state_writer.py --artifact-dir "${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}" state.json
 
       - name: Remove downloaded monitor artifact
         if: always()
-        run: rm -rf .state-artifact
+        run: rm -rf -- "${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}"
 
       - name: Propagate monitor failure result
         if: needs.monitor.outputs.result == 'failed'
