@@ -8,13 +8,45 @@ from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
-from config import TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
+from config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
 from http_client import fetch_html
 from models import ChapterReport
 from state_manager import valid_chapter
 
 class ParseError(RuntimeError):
     pass
+
+def chapter_validity_category(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if not isinstance(value, int):
+        return "non_integer"
+    if value < MIN_CHAPTER:
+        return "below_minimum"
+    if value > MAX_CHAPTER:
+        return "above_maximum"
+    return None
+
+def valid_parsed_chapter(value: Any, source: str) -> int | None:
+    category = chapter_validity_category(value)
+    if category is not None:
+        logging.warning("Discarding invalid parsed chapter from %s: category=%s", source or "unknown", category)
+        return None
+    return value
+
+def filter_public_candidates(candidates: list[ChapterReport], source: str) -> list[ChapterReport]:
+    valid: list[ChapterReport] = []
+    for candidate in candidates:
+        chapter = valid_parsed_chapter(candidate.chapter, source)
+        if chapter is None:
+            continue
+        valid.append(candidate)
+    return valid
+
+def require_valid_webnovel_report(report: ChapterReport) -> ChapterReport:
+    if valid_parsed_chapter(report.chapter, "WebNovel") is None:
+        raise ParseError("WebNovel parsed chapter is outside the trusted range")
+    return report
 
 def clean_title(title: str | None) -> str | None:
     if not title:
@@ -577,7 +609,7 @@ def parse_webnovel_latest(html: str) -> ChapterReport:
         parsed = parse_chapter_text(nearby)
         if parsed:
             chapter, title = parsed
-            return ChapterReport("WebNovel", chapter, title, WEBNOVEL_CATALOG_URL, "webnovel_latest_release")
+            return require_valid_webnovel_report(ChapterReport("WebNovel", chapter, title, WEBNOVEL_CATALOG_URL, "webnovel_latest_release"))
 
     text = soup.get_text("\n")
     marker = re.search(r"Latest\s+Release\s*[:：]?", text, flags=re.IGNORECASE)
@@ -586,7 +618,7 @@ def parse_webnovel_latest(html: str) -> ChapterReport:
         parsed = parse_chapter_text(snippet)
         if parsed:
             chapter, title = parsed
-            return ChapterReport("WebNovel", chapter, title, WEBNOVEL_CATALOG_URL, "webnovel_latest_release")
+            return require_valid_webnovel_report(ChapterReport("WebNovel", chapter, title, WEBNOVEL_CATALOG_URL, "webnovel_latest_release"))
 
     raise ParseError("Could not find WebNovel Latest Release chapter in catalog page.")
 
@@ -654,7 +686,7 @@ def parse_latest_from_chapter_page(html: str, url: str) -> ChapterReport | None:
 def check_public_site(site: SourceConfig) -> ChapterReport:
     logging.info("Checking %s.", site.name)
     soup = BeautifulSoup(fetch_html(site), "html.parser")
-    candidates = iter_public_candidates(soup, site.url, site.name)
+    candidates = filter_public_candidates(iter_public_candidates(soup, site.url, site.name), site.name)
 
     if not candidates and site.name == "LightNovelUp":
         read_last = soup.find("a", string=re.compile(r"\bRead\s+Last\b", re.IGNORECASE))
@@ -662,7 +694,7 @@ def check_public_site(site: SourceConfig) -> ChapterReport:
             read_last_url = urljoin(site.url, read_last["href"])
             logging.info("Following LightNovelUp Read Last link: %s", read_last_url)
             read_last_report = parse_latest_from_chapter_page(fetch_html(site, read_last_url), read_last_url)
-            if read_last_report:
+            if read_last_report and valid_parsed_chapter(read_last_report.chapter, site.name) is not None:
                 candidates.append(read_last_report)
 
     if not candidates:
