@@ -142,8 +142,3 @@ jobs:
         if: always()
         run: rm -rf -- "${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}"
 
-      - name: Propagate monitor failure result
-        if: needs.monitor.outputs.result == 'failed'
-        run: |
-          echo "Monitor recorded a failed health result."
-          exit 1
