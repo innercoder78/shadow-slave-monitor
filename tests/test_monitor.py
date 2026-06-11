@@ -56,10 +56,37 @@ def run_main_with_state(state: dict, *, first: bool = False, allow_system_exit: 
 
 
 class WebNovelCadenceTests(unittest.TestCase):
+    def test_every_five_minute_cadence_hits_each_twenty_minute_cycle(self) -> None:
+        for seconds in (0, 30):
+            for start_minute in range(20):
+                hits_by_cycle = []
+                for cycle in range(3):
+                    cycle_hits = []
+                    for offset in range(0, 20, 5):
+                        minute = cycle * 20 + start_minute + offset
+                        now = datetime(2026, 6, 11, 12 + (minute // 60), minute % 60, seconds, tzinfo=timezone.utc)
+                        with patch.object(monitor, "utc_now", return_value=now):
+                            cycle_hits.append(monitor.webnovel_check_window_open())
+                    hits_by_cycle.append(any(cycle_hits))
+                self.assertTrue(
+                    all(hits_by_cycle),
+                    f"5-minute cadence starting at :{start_minute:02d}:{seconds:02d} missed a 20-minute WebNovel window",
+                )
+
+    def test_edge_cadences_hit_window_after_boundary_delay(self) -> None:
+        for minute in (4, 9, 14, 19):
+            hits = []
+            for offset in range(0, 20, 5):
+                current_minute = minute + offset
+                now = datetime(2026, 6, 11, 12 + (current_minute // 60), current_minute % 60, 30, tzinfo=timezone.utc)
+                with patch.object(monitor, "utc_now", return_value=now):
+                    hits.append(monitor.webnovel_check_window_open())
+            self.assertTrue(any(hits), f"edge cadence :{minute:02d}:30 missed the WebNovel window")
+
     def test_watch_webnovel_outside_window_is_noop(self) -> None:
         state = base_state()
         original = copy.deepcopy(state)
-        outside_window = datetime(2026, 6, 11, 12, 5, tzinfo=timezone.utc)
+        outside_window = datetime(2026, 6, 11, 12, 12, tzinfo=timezone.utc)
 
         with patch.dict("os.environ", {"SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK": "false"}, clear=False), \
              patch.object(monitor, "utc_now", return_value=outside_window), \
@@ -103,7 +130,7 @@ class WebNovelCadenceTests(unittest.TestCase):
 
     def test_force_env_allows_manual_webnovel_check_outside_window(self) -> None:
         state = base_state()
-        outside_window = datetime(2026, 6, 11, 12, 5, tzinfo=timezone.utc)
+        outside_window = datetime(2026, 6, 11, 12, 12, tzinfo=timezone.utc)
         report = ChapterReport("WebNovel", 10, "Chapter Ten", "https://webnovel.example/10", "catalog")
 
         with patch.dict("os.environ", {"SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK": "true"}, clear=False), \
@@ -191,7 +218,7 @@ class PendingNotificationTests(unittest.TestCase):
             "last_error_category": "http_error",
             "last_http_status": 503,
         }
-        now = datetime(2026, 6, 11, 12, 5, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 11, 12, 12, tzinfo=timezone.utc)
 
         with patch.object(monitor, "pending_due", return_value=True), \
              patch.object(monitor, "send_new_chapter", side_effect=NotificationDeliveryError("http_error", 503)), \
@@ -220,6 +247,34 @@ class StateMigrationTests(unittest.TestCase):
 
         self.assertNotIn("last_webnovel_check", persisted)
         self.assertNotIn("webnovel_skip_count", persisted)
+
+    def test_current_main_state_with_legacy_timing_fields_is_migrated_safely(self) -> None:
+        state = {
+            "latest_seen": 3036,
+            "latest_title": "A Feast in Time of Plague",
+            "latest_url": "https://telegra.ph/3036-A-Feast-in-Time-of-Plague-06-11",
+            "latest_webnovel": 3036,
+            "latest_webnovel_title": "A Feast in Time of Plague",
+            "mode": "watch_webnovel",
+            "target_chapter": None,
+            "target_title": None,
+            "target_url": None,
+            "last_webnovel_check": "2026-06-11T23:10:21+00:00",
+            "webnovel_skip_count": 1,
+            "pending_notification": None,
+            "updated_at": "2026-06-11T23:15:15+00:00",
+        }
+
+        clean = validate_state(state)
+
+        self.assertEqual(clean["latest_seen"], 3036)
+        self.assertEqual(clean["latest_title"], "A Feast in Time of Plague")
+        self.assertEqual(clean["latest_url"], "https://telegra.ph/3036-A-Feast-in-Time-of-Plague-06-11")
+        self.assertEqual(clean["latest_webnovel"], 3036)
+        self.assertEqual(clean["latest_webnovel_title"], "A Feast in Time of Plague")
+        self.assertEqual(clean["mode"], "watch_webnovel")
+        self.assertNotIn("last_webnovel_check", clean)
+        self.assertNotIn("webnovel_skip_count", clean)
 
     def test_unknown_invalid_state_fields_are_still_rejected(self) -> None:
         state = base_state()
