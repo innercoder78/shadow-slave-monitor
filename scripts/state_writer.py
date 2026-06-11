@@ -318,14 +318,19 @@ def changed_entries() -> list[tuple[str, str]]:
     return entries
 
 
-def assert_only_permitted_state_changed(state_file: str, *, allow_clean: bool = False) -> None:
+def permitted_state_change_entries(state_file: str) -> list[tuple[str, str]]:
     entries = changed_entries()
-    if allow_clean and not entries:
-        return
     invalid = [(status, path) for status, path in entries if path != state_file or status not in {" M", "M ", "MM"}]
     if invalid:
         formatted = [f"{status} {path}" for status, path in invalid]
         raise SystemExit(f"unexpected changed, deleted, renamed, or untracked paths: {formatted}")
+    return entries
+
+
+def assert_only_permitted_state_changed(state_file: str, *, allow_clean: bool = False) -> None:
+    entries = permitted_state_change_entries(state_file)
+    if allow_clean and not entries:
+        return
     if not allow_clean and not entries:
         raise SystemExit(f"expected {state_file} to be the only changed path, but the worktree is clean")
 
@@ -362,11 +367,17 @@ def classify_artifact(state_file: str, current_path: Path, current_state: dict[s
     return "conflicting"
 
 
-def apply_state_artifact(state_file: str, artifact_state_path: Path, artifact_state: dict[str, Any]) -> None:
+def apply_state_artifact(state_file: str, artifact_state_path: Path, artifact_state: dict[str, Any]) -> bool:
     destination = Path(state_file)
+    if sha256_file(destination) == sha256_file(artifact_state_path):
+        print("Permitted state file unchanged.")
+        return False
     atomic_write_json(destination, artifact_state)
     validate_state_file(destination, state_file)
-    assert_only_permitted_state_changed(state_file)
+    if not permitted_state_change_entries(state_file):
+        print("Permitted state file unchanged.")
+        return False
+    return True
 
 
 def configure_git_identity() -> None:
@@ -399,7 +410,8 @@ def persist_with_retries(artifact_dir: Path, state_file: str) -> None:
             return
         if classification == "conflicting":
             raise SystemExit(f"stale {state_file} artifact conflicts with current repository state; refusing overwrite")
-        apply_state_artifact(state_file, artifact_state_path, artifact_state)
+        if not apply_state_artifact(state_file, artifact_state_path, artifact_state):
+            return
         if not commit_state_file(state_file):
             return
         assert_only_permitted_state_changed(state_file, allow_clean=True)
