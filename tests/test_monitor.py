@@ -260,10 +260,10 @@ class StateMigrationTests(unittest.TestCase):
             "target_chapter": None,
             "target_title": None,
             "target_url": None,
-            "last_webnovel_check": "2026-06-11T23:10:21+00:00",
-            "webnovel_skip_count": 1,
+            "last_webnovel_check": "2026-06-11T23:30:26+00:00",
+            "webnovel_skip_count": 2,
             "pending_notification": None,
-            "updated_at": "2026-06-11T23:15:15+00:00",
+            "updated_at": "2026-06-11T23:40:16+00:00",
         }
 
         clean = validate_state(state)
