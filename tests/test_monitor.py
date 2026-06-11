@@ -221,6 +221,7 @@ class PendingNotificationTests(unittest.TestCase):
         now = datetime(2026, 6, 11, 12, 12, tzinfo=timezone.utc)
 
         with patch.object(monitor, "pending_due", return_value=True), \
+             patch.object(monitor, "webnovel_due", return_value=False), \
              patch.object(monitor, "send_new_chapter", side_effect=NotificationDeliveryError("http_error", 503)), \
              patch("shadow_slave_monitor.notifications.utc_now", return_value=now):
             saved = run_main_with_state(state, allow_system_exit=True)
