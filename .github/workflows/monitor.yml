@@ -2,6 +2,12 @@ name: Shadow Slave chapter monitor
 
 on:
   workflow_dispatch:
+    inputs:
+      force_webnovel_check:
+        description: "Force a WebNovel check even outside the scheduled UTC check window"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: shadow-slave-monitor-workflow
@@ -75,6 +81,7 @@ jobs:
         env:
           NTFY_NEWCHAPTER: ${{ secrets.NTFY_NEWCHAPTER }}
           PYTHONPATH: ${{ github.workspace }}/src
+          SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK: ${{ inputs.force_webnovel_check && 'true' || 'false' }}
           SHADOW_SLAVE_MONITOR_RESULT_PATH: ${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}/run_result.json
         run: python -m shadow_slave_monitor.monitor
 
