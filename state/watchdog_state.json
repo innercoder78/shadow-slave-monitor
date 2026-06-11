@@ -1,8 +1,8 @@
 {
-  "current_outage_id": "27311637389",
+  "current_outage_id": "27314312305",
   "last_alert_at": "2026-06-10T17:13:22+00:00",
   "last_alert_outage_id": "27259565397",
-  "last_success_at": "2026-06-10T22:55:31Z",
+  "last_success_at": "2026-06-11T00:00:42Z",
   "latest_failed_conclusion": null,
   "latest_failed_run_url": null,
   "open_outage_id": null,
