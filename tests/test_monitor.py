@@ -250,6 +250,7 @@ class StateMigrationTests(unittest.TestCase):
         self.assertNotIn("webnovel_skip_count", persisted)
 
     def test_current_main_state_with_legacy_timing_fields_is_migrated_safely(self) -> None:
+        # Mirrors a timing-only main-branch state update: semantic fields must survive, legacy timing must not persist.
         state = {
             "latest_seen": 3036,
             "latest_title": "A Feast in Time of Plague",
