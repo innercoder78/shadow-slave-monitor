@@ -10,13 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_MAX_SKIPS_BEFORE_FORCE, WEBNOVEL_SKIP_TOLERANCE, WEBNOVEL_SOURCE
+from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
 from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
 from shadow_slave_monitor.parsers import ParseError, check_public_site, check_webnovel
 from shadow_slave_monitor.state_manager import StateError, load_state, parse_int, save_state
-from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime, utc_now
+from shadow_slave_monitor.timeutil import utc_now
 
 
 class PendingDeliveryOutcome(StrEnum):
@@ -98,15 +98,22 @@ def update_webnovel(state: dict[str, Any], report: ChapterReport, result: RunRes
     state["latest_webnovel_title"] = report.title
     return True
 
-def webnovel_due(state: dict[str, Any]) -> bool:
-    last = parse_iso_datetime(state.get("last_webnovel_check"))
-    if last is None:
-        return True
+def force_webnovel_check_enabled() -> bool:
+    return os.environ.get("SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK", "").strip().lower() in {"1", "true", "yes", "on"}
+
+def webnovel_check_window_open() -> bool:
+    """Return whether the current UTC time is in the deterministic WebNovel check window."""
     now = utc_now()
-    if last > now + WEBNOVEL_CHECK_INTERVAL:
-        logging.warning("last_webnovel_check is unexpectedly in the future; forcing WebNovel check.")
+    elapsed_since_hour = now.minute * 60 + now.second + (now.microsecond / 1_000_000)
+    interval_seconds = WEBNOVEL_CHECK_INTERVAL.total_seconds()
+    window_seconds = WEBNOVEL_CHECK_WINDOW.total_seconds()
+    return elapsed_since_hour % interval_seconds < window_seconds
+
+def webnovel_due() -> bool:
+    if force_webnovel_check_enabled():
+        logging.info("Forcing WebNovel check because SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK is enabled.")
         return True
-    return now - last >= (WEBNOVEL_CHECK_INTERVAL - WEBNOVEL_SKIP_TOLERANCE)
+    return webnovel_check_window_open()
 
 def required_webnovel_check(state: dict[str, Any], result: RunResult) -> ChapterReport | None:
     try:
@@ -115,8 +122,6 @@ def required_webnovel_check(state: dict[str, Any], result: RunResult) -> Chapter
         result.fail("WebNovel could not be requested or parsed while needed")
         logging.error("WebNovel check failed safely: category=%s type=%s", safe_exception_category(exc), type(exc).__name__)
         return None
-    state["last_webnovel_check"] = iso_now()
-    state["webnovel_skip_count"] = 0
     if not update_webnovel(state, report, result):
         return None
     return report
@@ -196,10 +201,8 @@ def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
     pending_outcome = try_deliver_pending(state, result)
     if pending_outcome == PendingDeliveryOutcome.DELIVERED:
         return
-    skip = parse_int(state.get("webnovel_skip_count")) or 0
-    if not webnovel_due(state) and skip < WEBNOVEL_MAX_SKIPS_BEFORE_FORCE:
-        state["webnovel_skip_count"] = skip + 1
-        logging.info("Skipping WebNovel check because fewer than 20 minutes have passed; skip count is %s/%s.", state["webnovel_skip_count"], WEBNOVEL_MAX_SKIPS_BEFORE_FORCE)
+    if not webnovel_due():
+        logging.info("Skipping WebNovel check because this run is outside the deterministic 20-minute UTC check window.")
         return
     official = required_webnovel_check(state, result)
     if official is None:

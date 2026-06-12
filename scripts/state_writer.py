@@ -234,14 +234,6 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
                 return False
         else:
             return False
-    if not timestamp_not_older(current.get("last_webnovel_check"), artifact.get("last_webnovel_check")):
-        return False
-    cur_check = timestamp_value(current.get("last_webnovel_check"))
-    art_check = timestamp_value(artifact.get("last_webnovel_check"))
-    cur_skip = current.get("webnovel_skip_count") or 0
-    art_skip = artifact.get("webnovel_skip_count") or 0
-    if cur_check == art_check and cur_skip < art_skip:
-        return False
     if max_known_chapter(current) < max_known_chapter(artifact):
         return False
     return True

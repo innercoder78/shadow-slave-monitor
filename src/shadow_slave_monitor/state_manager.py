@@ -13,6 +13,21 @@ from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITES, 
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
+LEGACY_TIMING_FIELDS = {"last_webnovel_check", "webnovel_skip_count"}
+
+MONITOR_STATE_FIELDS = {
+    "latest_seen",
+    "latest_title",
+    "latest_url",
+    "latest_webnovel",
+    "latest_webnovel_title",
+    "mode",
+    "target_chapter",
+    "target_title",
+    "target_url",
+    "pending_notification",
+    "updated_at",
+}
 
 WATCHDOG_STATE_FIELDS = {
     "current_outage_id",
@@ -97,8 +112,6 @@ def initial_state() -> dict[str, Any]:
         "target_chapter": None,
         "target_title": None,
         "target_url": None,
-        "last_webnovel_check": None,
-        "webnovel_skip_count": 0,
         "pending_notification": None,
         "updated_at": None,
     }
@@ -164,14 +177,13 @@ def validate_pending(pending: Any, latest_seen: int | None) -> dict[str, Any] | 
 
 def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     validate_source_config()
-    unknown = set(data) - set(initial_state())
+    unknown = set(data) - MONITOR_STATE_FIELDS - LEGACY_TIMING_FIELDS
     if unknown:
         raise StateError(f"state.json contains unknown fields: {sorted(unknown)}")
     state = initial_state()
     for key in state:
         if key in data:
             state[key] = copy.deepcopy(data[key])
-    # ignore obsolete last_error_alerts by not persisting it
     latest_seen = valid_chapter(state.get("latest_seen"), allow_none=True)
     latest_webnovel = valid_chapter(state.get("latest_webnovel"), allow_none=True)
     target = valid_chapter(state.get("target_chapter"), allow_none=True)
@@ -186,16 +198,11 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
         raise StateError("target_chapter cannot be greater than latest_webnovel")
     for key in ("latest_title", "latest_url", "latest_webnovel_title", "target_title", "target_url"):
         state[key] = _optional_str(state.get(key), key)
-    for key in ("last_webnovel_check", "updated_at"):
-        if state.get(key) is not None and parse_iso_datetime(state.get(key)) is None:
-            raise StateError(f"{key} must be a valid timestamp or null")
-    skip = parse_int(state.get("webnovel_skip_count"))
-    if skip is None or skip < 0 or skip > 1000:
-        raise StateError("webnovel_skip_count must be a reasonable non-negative integer")
+    if state.get("updated_at") is not None and parse_iso_datetime(state.get("updated_at")) is None:
+        raise StateError("updated_at must be a valid timestamp or null")
     state["latest_seen"] = latest_seen
     state["latest_webnovel"] = latest_webnovel
     state["target_chapter"] = target
-    state["webnovel_skip_count"] = skip
     state["pending_notification"] = validate_pending(state.get("pending_notification"), latest_seen)
     return state
 
