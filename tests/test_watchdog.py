@@ -9,6 +9,34 @@ from shadow_slave_monitor import watchdog
 
 
 class WatchdogEvaluateTests(unittest.TestCase):
+    def test_fresh_success_without_open_outage_or_failure_context_is_noop(self) -> None:
+        now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+        success = {
+            "id": 12345,
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": "2026-06-10T11:49:30Z",
+            "updated_at": "2026-06-10T11:50:00Z",
+            "html_url": "https://github.com/innercoder78/shadow-slave-monitor/actions/runs/12345",
+        }
+        state = {
+            "current_outage_id": "old-success",
+            "open_outage_id": None,
+            "last_alert_at": None,
+            "last_alert_outage_id": None,
+            "last_success_at": "2026-06-10T10:50:00Z",
+            "latest_failed_conclusion": None,
+            "latest_failed_run_url": None,
+            "resolved_at": "2026-06-10T11:00:00+00:00",
+        }
+
+        with patch.object(watchdog, "utc_now", return_value=now):
+            new_state, changed, status = watchdog.evaluate([success], state.copy())
+
+        self.assertFalse(changed)
+        self.assertEqual(status, "fresh")
+        self.assertEqual(new_state, state)
+
     def test_fresh_success_clears_stale_failure_context_and_resolves_open_outage(self) -> None:
         now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
         success = {
@@ -145,6 +173,35 @@ class WatchdogEvaluateTests(unittest.TestCase):
         self.assertEqual(status, "alert_sent")
         send.assert_called_once()
         self.assertEqual(new_state["latest_failed_conclusion"], "success")
+
+    def test_stale_monitor_alert_throttling_avoids_repeated_alert_for_unresolved_outage(self) -> None:
+        now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+        success = {
+            "id": 12345,
+            "status": "completed",
+            "conclusion": "success",
+            "created_at": "2026-06-10T05:49:30Z",
+            "updated_at": "2026-06-10T05:50:00Z",
+            "html_url": "https://github.com/innercoder78/shadow-slave-monitor/actions/runs/12345",
+        }
+        state = {
+            "current_outage_id": "12345",
+            "open_outage_id": "12345",
+            "last_alert_at": "2026-06-10T11:00:00+00:00",
+            "last_alert_outage_id": "12345",
+            "last_success_at": "2026-06-10T05:50:00Z",
+            "latest_failed_conclusion": "failure",
+            "latest_failed_run_url": "https://github.com/innercoder78/shadow-slave-monitor/actions/runs/12346",
+            "resolved_at": None,
+        }
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate([success], state.copy())
+
+        self.assertFalse(changed)
+        self.assertEqual(status, "throttled")
+        send.assert_not_called()
+        self.assertEqual(new_state, state)
 
 
 class WatchdogBuildBodyTests(unittest.TestCase):

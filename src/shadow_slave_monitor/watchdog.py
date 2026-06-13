@@ -253,24 +253,22 @@ def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[st
     last_success_time = run_timestamp(success) if success else parse_iso_datetime(last_success_at)
     ident = outage_identity(success, last_success_at)
     previous = state.get("current_outage_id")
-    if previous and previous != ident and not state.get("resolved_at"):
-        state["resolved_at"] = now.isoformat(timespec="seconds")
-        changed = True
-    state["current_outage_id"] = ident
     stale = last_success_time is None or now - last_success_time >= timedelta(hours=WATCHDOG_STALE_HOURS)
     if active and stale:
         logging.info("Recent monitor run is active; suppressing stale alert within grace period.")
         return state, changed, "suppressed_active_run"
     if not stale:
-        recovery_updates = {
-            "last_success_at": last_success_at,
-            "latest_failed_conclusion": None,
-            "latest_failed_run_url": None,
-        }
-        for key, value in recovery_updates.items():
-            if state.get(key) != value:
-                state[key] = value
-                changed = True
+        if state.get("open_outage_id") or state.get("latest_failed_conclusion") is not None or state.get("latest_failed_run_url") is not None:
+            recovery_updates = {
+                "current_outage_id": ident,
+                "last_success_at": last_success_at,
+                "latest_failed_conclusion": None,
+                "latest_failed_run_url": None,
+            }
+            for key, value in recovery_updates.items():
+                if state.get(key) != value:
+                    state[key] = value
+                    changed = True
         if state.get("open_outage_id"):
             state["open_outage_id"] = None
             state["resolved_at"] = now.isoformat(timespec="seconds")
@@ -278,6 +276,7 @@ def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[st
         logging.info("Latest successful monitor workflow is fresh.")
         return state, changed, "fresh"
     state["open_outage_id"] = ident
+    state["current_outage_id"] = ident
     if previous != ident:
         changed = True
     last_alert_at = parse_iso_datetime(state.get("last_alert_at"))
