@@ -39,51 +39,71 @@ def retry_after_seconds(value: str | None) -> int | None:
     delay = int((dt.timestamp() - utc_now().timestamp()))
     return max(0, min(delay, PENDING_RETRY_MAX_DELAY_SECONDS))
 
-def format_chapter_list(chapters: list[int]) -> str:
-    chapter_text = [str(chapter) for chapter in chapters]
-    if len(chapter_text) == 1:
-        return chapter_text[0]
-    if len(chapter_text) == 2:
-        return f"{chapter_text[0]} and {chapter_text[1]}"
-    return f"{', '.join(chapter_text[:-1])}, and {chapter_text[-1]}"
+NEW_CHAPTER_NOTIFICATION_TITLE = "Shadow Slave Chapter Monitor"
 
-def new_chapter_numbers(previous_seen: int | None, latest_chapter: int) -> list[int]:
-    if previous_seen is None or latest_chapter <= previous_seen:
-        return [latest_chapter]
-    if latest_chapter - previous_seen > 250:
-        return [previous_seen + 1, latest_chapter]
-    return list(range(previous_seen + 1, latest_chapter + 1))
 
-def notification_title(chapter_count: int) -> str:
-    return "New Shadow Slave chapter available" if chapter_count == 1 else "New Shadow Slave chapters available"
+def new_chapter_count(previous_seen: int | None, latest_chapter: int) -> int:
+    """Return the actual chapter gap, with one as the safe fallback."""
+    if previous_seen is not None and previous_seen < latest_chapter:
+        return latest_chapter - previous_seen
+    return 1
 
-def source_general_url(source: str, fallback_url: str = "") -> str:
-    first_source = source.split(",", maxsplit=1)[0].strip()
-    for site in PUBLIC_SITES:
-        if site.name == first_source:
-            return site.url
-    return fallback_url
+
+def source_names(source: str) -> list[str]:
+    """Normalize aggregated sources into configured order without losing unknowns."""
+    supplied = [name.strip() for name in source.split(",") if name.strip()]
+    unique = list(dict.fromkeys(supplied))
+    configured = {site.name: index for index, site in enumerate(PUBLIC_SITES)}
+    known = sorted((name for name in unique if name in configured), key=configured.__getitem__)
+    return [*known, *(name for name in unique if name not in configured)]
+
+
+def source_lines(source: str, fallback_url: str = "", *, include_urls: bool = True) -> list[str]:
+    names = source_names(source)
+    configured_urls = {site.name: site.url for site in PUBLIC_SITES}
+    lines = []
+    for name in names:
+        url = configured_urls.get(name)
+        if url is None and len(names) == 1:
+            url = fallback_url or None
+        lines.append(f"{name} [{url}]" if include_urls and url else name)
+    return lines
+
+
+def _fits_ntfy_body(body: str) -> bool:
+    return len(body.encode("utf-8")) <= NTFY_BODY_MAX_BYTES
 
 def notification_body(previous_seen: int | None, latest: ChapterReport) -> str:
-    chapters = new_chapter_numbers(previous_seen, latest.chapter)
-    count = len(chapters)
-    latest_chapter_line = f"Latest Chapter: {latest.chapter}" + (f" — {latest.title}" if latest.title else "") + "."
-    general_source_url = source_general_url(latest.source, latest.url)
-    if count == 1:
-        availability_lines = ["There is 1 new chapter.", f"Chapter {latest.chapter} is now available."]
-    elif previous_seen is not None and latest.chapter - previous_seen > 250:
-        availability_lines = [f"There are {latest.chapter - previous_seen} new chapters.", f"Chapters {previous_seen + 1} through {latest.chapter} are now available."]
-    else:
-        availability_lines = [f"There are {count} new chapters.", f"Chapters {format_chapter_list(chapters)} are now available."]
-    body = "\n".join([*availability_lines, latest_chapter_line, f"Source: {latest.source} [{general_source_url}]"])
-    if len(body.encode("utf-8")) <= NTFY_BODY_MAX_BYTES:
+    count = new_chapter_count(previous_seen, latest.chapter)
+    availability = (
+        "There is 1 new chapter available on the free sites."
+        if count == 1 else f"There are {count} new chapters available on the free sites."
+    )
+    latest_line = f"Latest Chapter: {latest.chapter}" + (f" — {latest.title}" if latest.title else "")
+    names = source_names(latest.source)
+    heading = "SOURCE:" if len(names) == 1 else "SOURCES:"
+
+    def build(lines: list[str], chapter_line: str = latest_line) -> str:
+        return "\n".join([availability, chapter_line, "", heading, *lines])
+
+    body = build(source_lines(latest.source, latest.url))
+    if _fits_ntfy_body(body):
         return body
-    return "\n".join([
-        f"There are {max(1, latest.chapter - (previous_seen or latest.chapter - 1))} new chapters.",
-        f"Chapters {(previous_seen + 1) if previous_seen else latest.chapter} through {latest.chapter} are now available.",
-        latest_chapter_line,
-        f"Source: {latest.source} [{general_source_url}]",
-    ])
+
+    # URLs are the least important and largest optional part of an overlong body.
+    body = build(source_lines(latest.source, latest.url, include_urls=False))
+    if _fits_ntfy_body(body):
+        return body
+
+    # Keep the chapter number and as many complete source names as possible.  Never
+    # truncate a URL or split a Unicode character while applying this rare fallback.
+    kept: list[str] = []
+    for name in names:
+        candidate = build([*kept, name], f"Latest Chapter: {latest.chapter}")
+        if not _fits_ntfy_body(candidate):
+            break
+        kept.append(name)
+    return build(kept, f"Latest Chapter: {latest.chapter}")
 
 def _post_ntfy(topic: str, title: str, body: str) -> None:
     url = f"{NTFY_BASE_URL}/{topic}"
@@ -100,8 +120,7 @@ def _post_ntfy(topic: str, title: str, body: str) -> None:
 def send_new_chapter(topic: str | None, previous_seen: int | None, latest: ChapterReport) -> None:
     if not topic:
         raise NotificationConfigError("NTFY_NEWCHAPTER is missing")
-    chapters = new_chapter_numbers(previous_seen, latest.chapter)
-    _post_ntfy(topic, notification_title(len(chapters)), notification_body(previous_seen, latest))
+    _post_ntfy(topic, NEW_CHAPTER_NOTIFICATION_TITLE, notification_body(previous_seen, latest))
     logging.info("Sent ntfy notification for chapter %s.", latest.chapter)
 
 def send_watchdog(topic: str | None, body: str) -> None:
@@ -127,7 +146,7 @@ def pending_from_report(previous_seen: int | None, latest: ChapterReport, err: N
         "first_pending_chapter": (previous_seen + 1) if previous_seen is not None else latest.chapter,
         "latest_pending_chapter": latest.chapter,
         "title": latest.title,
-        "sources": [s.strip() for s in latest.source.split(",") if s.strip()],
+        "sources": source_names(latest.source),
         "url": latest.url,
         "created_at": now_s,
         "first_failure_at": now_s,
@@ -141,7 +160,7 @@ def pending_from_report(previous_seen: int | None, latest: ChapterReport, err: N
 def report_from_pending(pending: dict[str, Any]) -> tuple[int | None, ChapterReport]:
     previous_seen = parse_int(pending.get("previous_seen")) if pending.get("previous_seen") is not None else None
     sources = pending.get("sources") if isinstance(pending.get("sources"), list) else []
-    source = ", ".join(str(s).strip() for s in sources if str(s).strip())
+    source = ", ".join(source_names(",".join(str(s) for s in sources)))
     return previous_seen, ChapterReport(source, int(pending["latest_pending_chapter"]), pending.get("title"), pending.get("url", ""), "pending")
 
 def pending_due(pending: dict[str, Any]) -> bool:
@@ -164,9 +183,9 @@ def merge_pending(pending: dict[str, Any] | None, previous_seen: int | None, lat
         pending["latest_pending_chapter"] = latest.chapter
         pending["title"] = latest.title
         pending["url"] = latest.url
-    existing = [str(s) for s in pending.get("sources", [])]
-    for source in [s.strip() for s in latest.source.split(",") if s.strip()]:
-        if source not in existing:
-            existing.append(source)
-    pending["sources"] = existing
+        pending["sources"] = source_names(latest.source)
+        return pending
+    if latest.chapter == int(pending["latest_pending_chapter"]):
+        existing = ",".join(str(s) for s in pending.get("sources", []))
+        pending["sources"] = source_names(f"{existing},{latest.source}")
     return pending
