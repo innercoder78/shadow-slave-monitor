@@ -24,6 +24,7 @@ The ntfy app is available for both Android and iOS:
 * [iOS](https://apps.apple.com/us/app/ntfy/id1625396347)
 
 The app is free and open source. Subscribe to the ntfy topic used by the repository to receive notifications.
+If you're a Shadow Slave fan and you want the ntfy topic I'm using to get notified when a new chapter comes out, message me. Otherwise, Fork this repo and set up your own ntfy topic.
 
 ## REPOSITORY WITH AN EXPIRATION DATE
 
