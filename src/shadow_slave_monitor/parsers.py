@@ -501,7 +501,9 @@ def parse_telegram_telegra_link(href: str) -> ChapterReport | None:
     if not match:
         return None
 
-    title_slug = re.sub(r"-\d{1,2}-\d{1,2}(?:-\d{2,4})?$", "", match.group(2))
+    month = r"(?:0?[1-9]|1[0-2])"
+    day = r"(?:0?[1-9]|[12]\d|3[01])"
+    title_slug = re.sub(rf"-{month}-{day}(?:-\d+)?$", "", match.group(2))
     title = clean_title(title_slug.replace("-", " "))
     if not title or is_non_chapter_title(title):
         return None
@@ -582,12 +584,18 @@ def parse_telegram_candidates(soup: BeautifulSoup, base_url: str) -> list[Chapte
             if report:
                 telegra_reports.append(report)
 
+        doc_candidates = telegram_doc_candidates_from_node(node, base_url)
+        doc_by_chapter = {report.chapter: report for report in doc_candidates}
         telegra_by_chapter = {report.chapter: report for report in telegra_reports}
         for report in telegra_reports:
+            doc_candidate = doc_by_chapter.get(report.chapter)
+            if doc_candidate:
+                report = ChapterReport("", report.chapter, doc_candidate.title, report.url)
             add(report)
 
-        for doc_candidate in telegram_doc_candidates_from_node(node, base_url):
-            add(telegra_by_chapter.get(doc_candidate.chapter, doc_candidate))
+        for doc_candidate in doc_candidates:
+            if doc_candidate.chapter not in telegra_by_chapter:
+                add(doc_candidate)
 
     if message_nodes and not candidates:
         for anchor in soup.find_all("a", href=True):
@@ -712,4 +720,3 @@ def check_public_site(site: SourceConfig) -> ChapterReport:
     else:
         logging.info("%s reports chapter %s: %s", report.source, report.chapter, report.title or "(no title)")
     return report
-
