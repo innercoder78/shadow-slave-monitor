@@ -14,7 +14,15 @@ TEMPORARY_STATUSES = {429, 500, 502, 503, 504}
 HTML_TYPES = {"text/html", "application/xhtml+xml", "application/xml", "text/xml"}
 
 class HttpFetchError(RuntimeError):
-    pass
+    def __init__(self, reason: str, *, host: str | None = None, attempts: int | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.host = host
+        self.attempts = attempts
+
+
+def _host(url: str) -> str | None:
+    return (urlparse(url).hostname or "").casefold() or None
 
 def _retry_after_seconds(value: str | None) -> float | None:
     if not value:
@@ -33,18 +41,18 @@ def _retry_after_seconds(value: str | None) -> float | None:
 
 def _check_https_and_host(url: str, source: SourceConfig) -> None:
     parsed = urlparse(url)
-    if parsed.scheme.lower() != "https":
-        raise HttpFetchError(f"{source.name} URL used non-HTTPS scheme")
     host = (parsed.hostname or "").casefold()
+    if parsed.scheme.lower() != "https":
+        raise HttpFetchError("non_https_url", host=host or None)
     if host not in {h.casefold() for h in source.allowed_hosts}:
-        raise HttpFetchError(f"{source.name} redirect target host is not allowed: {host or '(missing)'}")
+        raise HttpFetchError("redirect_host_not_allowed", host=host or None)
 
 def _next_url(response: requests.Response, source: SourceConfig) -> str | None:
     if not response.is_redirect:
         return None
     location = response.headers.get("Location")
     if not location:
-        raise HttpFetchError(f"{source.name} redirect response had no Location header")
+        raise HttpFetchError("missing_redirect_location", host=_host(response.url))
     new_url = urljoin(response.url, location)
     _check_https_and_host(new_url, source)
     return new_url
@@ -61,6 +69,24 @@ def safe_exception_category(exc: BaseException) -> str:
     if isinstance(exc, HttpFetchError):
         return "http_policy_error"
     return type(exc).__name__
+
+
+def safe_exception_details(exc: BaseException) -> str:
+    """Return controlled diagnostics without including arbitrary exception text."""
+    fields: list[str] = []
+    if isinstance(exc, HttpFetchError):
+        fields.append(f"reason={exc.reason}")
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        fields.append(f"status={exc.response.status_code}")
+    host = getattr(exc, "host", None)
+    if not host and isinstance(exc, requests.RequestException) and exc.request is not None:
+        host = _host(exc.request.url or "")
+    if host:
+        fields.append(f"host={host}")
+    attempts = getattr(exc, "attempts", None)
+    if attempts is not None:
+        fields.append(f"attempts={attempts}")
+    return " ".join(fields)
 
 def fetch_html(source: SourceConfig, url: str | None = None) -> str:
     target = url or source.url
@@ -85,7 +111,7 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                     response.close()
                     redirects += 1
                     if redirects > 5:
-                        raise HttpFetchError(f"{source.name} exceeded redirect limit")
+                        raise HttpFetchError("redirect_limit", host=_host(current), attempts=attempt)
                     current = nxt
                     continue
                 break
@@ -93,10 +119,15 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                 delay = _retry_after_seconds(response.headers.get("Retry-After")) or min(HTTP_BACKOFF_SECONDS * attempt, 20)
                 logging.info("Temporary HTTP status %s from %s; retrying after %.1fs.", response.status_code, source.name, delay)
                 response.close(); time.sleep(delay); continue
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as exc:
+                exc.host = _host(response.url)  # type: ignore[attr-defined]
+                exc.attempts = attempt  # type: ignore[attr-defined]
+                raise
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
             if content_type and content_type not in HTML_TYPES:
-                raise HttpFetchError(f"{source.name} returned unexpected content type {content_type}")
+                raise HttpFetchError("unexpected_content_type", host=_host(response.url), attempts=attempt)
             chunks: list[bytes] = []
             total = 0
             for chunk in response.iter_content(chunk_size=65536):
@@ -104,7 +135,7 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                     continue
                 total += len(chunk)
                 if total > MAX_HTML_BYTES:
-                    raise HttpFetchError(f"{source.name} response exceeded maximum HTML size")
+                    raise HttpFetchError("response_too_large", host=_host(response.url), attempts=attempt)
                 chunks.append(chunk)
             response.encoding = response.encoding or "utf-8"
             return b"".join(chunks).decode(response.encoding, errors="replace")
@@ -113,6 +144,12 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                 delay = min(HTTP_BACKOFF_SECONDS * attempt, 20)
                 logging.info("Temporary %s fetching %s; retrying after %.1fs.", safe_exception_category(exc), source.name, delay)
                 time.sleep(delay); continue
+            exc.host = _host(current)  # type: ignore[attr-defined]
+            exc.attempts = attempt  # type: ignore[attr-defined]
+            raise
+        except HttpFetchError as exc:
+            if exc.attempts is None:
+                exc.attempts = attempt
             raise
         finally:
             try:

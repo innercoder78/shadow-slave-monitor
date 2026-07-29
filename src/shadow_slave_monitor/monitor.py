@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
-from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category
+from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category, safe_exception_details
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
 from shadow_slave_monitor.parsers import ParseError, check_public_site, check_webnovel
@@ -74,7 +74,11 @@ def check_public_sites(result: RunResult) -> list[ChapterReport]:
             except Exception as exc:
                 category = safe_exception_category(exc)
                 failures.append(site.name)
-                logging.warning("%s check failed safely: category=%s type=%s", site.name, category, type(exc).__name__)
+                details = safe_exception_details(exc)
+                logging.warning(
+                    "%s check failed safely: category=%s type=%s%s",
+                    site.name, category, type(exc).__name__, f" {details}" if details else "",
+                )
     if failures and reports:
         result.degrade("optional public sources failed: " + ", ".join(sorted(failures)))
     if not reports:
