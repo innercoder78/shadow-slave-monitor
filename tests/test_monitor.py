@@ -8,7 +8,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import requests
+
 from shadow_slave_monitor import monitor
+from shadow_slave_monitor.config import SourceConfig
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.notifications import NotificationDeliveryError
 from shadow_slave_monitor.state_manager import StateError, save_state, validate_state
@@ -53,6 +56,42 @@ def run_main_with_state(state: dict, *, first: bool = False, allow_system_exit: 
         for p in reversed(patches):
             p.stop()
     return saved
+
+
+class PublicSourceFailureLoggingTests(unittest.TestCase):
+    def test_http_failure_logs_sanitized_diagnostics_and_degrades(self) -> None:
+        failed = SourceConfig("Failed", "https://example.com/private?token=secret", True, ("example.com",))
+        good = SourceConfig("Good", "https://good.example", True, ("good.example",))
+        response = requests.Response()
+        response.status_code = 403
+        response.url = failed.url
+        request = requests.Request("GET", failed.url, headers={"Authorization": "secret"}).prepare()
+        error = requests.HTTPError("response body cookie=secret", response=response, request=request)
+        error.host = "example.com"
+        error.attempts = 1
+        report = ChapterReport("Good", 10, None, "https://good.example/chapter-10")
+
+        def check(site):
+            if site.name == "Failed":
+                raise error
+            return report
+
+        result = monitor.RunResult()
+        with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check), self.assertLogs(level="WARNING") as logs:
+            reports = monitor.check_public_sites(result)
+        output = "\n".join(logs.output)
+        self.assertEqual(reports, [report])
+        self.assertIn("category=http_error type=HTTPError status=403 host=example.com attempts=1", output)
+        for unsafe in ("/private", "token", "response body", "cookie", "Authorization"):
+            self.assertNotIn(unsafe, output)
+        self.assertTrue(result.degraded_reasons)
+
+    def test_every_source_failure_still_fails_run(self) -> None:
+        source = SourceConfig("Failed", "https://example.com", True, ("example.com",))
+        result = monitor.RunResult()
+        with patch.object(monitor, "PUBLIC_SITES", (source,)), patch.object(monitor, "check_public_site", side_effect=RuntimeError("unsafe")):
+            self.assertEqual(monitor.check_public_sites(result), [])
+        self.assertTrue(result.reasons)
 
 
 class WebNovelCadenceTests(unittest.TestCase):

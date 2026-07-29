@@ -76,9 +76,9 @@ WEBNOVEL_SOURCE = SourceConfig(
 PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("Light Novel World", "https://lightnovelworld.org/novel/shadow-slave", True, ("lightnovelworld.org", "www.lightnovelworld.org")),
     SourceConfig("Telegram", "https://t.me/s/shadow_slave_fastes", True, ("t.me", "telegram.me", "www.t.me")),
-    SourceConfig("Novel Buddy", "https://novelbuddy.io/shadow-slave", True, ("novelbuddy.io", "www.novelbuddy.io")),
+    SourceConfig("Novel Buddy", "https://novelbuddy.me/shadow-slave", True, ("novelbuddy.me", "www.novelbuddy.me")),
     SourceConfig("NovelArrow", "https://novelarrow.com/novel/shadow-slave", True, ("novelarrow.com", "www.novelarrow.com")),
-    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False, ("novelfire.net", "www.novelfire.net")),
+    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net", "www.novelfire.net")),
     SourceConfig("NovelBin", "https://novelbin.com/b/shadow-slave", False, ("novelbin.com", "www.novelbin.com")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),

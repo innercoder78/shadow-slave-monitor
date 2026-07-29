@@ -69,6 +69,12 @@ class NewChapterNotificationTests(unittest.TestCase):
             body,
         )
 
+    def test_updated_sources_use_their_general_source_urls(self) -> None:
+        body = notification_body(3116, self.report("Novel Buddy, NovelFire", url="https://chapter.example"))
+        self.assertIn("Novel Buddy [https://novelbuddy.me/shadow-slave]", body)
+        self.assertIn("NovelFire [https://novelfire.net/book/shadow-slave]", body)
+        self.assertNotIn("chapter.example", body)
+
     def test_body_size_fallback_stays_within_utf8_limit(self) -> None:
         body = notification_body(1, self.report("Light Novel World, " + ("界" * 2000), "界" * 2000))
         self.assertLessEqual(len(body.encode("utf-8")), NTFY_BODY_MAX_BYTES)

@@ -51,7 +51,7 @@ def validate_source_config() -> None:
         "Telegram": True,
         "Novel Buddy": True,
         "NovelArrow": True,
-        "NovelFire": False,
+        "NovelFire": True,
         "NovelBin": False,
         "SSNovel": True,
         "NovelFull": True,

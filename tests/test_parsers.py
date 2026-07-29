@@ -10,6 +10,79 @@ from shadow_slave_monitor.parsers import ParseError, check_public_site, parse_te
 from shadow_slave_monitor.state_manager import validate_source_config
 
 
+class NovelBuddyParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "Novel Buddy")
+
+    def check(self, html: str):
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            return check_public_site(self.source)
+
+    def test_configuration_uses_only_me_domain(self) -> None:
+        self.assertEqual(self.source.url, "https://novelbuddy.me/shadow-slave")
+        self.assertEqual(self.source.allowed_hosts, ("novelbuddy.me", "www.novelbuddy.me"))
+        self.assertNotIn("novelbuddy.io", repr(PUBLIC_SITES))
+
+    def test_current_short_row_has_canonical_absolute_url_and_no_invented_title(self) -> None:
+        report = self.check('<a href="/shadow-slave/chapter-3110-gazing-into-the-abyss">Ch. 3110</a>')
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3110, None, "https://novelbuddy.me/shadow-slave/chapter-3110-gazing-into-the-abyss"))
+
+    def test_title_is_cleaned_without_losing_legitimate_number(self) -> None:
+        report = self.check('<a href="/shadow-slave/chapter-3110-gazing-into-the-abyss">Chapter 3110: Gazing 2 Into the Abyss 2 hours ago</a>')
+        self.assertEqual(report.title, "Gazing 2 Into the Abyss")
+
+    def test_untrustworthy_links_and_counts_are_rejected(self) -> None:
+        invalid = (
+            '<p>3110 Chapters</p><p>55 reviews</p><a href="/shadow-slave/chapter-3109-title">Ch. 3110</a>',
+            '<a href="/other/chapter-3110-title">Ch. 3110</a>',
+            '<a href="https://evil.example/shadow-slave/chapter-3110-title">Ch. 3110</a>',
+            '<a href="/shadow-slave/chapter-3110-title?token=secret">Ch. 3110</a>',
+            '<a href="/shadow-slave/chapter-3110-title#comments">Ch. 3110</a>',
+        )
+        for html in invalid:
+            with self.subTest(html=html), self.assertRaises(ParseError):
+                self.check(html)
+
+
+class NovelFireParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "NovelFire")
+
+    def check(self, html: str):
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            return check_public_site(self.source)
+
+    def test_enabled_configuration_and_main_latest_card(self) -> None:
+        validate_source_config()
+        self.assertTrue(self.source.enabled)
+        html = '<p>3122Chapters</p><a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>'
+        report = self.check(html)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3122, "Field of Dishonor", "https://novelfire.net/book/shadow-slave/chapters"))
+
+    def test_latest_release_individual_url_and_numeric_title(self) -> None:
+        report = self.check('<a href="/book/shadow-slave/chapter-3098">Latest Release: Chapter 3098 Catch 22 Updated 2 hours ago</a>')
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3098, "Catch 22", "https://novelfire.net/book/shadow-slave/chapter-3098"))
+
+    def test_count_unrelated_book_and_mismatch_are_rejected(self) -> None:
+        for html in ('<p>3122Chapters</p>',
+                     '<a href="/book/other/chapter-3122">Chapter 3122 Wrong</a>',
+                     '<a href="/book/shadow-slave/chapter-3121">Chapter 3122 Wrong</a>'):
+            with self.subTest(html=html), self.assertRaises(ParseError):
+                self.check(html)
+
+    def test_conflict_keeps_higher_self_consistent_main_candidate(self) -> None:
+        html = '''
+          <a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>
+          <a href="/book/shadow-slave/chapter-3098">Latest Release: Chapter 3098 Usurpation</a>
+        '''
+        with self.assertLogs(level="WARNING") as logs:
+            report = self.check(html)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3122, "Field of Dishonor", "https://novelfire.net/book/shadow-slave/chapters"))
+        self.assertIn("NovelFire pages disagreed: chapters=3098,3122", "\n".join(logs.output))
+
+
 class NovelArrowParserTests(unittest.TestCase):
     source = SourceConfig(
         "NovelArrow",
