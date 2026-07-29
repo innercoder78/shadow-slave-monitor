@@ -5,8 +5,98 @@ from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 
-from shadow_slave_monitor.config import SourceConfig
-from shadow_slave_monitor.parsers import check_public_site, parse_telegram_candidates, parse_telegram_telegra_link
+from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
+from shadow_slave_monitor.parsers import ParseError, check_public_site, parse_telegram_candidates, parse_telegram_telegra_link
+from shadow_slave_monitor.state_manager import validate_source_config
+
+
+class NovelArrowParserTests(unittest.TestCase):
+    source = SourceConfig(
+        "NovelArrow",
+        "https://novelarrow.com/novel/shadow-slave",
+        True,
+        ("novelarrow.com", "www.novelarrow.com"),
+    )
+
+    def check(self, html: str):
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            return check_public_site(self.source)
+
+    def test_source_is_enabled_in_exact_configuration_after_novel_buddy(self) -> None:
+        validate_source_config()
+        sites = list(PUBLIC_SITES)
+        index = next(i for i, site in enumerate(sites) if site.name == "NovelArrow")
+        self.assertEqual(sites[index - 1].name, "Novel Buddy")
+        self.assertTrue(sites[index].enabled)
+        self.assertEqual(sites[index].allowed_hosts, ("novelarrow.com", "www.novelarrow.com"))
+
+    def test_realistic_latest_chapter_section(self) -> None:
+        html = """
+            <main>
+              <h1>Shadow Slave</h1>
+              <p>3128 Chapters</p>
+              <section>
+                <h2>Latest chapter</h2>
+                <a href="/chapter/shadow-slave/chapter-3128-song-of-fire">C3128 Song of Fire</a>
+              </section>
+              <section>
+                <h2>Older chapters</h2>
+                <a href="/chapter/shadow-slave/chapter-3127-burning-skies">C3127 Burning Skies</a>
+                <a href="/chapter/shadow-slave/chapter-30-starless-void">C30 Starless Void 2</a>
+              </section>
+              <nav>Previous Next</nav><p>4.8 rating · 25 comments · updated 2 hours ago</p>
+              <a href="/chapter/other-novel/chapter-9999-not-shadow-slave">C9999 Not Shadow Slave</a>
+            </main>
+        """
+        report = self.check(html)
+        self.assertEqual(
+            (report.source, report.chapter, report.title, report.url),
+            (
+                "NovelArrow",
+                3128,
+                "Song of Fire",
+                "https://novelarrow.com/chapter/shadow-slave/chapter-3128-song-of-fire",
+            ),
+        )
+
+    def test_novel_wide_chapter_count_is_not_a_candidate(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check("<main><h1>Shadow Slave</h1><p>3128 Chapters</p><p>Latest chapter</p></main>")
+
+    def test_mismatched_visible_and_href_chapters_are_rejected(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check(
+                '<p>Latest chapter</p><a href="/chapter/shadow-slave/chapter-3128-song-of-fire">'
+                "C3127 Song of Fire</a>"
+            )
+
+    def test_unrelated_novel_link_is_rejected(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check(
+                '<p>Latest chapter</p><a href="/chapter/other-novel/chapter-3128-song-of-fire">'
+                "C3128 Song of Fire</a>"
+            )
+
+    def test_trailing_site_metadata_is_removed_when_slug_confirms_it(self) -> None:
+        report = self.check(
+            '<a href="/chapter/shadow-slave/chapter-30-starless-void">C30 Starless Void 2</a>'
+        )
+        self.assertEqual((report.chapter, report.title), (30, "Starless Void"))
+
+    def test_legitimate_numeric_title_is_preserved_when_present_in_slug(self) -> None:
+        report = self.check(
+            '<a href="/chapter/shadow-slave/chapter-3120-catch-22">C3120 Catch 22</a>'
+        )
+        self.assertEqual((report.chapter, report.title), (3120, "Catch 22"))
+
+    def test_relative_chapter_url_becomes_absolute_https(self) -> None:
+        report = self.check(
+            '<a href="/chapter/shadow-slave/chapter-3128-song-of-fire">C3128 Song of Fire</a>'
+        )
+        self.assertEqual(
+            report.url,
+            "https://novelarrow.com/chapter/shadow-slave/chapter-3128-song-of-fire",
+        )
 
 
 class TelegramParserTests(unittest.TestCase):
