@@ -479,6 +479,91 @@ def parse_novel_buddy_candidates(soup: BeautifulSoup, base_url: str) -> list[Cha
     return candidates
 
 
+def novelarrow_chapter_path(href: str, base_url: str) -> tuple[int, str, str] | None:
+    """Return the chapter, title slug, and URL for a canonical NovelArrow link."""
+    url = urljoin(base_url, href)
+    parsed_url = urlparse(url)
+    if parsed_url.scheme != "https" or parsed_url.netloc.casefold() not in {"novelarrow.com", "www.novelarrow.com"}:
+        return None
+    if parsed_url.params or parsed_url.query or parsed_url.fragment:
+        return None
+
+    match = re.fullmatch(
+        r"/chapter/shadow-slave/chapter-(\d{1,5})-([a-z0-9]+(?:-[a-z0-9]+)*)/?",
+        unquote(parsed_url.path),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return int(match.group(1)), match.group(2).casefold(), url
+
+
+def novelarrow_title(text: str, slug: str) -> tuple[int, str] | None:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    match = re.fullmatch(r"C(\d{1,5})\s+(.+)", normalized, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    title = clean_title(match.group(2))
+    if not title or is_non_chapter_title(title):
+        return None
+
+    def title_slug(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+
+    # Some older rows append a numeric site value after the displayed title. Only
+    # remove it when the canonical URL proves that it is absent from the title.
+    without_metadata = re.fullmatch(r"(.+?)\s+(\d+)", title)
+    if title_slug(title) != slug and without_metadata:
+        possible_title = clean_title(without_metadata.group(1))
+        if possible_title and title_slug(possible_title) == slug:
+            title = possible_title
+    return int(match.group(1)), title
+
+
+def novelarrow_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    href = anchor.get("href")
+    if not href:
+        return None
+    path = novelarrow_chapter_path(href, base_url)
+    if not path:
+        return None
+    href_chapter, slug, url = path
+    visible = novelarrow_title(anchor.get_text(" ", strip=True), slug)
+    if not visible or visible[0] != href_chapter:
+        return None
+    return ChapterReport("", href_chapter, visible[1], url)
+
+
+def parse_novelarrow_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    """Parse strict Shadow Slave chapter links, preferring the Latest chapter section."""
+    def candidates(nodes: list[Any]) -> list[ChapterReport]:
+        found: list[ChapterReport] = []
+        seen: set[tuple[int, str]] = set()
+        for node in nodes:
+            anchors = [node] if getattr(node, "name", None) == "a" else node.find_all("a", href=True)
+            for anchor in anchors:
+                candidate = novelarrow_candidate_from_anchor(anchor, base_url)
+                if candidate and (candidate.chapter, candidate.url) not in seen:
+                    seen.add((candidate.chapter, candidate.url))
+                    found.append(candidate)
+        return found
+
+    for marker in soup.find_all(string=re.compile(r"^\s*Latest\s+chapter\s*$", re.IGNORECASE)):
+        heading = marker.parent
+        if not heading:
+            continue
+        nearby = candidates([heading, *heading.find_next_siblings(limit=1)])
+        if nearby:
+            return nearby
+        parent = heading.parent
+        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
+            latest = candidates([parent])
+            if latest:
+                return latest
+    return candidates([soup])
+
+
 def parse_telegram_doc_title(text: str) -> tuple[int, str | None] | None:
     normalized = re.sub(r"\s+", " ", text).strip()
     match = re.search(r"\b(\d{3,5})\s+(.+?)\.docx\b", normalized, flags=re.IGNORECASE)
@@ -647,6 +732,8 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_telegram_candidates(soup, base_url)
     if site_name == "Novel Buddy":
         return parse_novel_buddy_candidates(soup, base_url)
+    if site_name == "NovelArrow":
+        return parse_novelarrow_candidates(soup, base_url)
 
     section_patterns = {
         "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
@@ -709,7 +796,7 @@ def check_public_site(site: SourceConfig) -> ChapterReport:
         raise ParseError(f"Could not find any chapter links on {site.name}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site.name, best.chapter, best.title, best.url, f"{site.name}:latest_candidate")
-    if report.source in {"SSNovel", "Light Novel World", "Telegram", "Novel Buddy"}:
+    if report.source in {"SSNovel", "Light Novel World", "Telegram", "Novel Buddy", "NovelArrow"}:
         logging.info(
             "%s reports chapter %s: %s (%s)",
             report.source,

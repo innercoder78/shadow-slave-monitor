@@ -62,6 +62,13 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertNotIn("Source:", body)
         self.assertFalse(body.splitlines()[1].endswith("."))
 
+    def test_novelarrow_uses_its_general_source_url(self) -> None:
+        body = notification_body(3116, self.report("NovelArrow"))
+        self.assertIn(
+            "SOURCE:\nNovelArrow [https://novelarrow.com/novel/shadow-slave]",
+            body,
+        )
+
     def test_body_size_fallback_stays_within_utf8_limit(self) -> None:
         body = notification_body(1, self.report("Light Novel World, " + ("界" * 2000), "界" * 2000))
         self.assertLessEqual(len(body.encode("utf-8")), NTFY_BODY_MAX_BYTES)
