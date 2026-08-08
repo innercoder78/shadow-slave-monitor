@@ -69,6 +69,13 @@ class NewChapterNotificationTests(unittest.TestCase):
             body,
         )
 
+    def test_shadowslave_space_uses_its_general_source_url(self) -> None:
+        body = notification_body(3116, self.report("ShadowSlave.Space"))
+        self.assertIn(
+            "SOURCE:\nShadowSlave.Space [https://shadowslave.space]",
+            body,
+        )
+
     def test_updated_sources_use_their_general_source_urls(self) -> None:
         body = notification_body(3116, self.report("Novel Buddy, NovelFire", url="https://chapter.example"))
         self.assertIn("Novel Buddy [https://novelbuddy.me/shadow-slave]", body)

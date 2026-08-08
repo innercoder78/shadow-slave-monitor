@@ -50,6 +50,7 @@ def validate_source_config() -> None:
         "Light Novel World": True,
         "Telegram": True,
         "Novel Buddy": True,
+        "ShadowSlave.Space": True,
         "NovelArrow": False,
         "NovelFire": False,
         "NovelBin": False,
