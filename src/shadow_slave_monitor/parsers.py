@@ -477,6 +477,41 @@ def parse_novel_buddy_candidates(soup: BeautifulSoup, base_url: str) -> list[Cha
     return candidates
 
 
+def shadowslave_space_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    """Parse a canonical ShadowSlave.Space chapter link without trusting its UI text."""
+    href = anchor.get("href")
+    if not href:
+        return None
+
+    url = urljoin(base_url, href)
+    parsed_url = urlparse(url)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.netloc.casefold() not in {"shadowslave.space", "www.shadowslave.space"}
+        or parsed_url.params
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        return None
+
+    match = re.fullmatch(r"/chapters/(\d{1,5})/?", unquote(parsed_url.path))
+    if not match:
+        return None
+    return ChapterReport("", int(match.group(1)), None, url)
+
+
+def parse_shadowslave_space_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    """Return unique candidates proved by ShadowSlave.Space's canonical chapter URLs."""
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+    for anchor in soup.find_all("a", href=True):
+        candidate = shadowslave_space_candidate_from_anchor(anchor, base_url)
+        if candidate and (candidate.chapter, candidate.url) not in seen:
+            seen.add((candidate.chapter, candidate.url))
+            candidates.append(candidate)
+    return candidates
+
+
 def _strip_novelfire_metadata(value: str) -> str | None:
     value = re.sub(
         r"\s+Updated\s+(?:about\s+)?\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago\s*$",
@@ -778,6 +813,8 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_telegram_candidates(soup, base_url)
     if site_name == "Novel Buddy":
         return parse_novel_buddy_candidates(soup, base_url)
+    if site_name == "ShadowSlave.Space":
+        return parse_shadowslave_space_candidates(soup, base_url)
     if site_name == "NovelArrow":
         return parse_novelarrow_candidates(soup, base_url)
     if site_name == "NovelFire":
@@ -844,7 +881,7 @@ def check_public_site(site: SourceConfig) -> ChapterReport:
         raise ParseError(f"Could not find any chapter links on {site.name}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site.name, best.chapter, best.title, best.url, f"{site.name}:latest_candidate")
-    if report.source in {"SSNovel", "Light Novel World", "Telegram", "Novel Buddy", "NovelArrow", "NovelFire"}:
+    if report.source in {"SSNovel", "Light Novel World", "Telegram", "Novel Buddy", "ShadowSlave.Space", "NovelArrow", "NovelFire"}:
         logging.info(
             "%s reports chapter %s: %s (%s)",
             report.source,

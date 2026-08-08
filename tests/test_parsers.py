@@ -51,9 +51,9 @@ class NovelFireParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
             return check_public_site(self.source)
 
-    def test_enabled_configuration_and_main_latest_card(self) -> None:
+    def test_disabled_configuration_and_main_latest_card(self) -> None:
         validate_source_config()
-        self.assertTrue(self.source.enabled)
+        self.assertFalse(self.source.enabled)
         html = '<p>3122Chapters</p><a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>'
         report = self.check(html)
         self.assertEqual((report.chapter, report.title, report.url),
@@ -95,12 +95,11 @@ class NovelArrowParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
             return check_public_site(self.source)
 
-    def test_source_is_enabled_in_exact_configuration_after_novel_buddy(self) -> None:
+    def test_source_is_disabled_in_exact_configuration(self) -> None:
         validate_source_config()
         sites = list(PUBLIC_SITES)
         index = next(i for i, site in enumerate(sites) if site.name == "NovelArrow")
-        self.assertEqual(sites[index - 1].name, "Novel Buddy")
-        self.assertTrue(sites[index].enabled)
+        self.assertFalse(sites[index].enabled)
         self.assertEqual(sites[index].allowed_hosts, ("novelarrow.com", "www.novelarrow.com"))
 
     def test_realistic_latest_chapter_section(self) -> None:
@@ -170,6 +169,83 @@ class NovelArrowParserTests(unittest.TestCase):
             report.url,
             "https://novelarrow.com/chapter/shadow-slave/chapter-3128-song-of-fire",
         )
+
+
+class ShadowSlaveSpaceParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "ShadowSlave.Space")
+
+    def check(self, html: str):
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            return check_public_site(self.source)
+
+    def test_exact_enabled_configuration_after_novel_buddy(self) -> None:
+        validate_source_config()
+        sites = list(PUBLIC_SITES)
+        index = sites.index(self.source)
+        self.assertEqual(sites[index - 1].name, "Novel Buddy")
+        self.assertEqual(
+            self.source,
+            SourceConfig(
+                "ShadowSlave.Space",
+                "https://shadowslave.space",
+                True,
+                ("shadowslave.space", "www.shadowslave.space"),
+            ),
+        )
+
+    def test_realistic_unordered_homepage_uses_highest_canonical_link(self) -> None:
+        html = """
+            <h2>Latest Chapters</h2>
+            <p>Showing 1-20 of 3144 chapters</p>
+            <a href="/chapters/3143">3143 Shadow Slave Chapter 3143 <span>New</span></a>
+            <a href="/chapters/3144">3144 Shadow Slave Chapter 3144 <span>New</span></a>
+            <a href="/chapters/3142">3142 Shadow Slave Chapter 3142</a>
+        """
+        report = self.check(html)
+        self.assertEqual(
+            (report.source, report.chapter, report.title, report.url),
+            ("ShadowSlave.Space", 3144, None, "https://shadowslave.space/chapters/3144"),
+        )
+
+    def test_trailing_slash_relative_url_and_duplicates_are_supported(self) -> None:
+        report = self.check(
+            '<a href="/chapters/3144/">New</a>'
+            '<a href="/chapters/3144/">3144 Shadow Slave Chapter 3144 New</a>'
+        )
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3144, None, "https://shadowslave.space/chapters/3144/"))
+
+    def test_page_metadata_is_not_a_candidate(self) -> None:
+        html = """
+            <p>Showing 1-20 of 9999 chapters</p><p>2026-08-08</p>
+            <p>4.9 rating · 1234 views · 88 comments</p>
+            <nav>1 2 3 100 Next</nav><p>Updated 12 minutes ago</p>
+            <a href="/chapters/3144">3144 Shadow Slave Chapter 3144 New</a>
+        """
+        report = self.check(html)
+        self.assertEqual((report.chapter, report.title), (3144, None))
+
+    def test_noncanonical_links_are_rejected(self) -> None:
+        invalid_hrefs = (
+            "/chapters/3144/extra",
+            "/chapters//3144",
+            "/chapter/3144",
+            "/chapters/3144?ref=latest",
+            "/chapters/3144#comments",
+            "https://example.com/chapters/3144",
+            "http://shadowslave.space/chapters/3144",
+            "https://shadowslave.space:443/chapters/3144",
+        )
+        for href in invalid_hrefs:
+            with self.subTest(href=href), self.assertRaises(ParseError):
+                self.check(f'<a href="{href}">Chapter 3144 New</a>')
+
+    def test_no_trustworthy_chapter_link_raises_parse_error(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check(
+                "<h2>Latest Chapters</h2><p>Showing 1-20 of 3144 chapters</p>"
+                "<p>Chapter 3144 New · 3144 views</p>"
+            )
 
 
 class TelegramParserTests(unittest.TestCase):
