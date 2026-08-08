@@ -1,6 +1,6 @@
 # SHADOW SLAVE NEW CHAPTER MONITOR
 
-A small automated monitor that checks for new chapters of the web novel *Shadow Slave* and sends a notification to your phone when they become available.
+A small automated monitor that checks for new chapters of the web novel *Shadow Slave* (but could easily be mofified to work with any other web novel) and sends a notification to your phone when they become available.
 
 I find it much better than repeatedly refreshing several websites whenever new chapters are expected.
 
@@ -8,9 +8,9 @@ I find it much better than repeatedly refreshing several websites whenever new c
 
 The main workflow is triggered every five minutes through cron-job.org.
 
-While waiting for a new chapter, the monitor checks WebNovel approximately every 20 minutes. When WebNovel confirms a new chapter, the monitor begins checking public sources until that exact chapter becomes available.
+While waiting for a new chapter, the monitor checks WebNovel approximately every 20 minutes. When the paid source confirms a new chapter, the monitor begins checking public free sources until that exact chapter becomes available.
 
-Once the chapter is found, the monitor sends a notification through ntfy and returns to watching WebNovel.
+Once the chapter is found, the monitor sends a notification through ntfy and returns to watching the paid source for new chapters.
 
 If an ntfy notification fails, it is saved and retried later. The monitor continues checking for newer chapters in the meantime and can combine several pending chapters into one notification.
 
