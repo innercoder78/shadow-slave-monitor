@@ -9,7 +9,7 @@ from urllib.parse import unquote, urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
-from shadow_slave_monitor.http_client import fetch_html
+from shadow_slave_monitor.http_client import fetch_html, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.state_manager import valid_chapter
 
@@ -512,6 +512,47 @@ def parse_shadowslave_space_candidates(soup: BeautifulSoup, base_url: str) -> li
     return candidates
 
 
+def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> str | None:
+    """Extract a title only from a heading that identifies the selected chapter."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag_name in ("h1", "h2", "title"):
+        for heading in soup.find_all(tag_name):
+            text = re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).strip()
+            match = re.match(
+                r"^Shadow\s+Slave\s+Chapter\s+(\d{1,5})\b(.*)$",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if not match or int(match.group(1)) != expected_chapter:
+                continue
+
+            remainder = re.sub(r"^[\s:;,.\-–—|]+", "", match.group(2))
+            repeated = re.match(
+                rf"^Chapter\s+{expected_chapter}\b(.*)$",
+                remainder,
+                flags=re.IGNORECASE,
+            )
+            if repeated:
+                remainder = re.sub(r"^[\s:;,.\-–—|]+", "", repeated.group(1))
+                remainder = re.sub(
+                    rf"^{expected_chapter}\s*:\s*",
+                    "",
+                    remainder,
+                    count=1,
+                )
+
+            title = clean_title(remainder)
+            if not title or is_non_chapter_title(title):
+                continue
+            normalized = title.casefold()
+            if re.fullmatch(rf"(?:shadow\s+slave\s+)?chapter\s+{expected_chapter}", normalized):
+                continue
+            if re.fullmatch(r"(?:read(?:\s+(?:online|now))?|latest|new|home|next|previous)", normalized):
+                continue
+            return title
+    return None
+
+
 def _strip_novelfire_metadata(value: str) -> str | None:
     value = re.sub(
         r"\s+Updated\s+(?:about\s+)?\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago\s*$",
@@ -881,14 +922,21 @@ def check_public_site(site: SourceConfig) -> ChapterReport:
         raise ParseError(f"Could not find any chapter links on {site.name}.")
     best = max(candidates, key=lambda item: item.chapter)
     report = ChapterReport(site.name, best.chapter, best.title, best.url, f"{site.name}:latest_candidate")
-    if report.source in {"SSNovel", "Light Novel World", "Telegram", "Novel Buddy", "ShadowSlave.Space", "NovelArrow", "NovelFire"}:
-        logging.info(
-            "%s reports chapter %s: %s (%s)",
-            report.source,
-            report.chapter,
-            report.title or "(no title)",
-            report.url,
-        )
-    else:
-        logging.info("%s reports chapter %s: %s", report.source, report.chapter, report.title or "(no title)")
+    if report.source == "ShadowSlave.Space" and report.title is None:
+        try:
+            title = parse_shadowslave_space_chapter_title(fetch_html(site, report.url), report.chapter)
+            report = ChapterReport(report.source, report.chapter, title, report.url, report.strategy)
+        except Exception as exc:
+            logging.warning(
+                "ShadowSlave.Space title enrichment failed safely: category=%s type=%s",
+                safe_exception_category(exc),
+                type(exc).__name__,
+            )
+    logging.info(
+        "%s reports chapter %s: %s (%s)",
+        report.source,
+        report.chapter,
+        report.title or "(no title)",
+        report.url,
+    )
     return report
