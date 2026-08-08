@@ -6,7 +6,14 @@ from unittest.mock import patch
 from bs4 import BeautifulSoup
 
 from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
-from shadow_slave_monitor.parsers import ParseError, check_public_site, parse_telegram_candidates, parse_telegram_telegra_link
+from shadow_slave_monitor.models import ChapterReport
+from shadow_slave_monitor.parsers import (
+    ParseError,
+    check_public_site,
+    parse_shadowslave_space_chapter_title,
+    parse_telegram_candidates,
+    parse_telegram_telegra_link,
+)
 from shadow_slave_monitor.state_manager import validate_source_config
 
 
@@ -207,6 +214,61 @@ class ShadowSlaveSpaceParserTests(unittest.TestCase):
             ("ShadowSlave.Space", 3144, None, "https://shadowslave.space/chapters/3144"),
         )
 
+    def test_highest_chapter_is_enriched_with_exactly_one_selected_detail_request(self) -> None:
+        homepage = """
+            <a href="/chapters/3143/">3143 Shadow Slave Chapter 3143 New</a>
+            <a href="/chapters/3144/">3144 Shadow Slave Chapter 3144 New</a>
+            <a href="/chapters/3142/">3142 Shadow Slave Chapter 3142</a>
+        """
+        detail = "<html><head><title>Shadow Slave</title></head><body><h1>Shadow Slave Chapter 3144 - Chapter 3144 The Gathering of Demigods</h1></body></html>"
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[homepage, detail]) as fetch:
+            report = check_public_site(self.source)
+
+        self.assertEqual(
+            (report.chapter, report.title, report.url),
+            (3144, "The Gathering of Demigods", "https://shadowslave.space/chapters/3144/"),
+        )
+        self.assertEqual(fetch.call_count, 2)
+        fetch.assert_any_call(self.source)
+        fetch.assert_any_call(self.source, "https://shadowslave.space/chapters/3144/")
+
+    def test_known_duplicated_heading_formats_are_normalized(self) -> None:
+        cases = (
+            (3116, "Shadow Slave Chapter 3116 - Chapter 3116 Princess of the Underworld", "Princess of the Underworld"),
+            (2026, "Shadow Slave Chapter 2026 - Chapter 2026 - 2026: Escalation", "Escalation"),
+        )
+        for chapter, heading, expected in cases:
+            with self.subTest(chapter=chapter):
+                self.assertEqual(
+                    parse_shadowslave_space_chapter_title(f"<h2>{heading}</h2>", chapter),
+                    expected,
+                )
+
+    def test_detail_title_requires_matching_chapter_and_rejects_labels_and_metadata(self) -> None:
+        rejected = (
+            "<h1>Shadow Slave Chapter 3143 - Chapter 3143 Wrong Chapter</h1>",
+            "<h1>Shadow Slave Chapter 3144 - Chapter 3144</h1>",
+            "<h1>Shadow Slave Chapter 3144 - Chapter 3144 - 3144</h1>",
+            "<p>Shadow Slave Chapter 3144 - Chapter 3144 Metadata</p><h1>1234 views</h1>",
+            "<nav>Shadow Slave Chapter 3144 - Chapter 3144 Navigation</nav><h2>88 comments</h2>",
+            "<title>Shadow Slave Chapter 3144 - Read Online</title><div>4.9 ratings 2026-08-08</div>",
+        )
+        for html in rejected:
+            with self.subTest(html=html):
+                self.assertIsNone(parse_shadowslave_space_chapter_title(html, 3144))
+
+    def test_detail_fetch_failure_and_malformed_parser_fail_soft(self) -> None:
+        homepage = '<a href="/chapters/3144/">3144 Shadow Slave Chapter 3144 New</a>'
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[homepage, TimeoutError("secret")]):
+            report = check_public_site(self.source)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3144, None, "https://shadowslave.space/chapters/3144/"))
+
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[homepage, "<h1>broken"]), \
+                patch("shadow_slave_monitor.parsers.parse_shadowslave_space_chapter_title", side_effect=ValueError("bad html")):
+            report = check_public_site(self.source)
+        self.assertEqual((report.chapter, report.title), (3144, None))
+
     def test_trailing_slash_relative_url_and_duplicates_are_supported(self) -> None:
         report = self.check(
             '<a href="/chapters/3144/">New</a>'
@@ -246,6 +308,32 @@ class ShadowSlaveSpaceParserTests(unittest.TestCase):
                 "<h2>Latest Chapters</h2><p>Showing 1-20 of 3144 chapters</p>"
                 "<p>Chapter 3144 New · 3144 views</p>"
             )
+
+
+class PublicSourceLoggingTests(unittest.TestCase):
+    def test_novelfull_success_log_always_includes_detected_url(self) -> None:
+        source = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
+        candidate = ChapterReport("", 3144, "The Gathering of Demigods", "https://novelfull.com/shadow-slave/chapter-3144.html")
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
+                patch("shadow_slave_monitor.parsers.iter_public_candidates", return_value=[candidate]), \
+                self.assertLogs(level="INFO") as logs:
+            check_public_site(source)
+        self.assertIn(
+            "NovelFull reports chapter 3144: The Gathering of Demigods (https://novelfull.com/shadow-slave/chapter-3144.html)",
+            "\n".join(logs.output),
+        )
+
+    def test_success_log_includes_url_when_title_is_missing(self) -> None:
+        source = SourceConfig("Other Public Source", "https://example.com", True, ("example.com",))
+        candidate = ChapterReport("", 3144, None, "https://example.com/chapter/3144")
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
+                patch("shadow_slave_monitor.parsers.iter_public_candidates", return_value=[candidate]), \
+                self.assertLogs(level="INFO") as logs:
+            check_public_site(source)
+        self.assertIn(
+            "Other Public Source reports chapter 3144: (no title) (https://example.com/chapter/3144)",
+            "\n".join(logs.output),
+        )
 
 
 class TelegramParserTests(unittest.TestCase):
