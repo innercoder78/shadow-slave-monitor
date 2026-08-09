@@ -79,6 +79,7 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("Novel Buddy", "https://novelbuddy.me/shadow-slave", True, ("novelbuddy.me", "www.novelbuddy.me")),
     SourceConfig("ShadowSlave.Space", "https://shadowslave.space", True, ("shadowslave.space", "www.shadowslave.space")),
     SourceConfig("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave", True, ("freewebnovel.com", "www.freewebnovel.com")),
+    SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", True, ("novelphoenix.com", "www.novelphoenix.com")),
     SourceConfig("NovelArrow", "https://novelarrow.com/novel/shadow-slave", False, ("novelarrow.com", "www.novelarrow.com")),
     SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False, ("novelfire.net", "www.novelfire.net")),
     SourceConfig("NovelBin", "https://novelbin.com/b/shadow-slave", False, ("novelbin.com", "www.novelbin.com")),
