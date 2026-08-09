@@ -76,6 +76,20 @@ class NewChapterNotificationTests(unittest.TestCase):
             body,
         )
 
+    def test_freewebnovel_uses_its_general_source_url(self) -> None:
+        body = notification_body(
+            3116,
+            self.report(
+                "FreeWebNovel",
+                url="https://freewebnovel.com/novel/shadow-slave/chapter-3117",
+            ),
+        )
+        self.assertIn(
+            "SOURCE:\nFreeWebNovel [https://freewebnovel.com/novel/shadow-slave]",
+            body,
+        )
+        self.assertNotIn("chapter-3117", body)
+
     def test_updated_sources_use_their_general_source_urls(self) -> None:
         body = notification_body(3116, self.report("Novel Buddy, NovelFire", url="https://chapter.example"))
         self.assertIn("Novel Buddy [https://novelbuddy.me/shadow-slave]", body)
