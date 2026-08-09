@@ -580,6 +580,71 @@ def parse_freewebnovel_candidates(soup: BeautifulSoup, base_url: str) -> list[Ch
     return candidates([soup])
 
 
+def novel_phoenix_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    """Parse a Novel Phoenix release only when its URL and visible label agree."""
+    href = anchor.get("href")
+    if not href:
+        return None
+
+    url = urljoin(base_url, href)
+    parsed_url = urlparse(url)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.netloc.casefold() not in {"novelphoenix.com", "www.novelphoenix.com"}
+        or parsed_url.params
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        return None
+
+    path_match = re.fullmatch(
+        r"/novel/shadow-slave/chapter-(\d{1,5})/?",
+        unquote(parsed_url.path),
+        flags=re.IGNORECASE,
+    )
+    if not path_match:
+        return None
+
+    parsed_text = parse_chapter_text(anchor.get_text(" ", strip=True))
+    if not parsed_text:
+        return None
+    visible_chapter, title = parsed_text
+    url_chapter = int(path_match.group(1))
+    if visible_chapter != url_chapter or not title or is_non_chapter_title(title):
+        return None
+    return ChapterReport("", url_chapter, title, url)
+
+
+def parse_novel_phoenix_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    """Trust only the canonical anchor associated with the Latest Release marker."""
+    for marker in soup.find_all(string=re.compile(r"^\s*Latest\s+Release\s*:?\s*$", re.IGNORECASE)):
+        element = marker.parent
+        if not element:
+            continue
+
+        scopes: list[Any] = [element]
+        sibling = element.find_next_sibling()
+        if sibling is not None:
+            scopes.append(sibling)
+        parent = element.parent
+        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
+            scopes.append(parent)
+
+        found: list[ChapterReport] = []
+        seen: set[tuple[int, str]] = set()
+        for scope in scopes:
+            anchors = [scope] if getattr(scope, "name", None) == "a" else scope.find_all("a", href=True)
+            for anchor in anchors:
+                candidate = novel_phoenix_candidate_from_anchor(anchor, base_url)
+                if candidate and (candidate.chapter, candidate.url) not in seen:
+                    seen.add((candidate.chapter, candidate.url))
+                    found.append(candidate)
+        if len(found) == 1:
+            return found
+
+    return []
+
+
 def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> str | None:
     """Extract a title only from a heading that identifies the selected chapter."""
     soup = BeautifulSoup(html, "html.parser")
@@ -926,6 +991,8 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_shadowslave_space_candidates(soup, base_url)
     if site_name == "FreeWebNovel":
         return parse_freewebnovel_candidates(soup, base_url)
+    if site_name == "Novel Phoenix":
+        return parse_novel_phoenix_candidates(soup, base_url)
     if site_name == "NovelArrow":
         return parse_novelarrow_candidates(soup, base_url)
     if site_name == "NovelFire":

@@ -11,6 +11,7 @@ from shadow_slave_monitor.parsers import (
     ParseError,
     check_public_site,
     parse_freewebnovel_candidates,
+    parse_novel_phoenix_candidates,
     parse_shadowslave_space_chapter_title,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
@@ -422,6 +423,146 @@ class FreeWebNovelParserTests(unittest.TestCase):
     def test_no_trustworthy_links_uses_normal_parse_error(self) -> None:
         with self.assertRaises(ParseError):
             self.check("<h2>Latest Chapters</h2><p>Chapter 3144 The Gathering of Demigods</p>")
+
+
+class NovelPhoenixParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "Novel Phoenix")
+
+    def check(self, html: str):
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html) as fetch:
+            report = check_public_site(self.source)
+        fetch.assert_called_once_with(self.source)
+        return report
+
+    def test_exact_enabled_configuration_immediately_after_freewebnovel(self) -> None:
+        validate_source_config()
+        sites = list(PUBLIC_SITES)
+        index = sites.index(self.source)
+        self.assertEqual(sites[index - 1].name, "FreeWebNovel")
+        self.assertEqual(
+            self.source,
+            SourceConfig(
+                "Novel Phoenix",
+                "https://novelphoenix.com/novel/shadow-slave/chapters",
+                True,
+                ("novelphoenix.com", "www.novelphoenix.com"),
+            ),
+        )
+
+    def test_realistic_latest_release_returns_exact_report_and_ignores_noise(self) -> None:
+        catalog = "".join(
+            f'<a href="/novel/shadow-slave/chapter-{chapter}">Chapter {chapter} Catalog Title</a>'
+            for chapter in range(1, 101)
+        )
+        html = f"""
+          <p>A total of 3148 chapters have been translated</p>
+          <p>Release date 2026-08-09 · rank 7 · 4.9 rating · 123456 views</p>
+          <nav>1 2 3 31 32 Next</nav>
+          <section class="release-card">
+            <span>Latest Release:</span>
+            <a href="/novel/shadow-slave/chapter-3148">Chapter 3148 Division of Power</a>
+            <small>Updated 2 hours ago</small>
+          </section>
+          <section class="catalog">{catalog}
+            <a href="/novel/shadow-slave/chapter-9999">Chapter 9999 Bogus Catalog Entry</a>
+          </section>
+        """
+        report = self.check(html)
+        self.assertEqual(
+            (report.source, report.chapter, report.title, report.url),
+            (
+                "Novel Phoenix",
+                3148,
+                "Division of Power",
+                "https://novelphoenix.com/novel/shadow-slave/chapter-3148",
+            ),
+        )
+
+    def test_absolute_https_url_and_optional_trailing_slash_are_accepted(self) -> None:
+        for url in (
+            "https://novelphoenix.com/novel/shadow-slave/chapter-3148",
+            "https://www.novelphoenix.com/novel/shadow-slave/chapter-3148/",
+        ):
+            with self.subTest(url=url):
+                report = self.check(
+                    f'<div><b>Latest Release</b><a href="{url}">Chapter 3148 Division of Power</a></div>'
+                )
+                self.assertEqual(report.url, url)
+
+    def test_title_preserves_legitimate_punctuation_unicode_and_numbers(self) -> None:
+        report = self.check(
+            '<div><span>Latest Release:</span>'
+            '<a href="/novel/shadow-slave/chapter-3148">'
+            "Chapter 3148 Effie's Test-2: Who’s There?! Yes, No—Maybe</a></div>"
+        )
+        self.assertEqual(report.title, "Effie's Test-2: Who’s There?! Yes, No—Maybe")
+
+    def test_nearby_update_text_is_not_part_of_title(self) -> None:
+        report = self.check(
+            '<div><span>Latest Release:</span>'
+            '<a href="/novel/shadow-slave/chapter-3148">Chapter 3148 Division of Power</a>'
+            '<span>Updated 2 hours ago</span></div>'
+        )
+        self.assertEqual(report.title, "Division of Power")
+
+    def test_latest_release_marker_is_case_and_whitespace_tolerant(self) -> None:
+        for marker in ("Latest Release:", "Latest Release", "  LATEST   RELEASE:  "):
+            with self.subTest(marker=marker):
+                report = self.check(
+                    f'<section><h3>{marker}</h3><div>'
+                    '<a href="/novel/shadow-slave/chapter-3148">Chapter 3148 Division of Power</a>'
+                    "</div></section>"
+                )
+                self.assertEqual(report.chapter, 3148)
+
+    def test_visible_and_url_chapter_numbers_must_match(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check(
+                '<div><span>Latest Release:</span>'
+                '<a href="/novel/shadow-slave/chapter-3148">Chapter 3149 Division of Power</a></div>'
+            )
+
+    def test_noncanonical_and_unsafe_links_are_rejected(self) -> None:
+        invalid_hrefs = (
+            "http://novelphoenix.com/novel/shadow-slave/chapter-3148",
+            "https://evil.example/novel/shadow-slave/chapter-3148",
+            "/novel/shadow-slave/chapter-3148?ref=latest",
+            "/novel/shadow-slave/chapter-3148#comments",
+            "/novel/shadow-slave/chapter-3148;session=1",
+            "/novel/other/chapter-3148",
+            "/novel/shadow-slave/chapters",
+            "/novel/shadow-slave/chapter-",
+            "/novel/shadow-slave/chapter-3148-title",
+            "/novel/shadow-slave/chapter-3148/extra",
+            "https://novelphoenix.com:443/novel/shadow-slave/chapter-3148",
+        )
+        for href in invalid_hrefs:
+            with self.subTest(href=href), self.assertRaises(ParseError):
+                self.check(
+                    f'<div><span>Latest Release:</span><a href="{href}">'
+                    "Chapter 3148 Division of Power</a></div>"
+                )
+
+    def test_missing_title_is_rejected(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check(
+                '<div><span>Latest Release:</span>'
+                '<a href="/novel/shadow-slave/chapter-3148">Chapter 3148</a></div>'
+            )
+
+    def test_catalog_links_without_marker_do_not_become_candidates(self) -> None:
+        html = """
+          <p>A total of 3148 chapters have been translated</p>
+          <p>Release date 2026-08-09 · 4.9 rating · 123456 views · rank 7</p>
+          <nav>1 2 3 31 32 Next</nav>
+          <a href="/novel/shadow-slave/chapter-100">Chapter 100 Catalog Title</a>
+          <a href="/novel/shadow-slave/chapter-3148">Chapter 3148 Division of Power</a>
+          <a href="/novel/shadow-slave/chapter-9999">Chapter 9999 Bogus Catalog Entry</a>
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        self.assertEqual(parse_novel_phoenix_candidates(soup, self.source.url), [])
+        with self.assertRaises(ParseError):
+            self.check(html)
 
 
 class PublicSourceLoggingTests(unittest.TestCase):
