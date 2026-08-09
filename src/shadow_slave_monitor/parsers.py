@@ -512,6 +512,74 @@ def parse_shadowslave_space_candidates(soup: BeautifulSoup, base_url: str) -> li
     return candidates
 
 
+def freewebnovel_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    """Parse a chapter only when its URL and visible label independently agree."""
+    href = anchor.get("href")
+    if not href:
+        return None
+
+    url = urljoin(base_url, href)
+    parsed_url = urlparse(url)
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.netloc.casefold() not in {"freewebnovel.com", "www.freewebnovel.com"}
+        or parsed_url.params
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        return None
+
+    path_match = re.fullmatch(
+        r"/novel/shadow-slave/chapter-(\d{1,5})/?",
+        unquote(parsed_url.path),
+        flags=re.IGNORECASE,
+    )
+    if not path_match:
+        return None
+
+    text = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).strip()
+    text_match = re.fullmatch(r"Chapter\s+(\d{1,5})\s+(.+)", text, flags=re.IGNORECASE)
+    if not text_match or int(text_match.group(1)) != int(path_match.group(1)):
+        return None
+
+    title = clean_title(text_match.group(2))
+    if not title or is_non_chapter_title(title):
+        return None
+    return ChapterReport("", int(path_match.group(1)), title, url)
+
+
+def parse_freewebnovel_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    """Prefer canonical links scoped to FreeWebNovel's semantic latest section."""
+    def candidates(nodes: list[Any]) -> list[ChapterReport]:
+        found: list[ChapterReport] = []
+        seen: set[tuple[int, str]] = set()
+        for node in nodes:
+            anchors = [node] if getattr(node, "name", None) == "a" else node.find_all("a", href=True)
+            for anchor in anchors:
+                candidate = freewebnovel_candidate_from_anchor(anchor, base_url)
+                if candidate and (candidate.chapter, candidate.url) not in seen:
+                    seen.add((candidate.chapter, candidate.url))
+                    found.append(candidate)
+        return found
+
+    for marker in soup.find_all(string=re.compile(r"\bLatest\s+Chapters\b", re.IGNORECASE)):
+        heading = marker.parent
+        if not heading:
+            continue
+        nearby = candidates([heading, *heading.find_next_siblings(limit=1)])
+        if nearby:
+            return nearby
+        parent = heading.parent
+        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
+            scoped = candidates([parent])
+            if scoped:
+                return scoped
+
+    # Some templates omit a usable section wrapper. This fallback remains limited
+    # to canonical Shadow Slave URLs whose visible chapter and title validate.
+    return candidates([soup])
+
+
 def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> str | None:
     """Extract a title only from a heading that identifies the selected chapter."""
     soup = BeautifulSoup(html, "html.parser")
@@ -856,13 +924,14 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_novel_buddy_candidates(soup, base_url)
     if site_name == "ShadowSlave.Space":
         return parse_shadowslave_space_candidates(soup, base_url)
+    if site_name == "FreeWebNovel":
+        return parse_freewebnovel_candidates(soup, base_url)
     if site_name == "NovelArrow":
         return parse_novelarrow_candidates(soup, base_url)
     if site_name == "NovelFire":
         return parse_novelfire_candidates(soup, base_url)
 
     section_patterns = {
-        "FreeWebNovel": r"\b6\s+Latest\s+Chapters\b",
         "NovelFull": r"\bLatest\s+chapters\b",
         "LightNovelUp": r"\bLATEST\s+MANGA\s+RELEASES\b",
     }
@@ -872,7 +941,7 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
             return section_candidates
 
     candidates: list[ChapterReport] = []
-    require_shadow_href = site_name in {"FreeWebNovel", "NovelFull", "LightNovelUp"}
+    require_shadow_href = site_name in {"NovelFull", "LightNovelUp"}
     for anchor in soup.find_all("a"):
         candidate = chapter_candidate_from_anchor(anchor, base_url, require_shadow_href=require_shadow_href)
         if candidate:

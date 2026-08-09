@@ -10,6 +10,7 @@ from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.parsers import (
     ParseError,
     check_public_site,
+    parse_freewebnovel_candidates,
     parse_shadowslave_space_chapter_title,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
@@ -308,6 +309,119 @@ class ShadowSlaveSpaceParserTests(unittest.TestCase):
                 "<h2>Latest Chapters</h2><p>Showing 1-20 of 3144 chapters</p>"
                 "<p>Chapter 3144 New · 3144 views</p>"
             )
+
+
+class FreeWebNovelParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "FreeWebNovel")
+
+    def check(self, html: str):
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html) as fetch:
+            report = check_public_site(self.source)
+        fetch.assert_called_once_with(self.source)
+        return report
+
+    def test_exact_enabled_configuration_immediately_after_shadowslave_space(self) -> None:
+        validate_source_config()
+        sites = list(PUBLIC_SITES)
+        index = sites.index(self.source)
+        self.assertEqual(sites[index - 1].name, "ShadowSlave.Space")
+        self.assertEqual(
+            self.source,
+            SourceConfig(
+                "FreeWebNovel",
+                "https://freewebnovel.com/novel/shadow-slave",
+                True,
+                ("freewebnovel.com", "www.freewebnovel.com"),
+            ),
+        )
+
+    def test_realistic_latest_section_selects_highest_and_extracts_exact_title(self) -> None:
+        html = """
+          <section class="latest-chapters">
+            <h2>6 Latest Chapters</h2>
+            <div>
+              <a href="/novel/shadow-slave/chapter-3143">Chapter 3143 Coronation</a>
+              <a href="/novel/shadow-slave/chapter-3144">Chapter 3144 The Gathering of Demigods</a>
+              <a href="/novel/shadow-slave/chapter-3142">Chapter 3142 Far Away</a>
+            </div>
+          </section>
+        """
+        report = self.check(html)
+        self.assertEqual(
+            (report.source, report.chapter, report.title, report.url),
+            ("FreeWebNovel", 3144, "The Gathering of Demigods",
+             "https://freewebnovel.com/novel/shadow-slave/chapter-3144"),
+        )
+
+    def test_absolute_www_url_trailing_slash_and_title_punctuation_numbers(self) -> None:
+        report = self.check(
+            '<h2>12 Latest Chapters</h2>'
+            '<div><a href="https://www.freewebnovel.com/novel/shadow-slave/chapter-3144/">'
+            "Chapter 3144 Effie&apos;s Test-2: Shut the Gates, Now?!</a></div>"
+        )
+        self.assertEqual(report.title, "Effie's Test-2: Shut the Gates, Now?!")
+        self.assertEqual(report.url, "https://www.freewebnovel.com/novel/shadow-slave/chapter-3144/")
+
+    def test_duplicate_links_are_deduplicated(self) -> None:
+        html = (
+            '<h2>Latest Chapters</h2><div>'
+            '<a href="/novel/shadow-slave/chapter-3144">Chapter 3144 The Gathering of Demigods</a>'
+            '<a href="/novel/shadow-slave/chapter-3144">Chapter 3144 The Gathering of Demigods</a>'
+            "</div>"
+        )
+        candidates = parse_freewebnovel_candidates(
+            BeautifulSoup(html, "html.parser"), self.source.url
+        )
+        self.assertEqual(len(candidates), 1)
+
+    def test_latest_section_is_preferred_over_higher_catalog_link(self) -> None:
+        html = """
+          <a href="/novel/shadow-slave/chapter-9999">Chapter 9999 Catalog Entry</a>
+          <h3>8 Latest Chapters</h3>
+          <div><a href="/novel/shadow-slave/chapter-3144">Chapter 3144 Current Title</a></div>
+          <aside><a href="/novel/other/chapter-9998">Chapter 9998 Other Novel</a></aside>
+        """
+        self.assertEqual(self.check(html).chapter, 3144)
+
+    def test_visible_and_href_chapter_numbers_must_match(self) -> None:
+        html = """
+          <h2>Latest Chapters</h2><div>
+            <a href="/novel/shadow-slave/chapter-3144">Chapter 3145 Wrong</a>
+            <a href="/novel/shadow-slave/chapter-3143">Chapter 3143 Coronation</a>
+          </div>
+        """
+        self.assertEqual(self.check(html).chapter, 3143)
+
+    def test_noncanonical_and_unsafe_links_are_rejected(self) -> None:
+        invalid_hrefs = (
+            "http://freewebnovel.com/novel/shadow-slave/chapter-3144",
+            "https://evil.example/novel/shadow-slave/chapter-3144",
+            "/novel/shadow-slave/chapter-3144?ref=latest",
+            "/novel/shadow-slave/chapter-3144#comments",
+            "/novel/shadow-slave/chapter-3144;session=1",
+            "/novel/other/chapter-3144",
+            "/novel/shadow-slave/chapters-3144",
+            "/novel/shadow-slave/chapter-3144/extra",
+            "https://freewebnovel.com:443/novel/shadow-slave/chapter-3144",
+        )
+        for href in invalid_hrefs:
+            with self.subTest(href=href), self.assertRaises(ParseError):
+                self.check(f'<a href="{href}">Chapter 3144 Valid Title</a>')
+
+    def test_unrelated_numbers_and_ui_only_titles_are_not_candidates(self) -> None:
+        html = """
+          <h2>Latest Chapters</h2><div>
+            <p>4.9 ratings · 88 votes · 1234 views · 2026-08-09 · page 99</p>
+            <a href="/novel/other/chapter-9999">Chapter 9999 Other Novel</a>
+            <a href="/novel/shadow-slave/chapter-3144">Chapter 3144 12345</a>
+          </div>
+        """
+        with self.assertRaises(ParseError):
+            self.check(html)
+
+    def test_no_trustworthy_links_uses_normal_parse_error(self) -> None:
+        with self.assertRaises(ParseError):
+            self.check("<h2>Latest Chapters</h2><p>Chapter 3144 The Gathering of Demigods</p>")
 
 
 class PublicSourceLoggingTests(unittest.TestCase):
