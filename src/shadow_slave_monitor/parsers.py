@@ -364,13 +364,22 @@ def parse_chikari_candidates(soup: BeautifulSoup, base_url: str) -> list[Chapter
 def parse_chikari_chapter_title(html: str, chapter: int) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
     pattern = re.compile(rf"^\s*Chapter\s+({chapter})\b\s*[:\-–—]?\s*(.*?)\s*$", re.IGNORECASE)
-    for heading in soup.find_all(["h1", "h2", "title"]):
-        match = pattern.fullmatch(heading.get_text(" ", strip=True))
-        if not match:
-            continue
-        title = clean_title(match.group(2))
-        if title and not is_non_chapter_title(title):
-            return title
+    for tag_name in ("h1", "h2", "title"):
+        for heading in soup.find_all(tag_name):
+            match = pattern.fullmatch(heading.get_text(" ", strip=True))
+            if not match:
+                continue
+            title_text = match.group(2)
+            if tag_name == "title":
+                title_text = re.sub(
+                    r"\s*(?:·|-|\|)\s*chikari\.moe\s*$",
+                    "",
+                    title_text,
+                    flags=re.IGNORECASE,
+                )
+            title = clean_title(title_text)
+            if title and not is_non_chapter_title(title):
+                return title
     return None
 
 

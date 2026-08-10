@@ -128,6 +128,41 @@ class ChikariParserTests(unittest.TestCase):
             "Effie's Test-2: Who’s There?! Yes, No—Maybe 22",
         )
 
+    def test_visible_h1_wins_over_earlier_suffixed_document_title(self) -> None:
+        html = (
+            "<html><head><title>Chapter 3149 Loose Ends · chikari.moe</title></head>"
+            "<body><h1>Chapter 3149 Loose Ends</h1></body></html>"
+        )
+        self.assertEqual(parse_chikari_chapter_title(html, 3149), "Loose Ends")
+
+    def test_h2_is_used_when_no_trustworthy_h1_exists(self) -> None:
+        html = (
+            "<title>Chapter 3149 Document Title | chikari.moe</title>"
+            "<h1>Chapter 3150 Wrong Chapter</h1>"
+            "<h2>Chapter 3149 Visible H2 Title</h2>"
+        )
+        self.assertEqual(parse_chikari_chapter_title(html, 3149), "Visible H2 Title")
+
+    def test_document_title_is_final_fallback_and_removes_only_known_site_suffix(self) -> None:
+        suffixes = (" · chikari.moe", "-chikari.moe", "  |  chikari.moe  ")
+        for suffix in suffixes:
+            with self.subTest(suffix=suffix):
+                html = (
+                    f"<title>Chapter 3149 Loose Ends{suffix}</title>"
+                    "<h1>Shadow Slave</h1><h2>Chapter 3150 Wrong Chapter</h2>"
+                )
+                self.assertEqual(parse_chikari_chapter_title(html, 3149), "Loose Ends")
+
+    def test_title_only_fallback_preserves_legitimate_punctuation(self) -> None:
+        self.assertEqual(
+            parse_chikari_chapter_title(
+                "<title>Chapter 3149 Loose Ends · chikari.moe</title>", 3149
+            ),
+            "Loose Ends",
+        )
+        html = "<title>Chapter 3149 Love | War - Part 2?! · chikari.moe</title>"
+        self.assertEqual(parse_chikari_chapter_title(html, 3149), "Love | War - Part 2?!")
+
     def test_title_requires_matching_number_and_trustworthy_structured_value(self) -> None:
         rejected = (
             "<h1>Chapter 3150 Loose Ends</h1>",
