@@ -47,7 +47,7 @@ def initial_watchdog_state() -> dict[str, Any]:
 
 def validate_source_config() -> None:
     expected = {
-        "Light Novel World": True,
+        "Chikari": True,
         "Telegram": True,
         "Novel Buddy": True,
         "ShadowSlave.Space": True,

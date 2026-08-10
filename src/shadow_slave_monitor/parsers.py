@@ -322,89 +322,65 @@ def candidates_from_nodes(nodes: list[Any], base_url: str, allow_bare_text: bool
     return candidates
 
 
-def is_light_novel_world_chapter_href(href: str) -> bool:
-    lowered = href.casefold()
-    if "shadow-slave" not in lowered:
-        return False
-    return bool(
-        re.search(r"/chapter/\d{1,5}/?(?:[?#].*)?$", lowered)
-        or re.search(r"chapter[-_/]\d{1,5}\b", lowered)
-    )
-
-
-def is_light_novel_world_ui_link(anchor: Any) -> bool:
-    text = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).strip().casefold()
-    css_classes = " ".join(anchor.get("class", [])).casefold()
-    return bool(
-        text in {"read now", "read first", "first chapter", "chapter 1", "latest chapters"}
-        or "btn-read-now" in css_classes
-        or re.fullmatch(r"(?:read\s+)?first(?:\s+chapter)?", text)
-    )
-
-
-def light_novel_world_report_from_chapter(
-    chapter: int, title: str | None, base_url: str, href: str | None = None
-) -> ChapterReport:
-    url = urljoin(base_url, href) if href else urljoin(base_url, f"/novel/shadow-slave/chapter/{chapter}/")
-    return ChapterReport("", chapter, title, url)
-
-
-def light_novel_world_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    href = anchor.get("href")
-    if not href or not is_light_novel_world_chapter_href(href):
+def chikari_candidate_from_href(href: str, base_url: str) -> ChapterReport | None:
+    if not isinstance(href, str):
         return None
-    if is_light_novel_world_ui_link(anchor):
+    try:
+        url = urljoin(base_url, href)
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or hostname not in {"chikari.moe", "www.chikari.moe"}
+        or parsed.netloc != hostname
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
         return None
 
-    href_chapter = parse_chapter_from_href(href)
-    if href_chapter is None:
+    match = re.fullmatch(r"/novels/shadow-slave/(\d{1,5})/?", parsed.path)
+    if not match:
         return None
-
-    text = anchor.get_text(" ", strip=True)
-    parsed = parse_chapter_text(text)
-    title = parsed[1] if parsed and parsed[0] == href_chapter else None
-    if title and is_non_chapter_title(title):
-        title = None
-    return light_novel_world_report_from_chapter(href_chapter, title, base_url, href)
+    return ChapterReport("", int(match.group(1)), None, url)
 
 
-def parse_light_novel_world_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+def parse_chikari_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
     candidates: list[ChapterReport] = []
     seen: set[tuple[int, str]] = set()
-
-    def add(candidate: ChapterReport | None) -> None:
-        if not candidate:
-            return
-        if candidate.chapter < 2:
-            return
-        key = (candidate.chapter, candidate.url)
-        if key not in seen:
-            seen.add(key)
-            candidates.append(candidate)
-
-    latest_nodes: list[Any] = []
-    for chapter_info in soup.select(".chapter-info"):
-        parent = chapter_info.find_parent(class_=re.compile(r"(?:^|\s)(?:content-card|card-content)(?:\s|$)"))
-        if parent:
-            latest_nodes.append(parent)
-        latest_nodes.append(chapter_info)
-
-    latest_nodes.extend(find_section_nodes(soup, r"\b(?:latest|recent|novel)\s+chapters?\b"))
-
-    for node in latest_nodes:
-        for anchor in node.find_all("a", href=True):
-            add(light_novel_world_candidate_from_anchor(anchor, base_url))
-
-        parsed = parse_chapter_text(node.get_text("\n", strip=True))
-        if parsed:
-            chapter, title = parsed
-            if not title or not is_non_chapter_title(title):
-                add(light_novel_world_report_from_chapter(chapter, title, base_url))
-
     for anchor in soup.find_all("a", href=True):
-        add(light_novel_world_candidate_from_anchor(anchor, base_url))
+        candidate = chikari_candidate_from_href(anchor["href"], base_url)
+        if candidate:
+            key = (candidate.chapter, candidate.url)
+            if key not in seen:
+                seen.add(key)
+                candidates.append(candidate)
 
     return candidates
+
+
+def parse_chikari_chapter_title(html: str, chapter: int) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    pattern = re.compile(rf"^\s*Chapter\s+({chapter})\b\s*[:\-–—]?\s*(.*?)\s*$", re.IGNORECASE)
+    for tag_name in ("h1", "h2", "title"):
+        for heading in soup.find_all(tag_name):
+            match = pattern.fullmatch(heading.get_text(" ", strip=True))
+            if not match:
+                continue
+            title_text = match.group(2)
+            if tag_name == "title":
+                title_text = re.sub(
+                    r"\s*(?:·|-|\|)\s*chikari\.moe\s*$",
+                    "",
+                    title_text,
+                    flags=re.IGNORECASE,
+                )
+            title = clean_title(title_text)
+            if title and not is_non_chapter_title(title):
+                return title
+    return None
 
 
 def parse_novel_buddy_chapter_text(text: str) -> tuple[int, str | None] | None:
@@ -981,8 +957,8 @@ def check_webnovel(source: SourceConfig) -> ChapterReport:
 def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = "") -> list[ChapterReport]:
     if site_name == "SSNovel":
         return parse_ssnovel_candidates(soup, base_url)
-    if site_name == "Light Novel World":
-        return parse_light_novel_world_candidates(soup, base_url)
+    if site_name == "Chikari":
+        return parse_chikari_candidates(soup, base_url)
     if site_name == "Telegram":
         return parse_telegram_candidates(soup, base_url)
     if site_name == "Novel Buddy":
@@ -1065,6 +1041,18 @@ def check_public_site(site: SourceConfig) -> ChapterReport:
         except Exception as exc:
             logging.warning(
                 "ShadowSlave.Space title enrichment failed safely: category=%s type=%s",
+                safe_exception_category(exc),
+                type(exc).__name__,
+            )
+    if report.source == "Chikari" and report.title is None:
+        try:
+            title = parse_chikari_chapter_title(fetch_html(site, report.url), report.chapter)
+            report = ChapterReport(report.source, report.chapter, title, report.url, report.strategy)
+            if title is None:
+                logging.warning("Chikari title enrichment found no trustworthy matching title.")
+        except Exception as exc:
+            logging.warning(
+                "Chikari title enrichment failed safely: category=%s type=%s",
                 safe_exception_category(exc),
                 type(exc).__name__,
             )
