@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from bs4 import BeautifulSoup
 
@@ -10,6 +10,8 @@ from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.parsers import (
     ParseError,
     check_public_site,
+    parse_chikari_candidates,
+    parse_chikari_chapter_title,
     parse_freewebnovel_candidates,
     parse_novel_phoenix_candidates,
     parse_shadowslave_space_chapter_title,
@@ -17,6 +19,144 @@ from shadow_slave_monitor.parsers import (
     parse_telegram_telegra_link,
 )
 from shadow_slave_monitor.state_manager import validate_source_config
+
+
+class ChikariParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "Chikari")
+
+    def test_exact_enabled_configuration_and_priority(self) -> None:
+        validate_source_config()
+        self.assertEqual(
+            self.source,
+            SourceConfig(
+                "Chikari",
+                "https://chikari.moe/novels/shadow-slave",
+                True,
+                ("chikari.moe", "www.chikari.moe"),
+            ),
+        )
+        self.assertIs(PUBLIC_SITES[0], self.source)
+        self.assertEqual(PUBLIC_SITES[1].name, "Telegram")
+        self.assertEqual(
+            {site.name: site.enabled for site in PUBLIC_SITES},
+            {
+                "Chikari": True,
+                "Telegram": True,
+                "Novel Buddy": True,
+                "ShadowSlave.Space": True,
+                "FreeWebNovel": True,
+                "Novel Phoenix": True,
+                "NovelArrow": False,
+                "NovelFire": False,
+                "NovelBin": False,
+                "SSNovel": True,
+                "NovelFull": True,
+            },
+        )
+
+    def test_realistic_unordered_series_page_uses_highest_canonical_link(self) -> None:
+        html = """
+          <main><h1>Shadow Slave</h1><p>3149 chapters · 4.9 ratings · 123456 views</p>
+          <p>Released 2026-08-09 · rank 7</p><nav>Page 1 2 3 2026 Next</nav>
+          <section aria-label="Chapters">
+            <a href="/novels/shadow-slave/3147">Chapter 3147</a>
+            <a href="/novels/shadow-slave/3149">Latest</a>
+            <a href="/novels/shadow-slave/3148">Chapter 3148</a>
+            <a href="/novels/shadow-slave/3149">Duplicate</a>
+            <a href="/novels/another-novel/9999">Other novel</a>
+          </section><p>Chapter 9999 Plain text noise</p></main>
+        """
+        candidates = parse_chikari_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+        self.assertEqual(len(candidates), 3)
+        detail = "<h1>Chapter 3149 Loose Ends</h1>"
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[html, detail]) as fetch:
+            report = check_public_site(self.source)
+        self.assertEqual(
+            (report.source, report.chapter, report.title, report.url),
+            ("Chikari", 3149, "Loose Ends", "https://chikari.moe/novels/shadow-slave/3149"),
+        )
+        self.assertEqual(
+            fetch.call_args_list,
+            [call(self.source), call(self.source, report.url)],
+        )
+
+    def test_allowed_absolute_hosts_relative_resolution_and_trailing_slash(self) -> None:
+        html = "".join(
+            (
+                '<a href="/novels/shadow-slave/3147">relative</a>',
+                '<a href="https://chikari.moe/novels/shadow-slave/3148">apex</a>',
+                '<a href="https://www.chikari.moe/novels/shadow-slave/3149/">www</a>',
+            )
+        )
+        candidates = parse_chikari_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+        self.assertEqual([candidate.chapter for candidate in candidates], [3147, 3148, 3149])
+        self.assertEqual(candidates[0].url, "https://chikari.moe/novels/shadow-slave/3147")
+
+    def test_noncanonical_unsafe_and_malformed_links_are_rejected(self) -> None:
+        invalid_hrefs = (
+            "http://chikari.moe/novels/shadow-slave/3149",
+            "https://evil.example/novels/shadow-slave/3149",
+            "/novels/shadow-slave/3149?ref=latest",
+            "/novels/shadow-slave/3149#comments",
+            "/novels/shadow-slave/3149;session=1",
+            "https://chikari.moe:443/novels/shadow-slave/3149",
+            "/novels/other/3149",
+            "/novels/shadow-slave/not-a-number",
+            "/novels/shadow-slave/3149/extra",
+            "/novels/shadow-slave",
+            "/novels/shadow-slave/123456",
+            "https://[broken/novels/shadow-slave/3149",
+        )
+        html = "".join(f'<a href="{href}">Chapter 9999</a>' for href in invalid_hrefs)
+        self.assertEqual(parse_chikari_candidates(BeautifulSoup(html, "html.parser"), self.source.url), [])
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            with self.assertRaises(ParseError):
+                check_public_site(self.source)
+
+    def test_plain_text_chapter_is_never_a_fallback(self) -> None:
+        html = "<h2>Chapters</h2><p>Chapter 3149 Loose Ends</p><p>3149 chapters</p>"
+        self.assertEqual(parse_chikari_candidates(BeautifulSoup(html, "html.parser"), self.source.url), [])
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            with self.assertRaises(ParseError):
+                check_public_site(self.source)
+
+    def test_title_preserves_punctuation_unicode_and_legitimate_numbers(self) -> None:
+        self.assertEqual(
+            parse_chikari_chapter_title(
+                "<h2> Chapter 3149 — Effie's Test-2: Who’s There?! Yes, No—Maybe 22 </h2>", 3149
+            ),
+            "Effie's Test-2: Who’s There?! Yes, No—Maybe 22",
+        )
+
+    def test_title_requires_matching_number_and_trustworthy_structured_value(self) -> None:
+        rejected = (
+            "<h1>Chapter 3150 Loose Ends</h1>",
+            "<h1>Chapter 3149</h1>",
+            "<h1>Chapter 3149 12345</h1>",
+            "<h1>Chapter 3149 Next</h1>",
+            "<p>Chapter 3149 Loose Ends</p><h1>Shadow Slave</h1>",
+        )
+        for html in rejected:
+            with self.subTest(html=html):
+                self.assertIsNone(parse_chikari_chapter_title(html, 3149))
+
+    def test_enrichment_failures_leave_trusted_chapter_and_url_unchanged(self) -> None:
+        series = '<a href="/novels/shadow-slave/3149">Latest chapter</a>'
+        details = ("<h1>Chapter 3150 Wrong</h1>", "<h1>broken", TimeoutError("secret"))
+        for detail in details:
+            with self.subTest(detail=detail):
+                with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[series, detail]):
+                    report = check_public_site(self.source)
+                self.assertEqual(
+                    (report.chapter, report.title, report.url),
+                    (3149, None, "https://chikari.moe/novels/shadow-slave/3149"),
+                )
+
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[series, "<h1>ignored</h1>"]), \
+                patch("shadow_slave_monitor.parsers.parse_chikari_chapter_title", side_effect=ValueError("bad html")):
+            report = check_public_site(self.source)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3149, None, "https://chikari.moe/novels/shadow-slave/3149"))
 
 
 class NovelBuddyParserTests(unittest.TestCase):

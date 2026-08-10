@@ -196,7 +196,7 @@ class WatchFreeSitesTests(unittest.TestCase):
 
     def test_watch_free_sites_checks_every_run_and_does_not_save_before_target(self) -> None:
         state = self.watch_free_state()
-        reports = [ChapterReport("Light Novel World", 10, "Chapter Ten", "https://public.example/10", "page")]
+        reports = [ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")]
 
         with patch.object(monitor, "check_public_sites", return_value=reports) as check_public_sites:
             saved = run_main_with_state(state)
@@ -208,7 +208,7 @@ class WatchFreeSitesTests(unittest.TestCase):
 
     def test_watch_free_sites_target_found_sends_notification_updates_state_and_saves(self) -> None:
         state = self.watch_free_state()
-        reports = [ChapterReport("Light Novel World", 11, "Chapter Eleven", "https://public.example/11", "page")]
+        reports = [ChapterReport("Chikari", 11, "Chapter Eleven", "https://public.example/11", "page")]
 
         with patch.object(monitor, "check_public_sites", return_value=reports) as check_public_sites, \
              patch.object(monitor, "send_new_chapter") as send_new_chapter:
@@ -225,7 +225,7 @@ class WatchFreeSitesTests(unittest.TestCase):
 
     def test_public_report_above_target_rechecks_webnovel_and_rejects_unconfirmed_jump(self) -> None:
         state = self.watch_free_state()
-        reports = [ChapterReport("Light Novel World", 12, "Chapter Twelve", "https://public.example/12", "page")]
+        reports = [ChapterReport("Chikari", 12, "Chapter Twelve", "https://public.example/12", "page")]
         official = ChapterReport("WebNovel", 11, "Chapter Eleven", "https://webnovel.example/11", "catalog")
 
         with patch.object(monitor, "check_public_sites", return_value=reports), \
@@ -247,7 +247,7 @@ class PendingNotificationTests(unittest.TestCase):
             "first_pending_chapter": 11,
             "latest_pending_chapter": 11,
             "title": "Chapter Eleven",
-            "sources": ["Light Novel World"],
+            "sources": ["Chikari"],
             "url": "https://public.example/11",
             "created_at": "2026-06-11T11:00:00+00:00",
             "first_failure_at": "2026-06-11T11:00:00+00:00",
