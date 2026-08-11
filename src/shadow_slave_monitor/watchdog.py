@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import time
 import zipfile
 from datetime import timedelta
 from typing import Any
@@ -26,17 +27,45 @@ MAX_WORKFLOW_RUN_PAGES = 10
 MONITOR_ARTIFACT_NAME = "monitor-state"
 NON_FAILED_MONITOR_RESULTS = {"healthy", "degraded"}
 ALL_MONITOR_RESULTS = NON_FAILED_MONITOR_RESULTS | {"failed"}
+GITHUB_REQUEST_ATTEMPTS = 3
+GITHUB_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+def _github_request(url: str, headers: dict[str, str], timeout: tuple[int, int]) -> requests.Response:
+    for attempt in range(1, GITHUB_REQUEST_ATTEMPTS + 1):
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            if attempt == GITHUB_REQUEST_ATTEMPTS:
+                raise
+            delay = float(attempt)
+            logging.info(
+                "Temporary GitHub API %s; attempt=%s/%s retrying_after=%.1fs.",
+                safe_exception_category(exc), attempt, GITHUB_REQUEST_ATTEMPTS, delay,
+            )
+            time.sleep(delay)
+            continue
+        if response.status_code in GITHUB_RETRYABLE_STATUSES and attempt < GITHUB_REQUEST_ATTEMPTS:
+            delay = float(attempt)
+            logging.info(
+                "Temporary GitHub API response; status=%s attempt=%s/%s retrying_after=%.1fs.",
+                response.status_code, attempt, GITHUB_REQUEST_ATTEMPTS, delay,
+            )
+            response.close()
+            time.sleep(delay)
+            continue
+        response.raise_for_status()
+        return response
+    raise AssertionError("GitHub request retry loop exited unexpectedly")
 
 def github_get(path: str) -> dict[str, Any]:
     token = os.environ.get("GITHUB_TOKEN")
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    response = requests.get(API + path, headers=headers, timeout=(5, 20))
-    response.raise_for_status()
+    response = _github_request(API + path, headers, (5, 20))
     data = response.json()
     if not isinstance(data, dict):
         raise RuntimeError("GitHub API returned non-object JSON")
@@ -47,8 +76,7 @@ def github_get_bytes(url: str) -> bytes:
     headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    response = requests.get(url, headers=headers, timeout=(5, 30))
-    response.raise_for_status()
+    response = _github_request(url, headers, (5, 30))
     return response.content
 
 

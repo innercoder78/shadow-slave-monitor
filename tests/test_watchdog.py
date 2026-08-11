@@ -3,9 +3,83 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import requests
 
 from shadow_slave_monitor import watchdog
+
+
+class WatchdogGitHubRequestTests(unittest.TestCase):
+    @staticmethod
+    def response(status: int = 200, *, json_data: object | None = None, content: bytes = b"") -> Mock:
+        response = Mock(spec=requests.Response)
+        response.status_code = status
+        response.content = content
+        response.json.return_value = {} if json_data is None else json_data
+        if status >= 400:
+            response.raise_for_status.side_effect = requests.HTTPError(response=response)
+        return response
+
+    @patch.object(watchdog.time, "sleep")
+    @patch.object(watchdog.requests, "get")
+    def test_connection_error_is_retried_then_json_request_succeeds(self, get: Mock, sleep: Mock) -> None:
+        response = self.response(json_data={"workflow_runs": []})
+        get.side_effect = [requests.ConnectionError("certificate verification failed"), response]
+
+        self.assertEqual(watchdog.github_get("/example"), {"workflow_runs": []})
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once_with(1.0)
+
+    @patch.object(watchdog.time, "sleep")
+    @patch.object(watchdog.requests, "get")
+    def test_timeout_is_retried(self, get: Mock, sleep: Mock) -> None:
+        get.side_effect = [requests.Timeout("timed out"), self.response(json_data={"ok": True})]
+
+        self.assertEqual(watchdog.github_get("/example"), {"ok": True})
+        sleep.assert_called_once_with(1.0)
+
+    @patch.object(watchdog.time, "sleep")
+    @patch.object(watchdog.requests, "get")
+    def test_persistent_connection_error_propagates_after_three_attempts(self, get: Mock, sleep: Mock) -> None:
+        get.side_effect = requests.ConnectionError("still unavailable")
+
+        with self.assertRaises(requests.ConnectionError):
+            watchdog.github_get("/example")
+
+        self.assertEqual(get.call_count, 3)
+        self.assertEqual([call.args for call in sleep.call_args_list], [(1.0,), (2.0,)])
+
+    @patch.object(watchdog.time, "sleep")
+    @patch.object(watchdog.requests, "get")
+    def test_temporary_http_status_is_retried_then_succeeds(self, get: Mock, sleep: Mock) -> None:
+        temporary = self.response(503)
+        success = self.response(json_data={"ok": True})
+        get.side_effect = [temporary, success]
+
+        self.assertEqual(watchdog.github_get("/example"), {"ok": True})
+        temporary.close.assert_called_once_with()
+        sleep.assert_called_once_with(1.0)
+
+    @patch.object(watchdog.time, "sleep")
+    @patch.object(watchdog.requests, "get")
+    def test_permanent_http_status_is_not_retried(self, get: Mock, sleep: Mock) -> None:
+        get.return_value = self.response(404)
+
+        with self.assertRaises(requests.HTTPError):
+            watchdog.github_get("/example")
+
+        get.assert_called_once()
+        sleep.assert_not_called()
+
+    @patch.object(watchdog.time, "sleep")
+    @patch.object(watchdog.requests, "get")
+    def test_artifact_download_uses_shared_retry_behavior(self, get: Mock, sleep: Mock) -> None:
+        get.side_effect = [requests.Timeout("timed out"), self.response(content=b"archive")]
+
+        self.assertEqual(watchdog.github_get_bytes("https://api.github.com/artifact"), b"archive")
+        self.assertEqual(get.call_count, 2)
+        sleep.assert_called_once_with(1.0)
 
 
 class WatchdogEvaluateTests(unittest.TestCase):
