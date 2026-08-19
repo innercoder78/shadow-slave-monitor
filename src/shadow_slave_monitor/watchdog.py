@@ -242,6 +242,17 @@ def latest_completed(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     completed = [r for r in runs if r.get("status") == "completed" and run_timestamp(r) is not None]
     return max(completed, key=run_timestamp) if completed else None
 
+def history_regresses_behind_known_success(runs: list[dict[str, Any]], last_success_at: Any) -> bool:
+    """Return whether fetched history contradicts a persisted successful completion."""
+    known_success_time = parse_iso_datetime(last_success_at)
+    if known_success_time is None:
+        return False
+    success = latest_success(runs)
+    if success is not None:
+        return run_timestamp(success) < known_success_time
+    run_times = [timestamp for run in runs if (timestamp := run_timestamp(run)) is not None]
+    return not run_times or max(run_times) < known_success_time
+
 def active_recent_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     now = utc_now()
     active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested", "pending"}]
@@ -273,6 +284,9 @@ def build_body(success: dict[str, Any] | None, latest: dict[str, Any] | None, la
 
 def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[str, Any], bool, str]:
     now = utc_now()
+    if history_regresses_behind_known_success(runs, state.get("last_success_at")):
+        logging.warning("GitHub Actions history regressed behind the persisted known success; suppressing evaluation.")
+        return state, False, "suppressed_regressive_history"
     success = latest_success(runs)
     latest = latest_completed(runs)
     active = active_recent_run(runs)

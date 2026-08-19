@@ -57,14 +57,45 @@ class StateWriterValidationTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def write_watchdog_result(self, artifact_dir: Path) -> None:
+    def write_watchdog_result(self, artifact_dir: Path, status: str = "fresh") -> None:
         (artifact_dir / "watchdog_result.json").write_text(
-            json.dumps({"changed": False, "status": "fresh"}) + "\n",
+            json.dumps({"changed": False, "status": status}) + "\n",
             encoding="utf-8",
         )
 
     def write_valid_state(self, artifact_dir: Path) -> None:
         (artifact_dir / "state.json").write_text((ROOT / "state" / "state.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+    def write_valid_watchdog_state(self, artifact_dir: Path) -> None:
+        (artifact_dir / "watchdog_state.json").write_text(
+            (ROOT / "state" / "watchdog_state.json").read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+
+    def test_accepts_suppressed_regressive_history_watchdog_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self.write_metadata(artifact_dir, "state/watchdog_state.json")
+            self.write_valid_watchdog_state(artifact_dir)
+            self.write_watchdog_result(artifact_dir, "suppressed_regressive_history")
+
+            state_path, artifact_state, metadata = state_writer.validate_artifact_boundary(
+                artifact_dir, "state/watchdog_state.json"
+            )
+
+        self.assertEqual(state_path.name, "watchdog_state.json")
+        self.assertEqual(artifact_state, json.loads((ROOT / "state" / "watchdog_state.json").read_text(encoding="utf-8")))
+        self.assertEqual(metadata["artifact_type"], "watchdog")
+
+    def test_rejects_unknown_watchdog_result_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self.write_metadata(artifact_dir, "state/watchdog_state.json")
+            self.write_valid_watchdog_state(artifact_dir)
+            self.write_watchdog_result(artifact_dir, "arbitrary_unknown_status")
+
+            with self.assertRaisesRegex(SystemExit, "status is not recognized"):
+                state_writer.validate_artifact_boundary(artifact_dir, "state/watchdog_state.json")
 
     def test_rejects_invalid_monitor_result_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -124,7 +155,16 @@ class StateWriterPersistenceTests(unittest.TestCase):
         self.run_git(repo, "add", "state/state.json", "state/watchdog_state.json")
         self.run_git(repo, "commit", "-m", "initial state")
 
-    def write_artifact(self, repo: Path, artifact_dir: Path, state_file: str, state_data: dict, base_sha256: str) -> None:
+    def write_artifact(
+        self,
+        repo: Path,
+        artifact_dir: Path,
+        state_file: str,
+        state_data: dict,
+        base_sha256: str,
+        *,
+        watchdog_status: str = "fresh",
+    ) -> None:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         artifact_type = "monitor" if state_file == "state/state.json" else "watchdog"
         state_name = "state.json" if state_file == "state/state.json" else "watchdog_state.json"
@@ -144,7 +184,7 @@ class StateWriterPersistenceTests(unittest.TestCase):
         if result_name == "run_result.json":
             self.write_json(artifact_dir / result_name, {"result": "failed", "reasons": ["not found yet"], "degraded_reasons": []})
         else:
-            self.write_json(artifact_dir / result_name, {"changed": False, "status": "fresh"})
+            self.write_json(artifact_dir / result_name, {"changed": False, "status": watchdog_status})
 
     def persist(self, artifact_dir: Path, state_file: str, push_calls: list[list[str]]) -> None:
         original_run = state_writer.run
@@ -183,7 +223,14 @@ class StateWriterPersistenceTests(unittest.TestCase):
             state_file = "state/watchdog_state.json"
             state_data = json.loads((repo / state_file).read_text(encoding="utf-8"))
             artifact_dir = Path(tmp) / "artifact"
-            self.write_artifact(repo, artifact_dir, state_file, state_data, self.sha256(repo / state_file))
+            self.write_artifact(
+                repo,
+                artifact_dir,
+                state_file,
+                state_data,
+                self.sha256(repo / state_file),
+                watchdog_status="suppressed_regressive_history",
+            )
             push_calls: list[list[str]] = []
 
             with chdir(repo):
