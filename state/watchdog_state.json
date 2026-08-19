@@ -1,10 +1,10 @@
 {
-  "current_outage_id": "32262894884",
-  "last_alert_at": "2026-08-19T13:08:50+00:00",
-  "last_alert_outage_id": "31870625776",
-  "last_success_at": "2026-08-19T14:15:31Z",
-  "latest_failed_conclusion": null,
-  "latest_failed_run_url": null,
-  "open_outage_id": null,
-  "resolved_at": "2026-08-19T14:18:07+00:00"
+  "current_outage_id": "29552333449",
+  "last_alert_at": "2026-08-19T15:46:33+00:00",
+  "last_alert_outage_id": "29552333449",
+  "last_success_at": "2026-07-17T03:25:33Z",
+  "latest_failed_conclusion": "healthy",
+  "latest_failed_run_url": "https://github.com/innercoder78/shadow-slave-monitor/actions/runs/29552333449",
+  "open_outage_id": "29552333449",
+  "resolved_at": null
 }
