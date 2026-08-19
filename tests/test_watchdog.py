@@ -83,6 +83,124 @@ class WatchdogGitHubRequestTests(unittest.TestCase):
 
 
 class WatchdogEvaluateTests(unittest.TestCase):
+    @staticmethod
+    def state(last_success_at: str, **updates: object) -> dict[str, object]:
+        state: dict[str, object] = {
+            "current_outage_id": "known-success",
+            "open_outage_id": None,
+            "last_alert_at": None,
+            "last_alert_outage_id": None,
+            "last_success_at": last_success_at,
+            "latest_failed_conclusion": None,
+            "latest_failed_run_url": None,
+            "resolved_at": None,
+        }
+        state.update(updates)
+        return state
+
+    @staticmethod
+    def monitor_run(identifier: int, timestamp: str, *, result: str = "healthy") -> dict[str, object]:
+        return {
+            "id": identifier,
+            "status": "completed",
+            "conclusion": "success",
+            "monitor_result": result,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "html_url": f"https://github.com/innercoder78/shadow-slave-monitor/actions/runs/{identifier}",
+        }
+
+    def test_regressive_successful_history_is_suppressed_without_state_changes(self) -> None:
+        state = self.state(
+            "2026-06-10T11:00:00Z",
+            open_outage_id="known-success",
+            latest_failed_conclusion="failure",
+        )
+        original = state.copy()
+        runs = [self.monitor_run(10, "2026-06-10T05:00:00Z")]
+
+        with patch.object(watchdog, "send_watchdog") as send, self.assertLogs(level="WARNING") as logs:
+            new_state, changed, status = watchdog.evaluate(runs, state)
+
+        self.assertFalse(changed)
+        self.assertEqual(status, "suppressed_regressive_history")
+        self.assertEqual(new_state, original)
+        send.assert_not_called()
+        self.assertIn("regressed behind the persisted known success", " ".join(logs.output))
+
+    def test_no_success_and_all_returned_runs_predate_known_success_is_suppressed(self) -> None:
+        state = self.state("2026-06-10T11:00:00Z")
+        original = state.copy()
+        runs = [self.monitor_run(10, "2026-06-10T05:00:00Z", result="failed")]
+
+        with patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate(runs, state)
+
+        self.assertEqual((changed, status), (False, "suppressed_regressive_history"))
+        self.assertEqual(new_state, original)
+        send.assert_not_called()
+
+    def test_older_success_with_newer_failure_is_still_suppressed_as_incomplete(self) -> None:
+        state = self.state("2026-06-10T09:00:00Z")
+        original = state.copy()
+        runs = [
+            self.monitor_run(10, "2026-06-10T05:00:00Z"),
+            self.monitor_run(20, "2026-06-10T11:50:00Z", result="failed"),
+        ]
+
+        with patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate(runs, state)
+
+        self.assertEqual((changed, status), (False, "suppressed_regressive_history"))
+        self.assertEqual(new_state, original)
+        send.assert_not_called()
+
+    def test_newer_failed_run_without_returned_success_preserves_outage_detection(self) -> None:
+        now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+        state = self.state("2026-06-10T06:00:00Z")
+        failed = self.monitor_run(20, "2026-06-10T11:50:00Z", result="failed")
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate([failed], state)
+
+        self.assertTrue(changed)
+        self.assertEqual(status, "alert_sent")
+        self.assertEqual(new_state["last_success_at"], "2026-06-10T06:00:00Z")
+        send.assert_called_once()
+
+    def test_success_equal_to_known_success_uses_normal_stale_throttling(self) -> None:
+        now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+        state = self.state(
+            "2026-06-10T06:00:00Z",
+            current_outage_id="10",
+            open_outage_id="10",
+            last_alert_at="2026-06-10T11:00:00+00:00",
+            last_alert_outage_id="10",
+        )
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate([self.monitor_run(10, "2026-06-10T06:00:00Z")], state)
+
+        self.assertEqual((changed, status), (False, "throttled"))
+        self.assertEqual(new_state, state)
+        send.assert_not_called()
+
+    def test_newer_success_advances_state_during_normal_recovery(self) -> None:
+        now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+        state = self.state(
+            "2026-06-10T06:00:00Z",
+            open_outage_id="known-success",
+            latest_failed_conclusion="failed",
+        )
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate([self.monitor_run(20, "2026-06-10T11:50:00Z")], state)
+
+        self.assertEqual((changed, status), (True, "fresh"))
+        self.assertEqual(new_state["last_success_at"], "2026-06-10T11:50:00Z")
+        self.assertIsNone(new_state["open_outage_id"])
+        send.assert_not_called()
+
     def test_fresh_success_without_open_outage_or_failure_context_is_noop(self) -> None:
         now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
         success = {
