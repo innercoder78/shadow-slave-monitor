@@ -45,6 +45,7 @@ WATCHDOG_STATUSES = {
     "ok",
     "fresh",
     "suppressed_active_run",
+    "suppressed_regressive_history",
     "throttled",
     "alert_failed",
     "alert_sent",
