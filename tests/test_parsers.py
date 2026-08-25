@@ -749,37 +749,49 @@ class NovelFullParserTests(unittest.TestCase):
 
     def test_relative_absolute_and_www_canonical_links_are_accepted(self) -> None:
         html = """
-          <a href="/shadow-slave/chapter-3141.html">Chapter 3141: Relative</a>
-          <a href="https://novelfull.com/shadow-slave/chapter-3142.html">Chapter 3142 — Apex</a>
-          <a href="https://www.novelfull.com/shadow-slave/chapter-3143.html">Chapter 3143: WWW</a>
+          <a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a>
+          <a href="https://novelfull.com/shadow-slave/chapter-3161-a-new-dawn.html">Chapter 3161 — A New Dawn</a>
+          <a href="https://www.novelfull.com/shadow-slave/chapter-3162-into-the-dark.html">Chapter 3162: Into the Dark</a>
         """
         candidates = self.parse(html)
-        self.assertEqual([candidate.chapter for candidate in candidates], [3141, 3142, 3143])
-        self.assertEqual(candidates[0].url, "https://novelfull.com/shadow-slave/chapter-3141.html")
+        self.assertEqual([candidate.chapter for candidate in candidates], [3160, 3161, 3162])
+        self.assertEqual(candidates[0].title, "Rushing Towards a Nightmare")
+        self.assertEqual(
+            candidates[0].url,
+            "https://novelfull.com/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html",
+        )
+
+    def test_titleless_short_canonical_link_has_no_invented_title(self) -> None:
+        candidate = self.parse('<a href="/shadow-slave/chapter-15.html">Chapter 15</a>')[0]
+        self.assertEqual((candidate.chapter, candidate.title), (15, None))
 
     def test_unordered_and_duplicate_links_select_highest_trusted_chapter(self) -> None:
         html = """
-          <a href="/shadow-slave/chapter-3144.html">Chapter 3144: First</a>
-          <a href="/shadow-slave/chapter-3146.html">Chapter 3146: Latest</a>
-          <a href="/shadow-slave/chapter-3145.html">Chapter 3145: Middle</a>
-          <a href="/shadow-slave/chapter-3146.html">Chapter 3146: Latest</a>
+          <a href="/shadow-slave/chapter-3158-first-step.html">Chapter 3158: First Step</a>
+          <a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a>
+          <a href="/shadow-slave/chapter-3159-before-the-storm.html">Chapter 3159: Before the Storm</a>
+          <a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a>
         """
-        self.assertEqual([candidate.chapter for candidate in self.parse(html)], [3144, 3146, 3145])
+        self.assertEqual([candidate.chapter for candidate in self.parse(html)], [3158, 3160, 3159])
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
             report = check_public_site(self.source)
-        self.assertEqual((report.chapter, report.title), (3146, None))
+        self.assertEqual((report.chapter, report.title), (3160, "Rushing Towards a Nightmare"))
+        self.assertEqual(
+            report.url,
+            "https://novelfull.com/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html",
+        )
 
     def test_visible_chapter_must_match_url_and_title_is_cleaned_safely(self) -> None:
         html = """
-          <a href="/shadow-slave/chapter-3147.html">Chapter 9999: Forged</a>
-          <a href="/shadow-slave/chapter-3147.html">Chapter 3147 — Effie's Test-2: Who’s There?! 22</a>
+          <a href="/shadow-slave/chapter-3147-forged.html">Chapter 9999: Forged</a>
+          <a href="/shadow-slave/chapter-3147-unrelated-slug.html">Chapter 3147 — Effie's Test-2: Who’s There?! 22</a>
         """
         candidates = self.parse(html)
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].title, "Effie's Test-2: Who’s There?! 22")
 
     def test_canonical_link_without_chapter_label_does_not_invent_title(self) -> None:
-        candidate = self.parse('<a href="/shadow-slave/chapter-3148.html">Read latest</a>')[0]
+        candidate = self.parse('<a href="/shadow-slave/chapter-3148-secret-title.html">Read latest</a>')[0]
         self.assertEqual((candidate.chapter, candidate.title), (3148, None))
 
     def test_noncanonical_unsafe_and_malformed_links_are_rejected(self) -> None:
@@ -794,6 +806,10 @@ class NovelFullParserTests(unittest.TestCase):
             "https://user@novelfull.com/shadow-slave/chapter-3149.html",
             "https://[broken/shadow-slave/chapter-3149.html",
             "/shadow-slave.html",
+            "/shadow-slave/chapter-3149-.html",
+            "/shadow-slave/chapter-3149-title.html/extra",
+            "/shadow-slave/chapter-3149-title.htm",
+            "/shadow-slave/chapter-3149--title.html",
         )
         html = "".join(f'<a href="{href}">Chapter 3149: Forged</a>' for href in invalid_hrefs)
         self.assertEqual(self.parse(html), [])
@@ -809,6 +825,20 @@ class NovelFullParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
             with self.assertRaises(ParseError):
                 check_public_site(self.source)
+
+    def test_realistic_latest_chapters_block_reports_slugged_latest_link(self) -> None:
+        html = """
+          <div class="list-chapter">
+            <h3>Latest chapters</h3>
+            <ul>
+              <li><a href="/shadow-slave/chapter-3159-before-the-storm.html">Chapter 3159 Before the Storm</a></li>
+              <li><a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a></li>
+            </ul>
+          </div>
+        """
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            report = check_public_site(self.source)
+        self.assertEqual((report.chapter, report.title), (3160, "Rushing Towards a Nightmare"))
 
 
 class PublicSourceLoggingTests(unittest.TestCase):

@@ -641,7 +641,10 @@ def novelfull_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport
         or parsed_url.fragment
     ):
         return None
-    path_match = re.fullmatch(r"/shadow-slave/chapter-(\d{1,5})\.html", parsed_url.path)
+    path_match = re.fullmatch(
+        r"/shadow-slave/chapter-(\d{1,5})(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.html",
+        parsed_url.path,
+    )
     if not path_match:
         return None
     url_chapter = int(path_match.group(1))
