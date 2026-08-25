@@ -14,6 +14,7 @@ from shadow_slave_monitor.parsers import (
     parse_chikari_chapter_title,
     parse_freewebnovel_candidates,
     parse_novel_phoenix_candidates,
+    parse_novelfull_candidates,
     parse_shadowslave_space_chapter_title,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
@@ -738,6 +739,106 @@ class NovelPhoenixParserTests(unittest.TestCase):
         self.assertEqual(parse_novel_phoenix_candidates(soup, self.source.url), [])
         with self.assertRaises(ParseError):
             self.check(html)
+
+
+class NovelFullParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
+
+    def parse(self, html: str) -> list[ChapterReport]:
+        return parse_novelfull_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+
+    def test_relative_absolute_and_www_canonical_links_are_accepted(self) -> None:
+        html = """
+          <a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a>
+          <a href="https://novelfull.com/shadow-slave/chapter-3161-a-new-dawn.html">Chapter 3161 — A New Dawn</a>
+          <a href="https://www.novelfull.com/shadow-slave/chapter-3162-into-the-dark.html">Chapter 3162: Into the Dark</a>
+        """
+        candidates = self.parse(html)
+        self.assertEqual([candidate.chapter for candidate in candidates], [3160, 3161, 3162])
+        self.assertEqual(candidates[0].title, "Rushing Towards a Nightmare")
+        self.assertEqual(
+            candidates[0].url,
+            "https://novelfull.com/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html",
+        )
+
+    def test_titleless_short_canonical_link_has_no_invented_title(self) -> None:
+        candidate = self.parse('<a href="/shadow-slave/chapter-15.html">Chapter 15</a>')[0]
+        self.assertEqual((candidate.chapter, candidate.title), (15, None))
+
+    def test_unordered_and_duplicate_links_select_highest_trusted_chapter(self) -> None:
+        html = """
+          <a href="/shadow-slave/chapter-3158-first-step.html">Chapter 3158: First Step</a>
+          <a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a>
+          <a href="/shadow-slave/chapter-3159-before-the-storm.html">Chapter 3159: Before the Storm</a>
+          <a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a>
+        """
+        self.assertEqual([candidate.chapter for candidate in self.parse(html)], [3158, 3160, 3159])
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            report = check_public_site(self.source)
+        self.assertEqual((report.chapter, report.title), (3160, "Rushing Towards a Nightmare"))
+        self.assertEqual(
+            report.url,
+            "https://novelfull.com/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html",
+        )
+
+    def test_visible_chapter_must_match_url_and_title_is_cleaned_safely(self) -> None:
+        html = """
+          <a href="/shadow-slave/chapter-3147-forged.html">Chapter 9999: Forged</a>
+          <a href="/shadow-slave/chapter-3147-unrelated-slug.html">Chapter 3147 — Effie's Test-2: Who’s There?! 22</a>
+        """
+        candidates = self.parse(html)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].title, "Effie's Test-2: Who’s There?! 22")
+
+    def test_canonical_link_without_chapter_label_does_not_invent_title(self) -> None:
+        candidate = self.parse('<a href="/shadow-slave/chapter-3148-secret-title.html">Read latest</a>')[0]
+        self.assertEqual((candidate.chapter, candidate.title), (3148, None))
+
+    def test_noncanonical_unsafe_and_malformed_links_are_rejected(self) -> None:
+        invalid_hrefs = (
+            "https://evil.example/shadow-slave/chapter-3149.html",
+            "http://novelfull.com/shadow-slave/chapter-3149.html",
+            "https://novelfull.com/other-novel/chapter-3149.html",
+            "/shadow-slave/chapter-3149.html?ref=latest",
+            "/shadow-slave/chapter-3149.html#comments",
+            "/shadow-slave/chapter-3149.html;session=1",
+            "https://novelfull.com:443/shadow-slave/chapter-3149.html",
+            "https://user@novelfull.com/shadow-slave/chapter-3149.html",
+            "https://[broken/shadow-slave/chapter-3149.html",
+            "/shadow-slave.html",
+            "/shadow-slave/chapter-3149-.html",
+            "/shadow-slave/chapter-3149-title.html/extra",
+            "/shadow-slave/chapter-3149-title.htm",
+            "/shadow-slave/chapter-3149--title.html",
+        )
+        html = "".join(f'<a href="{href}">Chapter 3149: Forged</a>' for href in invalid_hrefs)
+        self.assertEqual(self.parse(html), [])
+
+    def test_page_numbers_and_plain_text_never_become_candidates(self) -> None:
+        html = """
+          <h1>Shadow Slave</h1><p>3160 Chapters · 9999 views · rating 4.9</p>
+          <p>Updated 2026-08-25 · rank 7</p><nav>Page 1 2 3 9999</nav>
+          <p>Chapter 9999: Plain text noise</p>
+          <a href="/shadow-slave.html">Chapter 9999: Index masquerade</a>
+        """
+        self.assertEqual(self.parse(html), [])
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            with self.assertRaises(ParseError):
+                check_public_site(self.source)
+
+    def test_realistic_latest_chapters_block_reports_slugged_latest_link(self) -> None:
+        html = """
+          <div class="list-chapter">
+            <h3>Latest chapters</h3>
+            <ul>
+              <li><a href="/shadow-slave/chapter-3159-before-the-storm.html">Chapter 3159 Before the Storm</a></li>
+              <li><a href="/shadow-slave/chapter-3160-rushing-towards-a-nightmare.html">Chapter 3160 Rushing Towards a Nightmare</a></li>
+            </ul>
+          </div>
+        """
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            report = check_public_site(self.source)
+        self.assertEqual((report.chapter, report.title), (3160, "Rushing Towards a Nightmare"))
 
 
 class PublicSourceLoggingTests(unittest.TestCase):

@@ -621,6 +621,60 @@ def parse_novel_phoenix_candidates(soup: BeautifulSoup, base_url: str) -> list[C
     return []
 
 
+def novelfull_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
+    """Parse only canonical NovelFull Shadow Slave chapter links."""
+    href = anchor.get("href")
+    if not isinstance(href, str) or not href:
+        return None
+    try:
+        url = urljoin(base_url, href)
+        parsed_url = urlparse(url)
+        hostname = parsed_url.hostname
+    except (TypeError, ValueError):
+        return None
+    if (
+        parsed_url.scheme != "https"
+        or hostname not in {"novelfull.com", "www.novelfull.com"}
+        or parsed_url.netloc.casefold() != hostname
+        or parsed_url.params
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        return None
+    path_match = re.fullmatch(
+        r"/shadow-slave/chapter-(\d{1,5})(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?\.html",
+        parsed_url.path,
+    )
+    if not path_match:
+        return None
+    url_chapter = int(path_match.group(1))
+    if chapter_validity_category(url_chapter) is not None:
+        return None
+
+    visible = parse_chapter_text(anchor.get_text(" ", strip=True))
+    if visible:
+        visible_chapter, title = visible
+        if visible_chapter != url_chapter:
+            return None
+        if title and is_non_chapter_title(title):
+            title = None
+    else:
+        title = None
+    return ChapterReport("", url_chapter, title, url)
+
+
+def parse_novelfull_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
+    """Return unique NovelFull candidates proved by canonical anchor URLs."""
+    candidates: list[ChapterReport] = []
+    seen: set[tuple[int, str]] = set()
+    for anchor in soup.find_all("a", href=True):
+        candidate = novelfull_candidate_from_anchor(anchor, base_url)
+        if candidate and (candidate.chapter, candidate.url) not in seen:
+            seen.add((candidate.chapter, candidate.url))
+            candidates.append(candidate)
+    return candidates
+
+
 def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> str | None:
     """Extract a title only from a heading that identifies the selected chapter."""
     soup = BeautifulSoup(html, "html.parser")
@@ -973,9 +1027,10 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
         return parse_novelarrow_candidates(soup, base_url)
     if site_name == "NovelFire":
         return parse_novelfire_candidates(soup, base_url)
+    if site_name == "NovelFull":
+        return parse_novelfull_candidates(soup, base_url)
 
     section_patterns = {
-        "NovelFull": r"\bLatest\s+chapters\b",
         "LightNovelUp": r"\bLATEST\s+MANGA\s+RELEASES\b",
     }
     if site_name in section_patterns:
@@ -984,7 +1039,7 @@ def iter_public_candidates(soup: BeautifulSoup, base_url: str, site_name: str = 
             return section_candidates
 
     candidates: list[ChapterReport] = []
-    require_shadow_href = site_name in {"NovelFull", "LightNovelUp"}
+    require_shadow_href = site_name == "LightNovelUp"
     for anchor in soup.find_all("a"):
         candidate = chapter_candidate_from_anchor(anchor, base_url, require_shadow_href=require_shadow_href)
         if candidate:
