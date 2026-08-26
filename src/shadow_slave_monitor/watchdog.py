@@ -125,7 +125,7 @@ def fetch_monitor_result_for_run(run: dict[str, Any]) -> str | None:
     artifacts = data.get("artifacts")
     if not isinstance(artifacts, list):
         return None
-    candidates = [artifact for artifact in artifacts if isinstance(artifact, dict) and artifact.get("name") == MONITOR_ARTIFACT_NAME and not artifact.get("expired")]
+    candidates = [artifact for artifact in artifacts if isinstance(artifact, dict) and artifact.get("name") == MONITOR_ARTIFACT_NAME and artifact.get("expired") is False]
     if not candidates:
         return None
     artifact = max(candidates, key=lambda item: item.get("created_at") or "")
@@ -232,19 +232,27 @@ def _repository_monitor_artifacts(
     repo: str,
     runs_by_id: dict[str, dict[str, Any]],
     discovery_cutoff: Any,
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], bool]:
     data = github_get(f"/repos/{repo}/actions/artifacts?name={quote(MONITOR_ARTIFACT_NAME, safe='')}&per_page=100")
     artifacts = data.get("artifacts")
     if not isinstance(artifacts, list):
         raise RuntimeError("GitHub repository artifacts payload is malformed")
     selected: dict[str, dict[str, Any]] = {}
+    metadata_unavailable = False
     omitted_lookups = 0
     for artifact in artifacts:
-        if not isinstance(artifact, dict) or artifact.get("name") != MONITOR_ARTIFACT_NAME or artifact.get("expired") is not False:
+        if not isinstance(artifact, dict) or artifact.get("name") != MONITOR_ARTIFACT_NAME:
             continue
         created_at = parse_iso_datetime(artifact.get("created_at"))
         if created_at is None:
             raise RuntimeError("GitHub repository artifact timestamp is malformed")
+        if created_at < discovery_cutoff:
+            continue
+        expired = artifact.get("expired")
+        if expired is not True and expired is not False:
+            metadata_unavailable = True
+            logging.info("Stale-alert verification found malformed recent artifact expiration metadata.")
+            continue
         associated = artifact.get("workflow_run")
         associated_id = associated.get("id") if isinstance(associated, dict) else None
         identifier = str(associated_id) if associated_id is not None else ""
@@ -258,12 +266,8 @@ def _repository_monitor_artifacts(
             and archive_url == expected_url
         )
         if not valid_location:
-            if created_at >= discovery_cutoff:
-                raise RuntimeError("Recent GitHub repository artifact association is malformed")
-            continue
+            raise RuntimeError("Recent GitHub repository artifact association is malformed")
         if identifier not in runs_by_id:
-            if created_at < discovery_cutoff:
-                continue
             omitted_lookups += 1
             if omitted_lookups > MAX_ARTIFACT_RUN_LOOKUPS:
                 raise RuntimeError("Recent GitHub repository artifact lookup limit was exceeded")
@@ -275,7 +279,7 @@ def _repository_monitor_artifacts(
         previous = selected.get(identifier)
         if previous is None or str(artifact.get("created_at") or "") > str(previous.get("created_at") or ""):
             selected[identifier] = artifact
-    return selected, runs_by_id
+    return selected, runs_by_id, metadata_unavailable
 
 
 def merge_run_evidence(primary_runs: list[dict[str, Any]], corroborated_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -302,10 +306,12 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
         artifact_discovery_cutoff = success_cutoff - WATCHDOG_LOOKBACK_MARGIN
         repository_runs = _repository_monitor_runs(repo)
         runs_by_id = {str(run["id"]): run for run in repository_runs if run.get("id") is not None}
-        artifacts, runs_by_id = _repository_monitor_artifacts(repo, runs_by_id, artifact_discovery_cutoff)
+        artifacts, runs_by_id, artifact_metadata_unavailable = _repository_monitor_artifacts(
+            repo, runs_by_id, artifact_discovery_cutoff
+        )
         verified: list[dict[str, Any]] = []
         result_unavailable = False
-        metadata_unavailable = False
+        metadata_unavailable = artifact_metadata_unavailable
         for run in runs_by_id.values():
             copy = dict(run)
             timestamp = run_timestamp(copy)
@@ -314,7 +320,7 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
             artifact_timestamp = parse_iso_datetime(artifact.get("created_at")) if artifact is not None else None
             if status == "completed" and timestamp is not None and timestamp >= artifact_discovery_cutoff:
                 result = None
-                if artifact is not None:
+                if artifact is not None and artifact.get("expired") is False:
                     result = monitor_result_from_zip(github_get_bytes(str(artifact["archive_download_url"])))
                 copy["monitor_result"] = result
                 if result is None and timestamp >= success_cutoff:
