@@ -657,6 +657,78 @@ class WatchdogArtifactTests(unittest.TestCase):
                 "healthy",
             )
 
+    def test_artifact_just_before_success_cutoff_resolves_fresh_run(self) -> None:
+        now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        for result in ("healthy", "degraded"):
+            state = WatchdogEvaluateTests.state("2026-08-19T00:00:00Z")
+            original = state.copy()
+            primary = [WatchdogEvaluateTests.monitor_run(32396092427, "2026-08-20T17:10:37Z")]
+            resolved = WatchdogEvaluateTests.monitor_run(32928552910, "2026-08-26T07:02:00Z", result=result)
+            resolved.update({
+                "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+                "head_branch": "main", "event": "workflow_dispatch",
+                "repository": {"full_name": "innercoder78/shadow-slave-monitor"},
+            })
+            artifact = {
+                "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T06:58:00Z",
+                "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+                "workflow_run": {"id": resolved["id"]},
+            }
+            with self.subTest(result=result), patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+                watchdog, "utc_now", return_value=now
+            ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": [artifact]}, resolved]) as get, patch.object(
+                watchdog, "github_get_bytes", return_value=self.result_zip(result)
+            ), patch.object(watchdog, "send_watchdog") as send:
+                new_state, changed, status = watchdog.evaluate(primary, state, watchdog.corroborate_stale_history)
+            self.assertEqual((changed, status), (False, "fresh"))
+            self.assertEqual(new_state, original)
+            self.assertEqual(get.call_count, 3)
+            send.assert_not_called()
+
+    def test_artifact_outside_discovery_margin_does_not_resolve_run(self) -> None:
+        artifact = {
+            "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T06:29:59Z",
+            "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+            "workflow_run": {"id": 32928552910},
+        }
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": [artifact]}]) as get, patch.object(
+            watchdog, "github_get_bytes"
+        ) as download:
+            classification, runs = watchdog.corroborate_stale_history([])
+        self.assertEqual((classification, runs), (watchdog.VERIFICATION_STALE, []))
+        self.assertEqual(get.call_count, 2)
+        download.assert_not_called()
+
+    def test_artifact_only_lookup_cap_fails_closed(self) -> None:
+        artifacts = [
+            {
+                "id": identifier, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T06:58:00Z",
+                "archive_download_url": f"https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/{identifier}/zip",
+                "workflow_run": {"id": 1000 + identifier},
+            }
+            for identifier in range(1, watchdog.MAX_ARTIFACT_RUN_LOOKUPS + 2)
+        ]
+        resolved_runs = [
+            {
+                "id": 1000 + identifier, "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+                "head_branch": "main", "event": "workflow_dispatch", "status": "completed",
+                "created_at": "2026-08-26T06:40:00Z", "updated_at": "2026-08-26T06:45:00Z",
+            }
+            for identifier in range(1, watchdog.MAX_ARTIFACT_RUN_LOOKUPS + 1)
+        ]
+        responses = [{"workflow_runs": []}, {"artifacts": artifacts}, *resolved_runs]
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        ), patch.object(watchdog, "github_get", side_effect=responses) as get, patch.object(
+            watchdog, "send_watchdog"
+        ) as send, self.assertLogs(level="WARNING"):
+            classification, _ = watchdog.corroborate_stale_history([])
+        self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
+        self.assertEqual(get.call_count, 2 + watchdog.MAX_ARTIFACT_RUN_LOOKUPS)
+        send.assert_not_called()
+
 
 class WorkflowPolicyTests(unittest.TestCase):
     def test_monitor_workflow_does_not_propagate_failed_health_result(self) -> None:

@@ -230,7 +230,7 @@ def _validated_repository_run(run: Any, repo: str, expected_id: str | None = Non
 def _repository_monitor_artifacts(
     repo: str,
     runs_by_id: dict[str, dict[str, Any]],
-    cutoff: Any,
+    discovery_cutoff: Any,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     data = github_get(f"/repos/{repo}/actions/artifacts?name={quote(MONITOR_ARTIFACT_NAME, safe='')}&per_page=100")
     artifacts = data.get("artifacts")
@@ -257,11 +257,11 @@ def _repository_monitor_artifacts(
             and archive_url == expected_url
         )
         if not valid_location:
-            if created_at >= cutoff:
+            if created_at >= discovery_cutoff:
                 raise RuntimeError("Recent GitHub repository artifact association is malformed")
             continue
         if identifier not in runs_by_id:
-            if created_at < cutoff:
+            if created_at < discovery_cutoff:
                 continue
             omitted_lookups += 1
             if omitted_lookups > MAX_ARTIFACT_RUN_LOOKUPS:
@@ -284,16 +284,17 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
         logging.warning("Stale-alert verification suppressed: repository context is unavailable.")
         return VERIFICATION_UNCERTAIN, primary_runs
     try:
-        cutoff = utc_now() - timedelta(hours=WATCHDOG_STALE_HOURS)
+        success_cutoff = utc_now() - timedelta(hours=WATCHDOG_STALE_HOURS)
+        artifact_discovery_cutoff = success_cutoff - WATCHDOG_LOOKBACK_MARGIN
         repository_runs = _repository_monitor_runs(repo)
         runs_by_id = {str(run["id"]): run for run in repository_runs if run.get("id") is not None}
-        artifacts, runs_by_id = _repository_monitor_artifacts(repo, runs_by_id, cutoff)
+        artifacts, runs_by_id = _repository_monitor_artifacts(repo, runs_by_id, artifact_discovery_cutoff)
         verified: list[dict[str, Any]] = []
         result_unavailable = False
         for run in runs_by_id.values():
             copy = dict(run)
             timestamp = run_timestamp(copy)
-            if copy.get("status") == "completed" and timestamp is not None and timestamp >= cutoff:
+            if copy.get("status") == "completed" and timestamp is not None and timestamp >= success_cutoff:
                 artifact = artifacts.get(str(copy.get("id")))
                 result = None
                 if artifact is not None:
@@ -316,11 +317,11 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
 
     primary_recent_ids = {
         run_id(run) for run in primary_runs
-        if run_timestamp(run) is not None and run_timestamp(run) >= cutoff
+        if run_timestamp(run) is not None and run_timestamp(run) >= success_cutoff
     }
     repository_recent_ids = {
         run_id(run) for run in verified
-        if run_timestamp(run) is not None and run_timestamp(run) >= cutoff
+        if run_timestamp(run) is not None and run_timestamp(run) >= success_cutoff
     }
     if primary_recent_ids - repository_recent_ids:
         logging.warning("Stale-alert verification suppressed: workflow histories disagree about recent monitor activity.")
@@ -328,7 +329,7 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
 
     merged = list({run_id(run): run for run in primary_runs + verified}.values())
     success = latest_success(verified)
-    if success is not None and run_timestamp(success) >= cutoff:
+    if success is not None and run_timestamp(success) >= success_cutoff:
         logging.info(
             "Stale-alert verification found a fresh monitor success; run_id=%s timestamp=%s result=%s.",
             run_id(success), run_timestamp_string(success), monitor_completion_result(success),
