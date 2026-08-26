@@ -307,13 +307,13 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
         for run in runs_by_id.values():
             copy = dict(run)
             timestamp = run_timestamp(copy)
-            if copy.get("status") == "completed" and timestamp is not None and timestamp >= success_cutoff:
+            if copy.get("status") == "completed" and timestamp is not None and timestamp >= artifact_discovery_cutoff:
                 artifact = artifacts.get(str(copy.get("id")))
                 result = None
                 if artifact is not None:
                     result = monitor_result_from_zip(github_get_bytes(str(artifact["archive_download_url"])))
                 copy["monitor_result"] = result
-                if result is None:
+                if result is None and timestamp >= success_cutoff:
                     result_unavailable = True
                     logging.info(
                         "Stale-alert verification found an unavailable recent monitor result; run_id=%s timestamp=%s.",
