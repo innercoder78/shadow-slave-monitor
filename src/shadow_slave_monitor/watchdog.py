@@ -277,6 +277,19 @@ def _repository_monitor_artifacts(
     return selected, runs_by_id
 
 
+def merge_run_evidence(primary_runs: list[dict[str, Any]], corroborated_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge duplicate runs without erasing an authoritative logical result."""
+    merged = {run_id(run): dict(run) for run in primary_runs}
+    for run in corroborated_runs:
+        identifier = run_id(run)
+        copy = dict(run)
+        primary = merged.get(identifier)
+        if "monitor_result" not in copy and primary is not None and "monitor_result" in primary:
+            copy["monitor_result"] = primary["monitor_result"]
+        merged[identifier] = copy
+    return list(merged.values())
+
+
 def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
     """Independently verify evidence immediately before a stale alert."""
     repo = os.environ.get("GITHUB_REPOSITORY")
@@ -327,7 +340,7 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
         logging.warning("Stale-alert verification suppressed: workflow histories disagree about recent monitor activity.")
         return VERIFICATION_UNCERTAIN, primary_runs
 
-    merged = list({run_id(run): run for run in primary_runs + verified}.values())
+    merged = merge_run_evidence(primary_runs, verified)
     success = latest_success(verified)
     if success is not None and run_timestamp(success) >= success_cutoff:
         logging.info(

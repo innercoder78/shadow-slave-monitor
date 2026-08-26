@@ -729,6 +729,74 @@ class WatchdogArtifactTests(unittest.TestCase):
         self.assertEqual(get.call_count, 2 + watchdog.MAX_ARTIFACT_RUN_LOOKUPS)
         send.assert_not_called()
 
+    def test_lookback_band_failed_result_survives_corroborating_merge(self) -> None:
+        now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        failed = WatchdogEvaluateTests.monitor_run(20, "2026-08-26T06:50:00Z", result="failed")
+        repository_copy = dict(failed)
+        repository_copy.pop("monitor_result")
+        repository_copy.update({
+            "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+            "head_branch": "main", "event": "workflow_dispatch",
+        })
+        state = WatchdogEvaluateTests.state("2026-08-26T06:00:00Z")
+
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=now
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": [repository_copy]}, {"artifacts": []}]), patch.object(
+            watchdog, "send_watchdog"
+        ) as send:
+            new_state, changed, status = watchdog.evaluate([failed], state, watchdog.corroborate_stale_history)
+
+        self.assertEqual((changed, status), (True, "alert_sent"))
+        self.assertEqual(new_state["last_success_at"], "2026-08-26T06:00:00Z")
+        self.assertEqual(new_state["latest_failed_conclusion"], "failed")
+        self.assertEqual(new_state["latest_failed_run_url"], failed["html_url"])
+        send.assert_called_once()
+
+    def test_lookback_band_explicit_unknown_survives_corroborating_merge(self) -> None:
+        primary = WatchdogEvaluateTests.monitor_run(20, "2026-08-26T06:50:00Z")
+        primary["monitor_result"] = None
+        corroborated = dict(primary)
+        corroborated.pop("monitor_result")
+
+        merged = watchdog.merge_run_evidence([primary], [corroborated])
+
+        self.assertIn("monitor_result", merged[0])
+        self.assertIsNone(merged[0]["monitor_result"])
+        self.assertIsNone(watchdog.monitor_completion_result(merged[0]))
+
+    def test_fresh_corroborating_result_overrides_primary_unknown(self) -> None:
+        primary = WatchdogEvaluateTests.monitor_run(20, "2026-08-26T11:50:00Z")
+        primary["monitor_result"] = None
+        corroborated = dict(primary, monitor_result="degraded")
+
+        merged = watchdog.merge_run_evidence([primary], [corroborated])
+
+        self.assertEqual(watchdog.monitor_completion_result(merged[0]), "degraded")
+
+    def test_fresh_corroborating_unknown_overrides_primary_result_and_suppresses(self) -> None:
+        now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        primary = WatchdogEvaluateTests.monitor_run(20, "2026-08-26T11:50:00Z", result="failed")
+        repository_copy = dict(primary)
+        repository_copy.pop("monitor_result")
+        repository_copy.update({
+            "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+            "head_branch": "main", "event": "workflow_dispatch",
+        })
+        state = WatchdogEvaluateTests.state("2026-08-26T06:00:00Z")
+        original = state.copy()
+
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=now
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": [repository_copy]}, {"artifacts": []}]), patch.object(
+            watchdog, "send_watchdog"
+        ) as send, self.assertLogs(level="WARNING"):
+            new_state, changed, status = watchdog.evaluate([primary], state, watchdog.corroborate_stale_history)
+
+        self.assertEqual((changed, status), (False, "suppressed_unverified_history"))
+        self.assertEqual(new_state, original)
+        send.assert_not_called()
+
 
 class WorkflowPolicyTests(unittest.TestCase):
     def test_monitor_workflow_does_not_propagate_failed_health_result(self) -> None:
