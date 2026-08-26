@@ -292,7 +292,7 @@ def main() -> None:
         logging.error("State validation failed closed: %s", exc)
     except Exception as exc:
         result.fail(f"unexpected monitor failure: {type(exc).__name__}")
-        logging.exception("Unexpected monitor failure")
+        logging.error("Unexpected monitor failure safely contained: type=%s", type(exc).__name__)
     finally:
         write_result(result)
     if result.status == Health.FAILED:

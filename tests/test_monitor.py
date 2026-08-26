@@ -94,6 +94,23 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
         self.assertTrue(result.reasons)
 
 
+class UnexpectedFailureLoggingTests(unittest.TestCase):
+    def test_top_level_unexpected_failure_does_not_log_exception_contents(self) -> None:
+        secret = "https://secret.example/private?token=super-secret cookie=secret-value Authorization: Bearer secret-token response-body-secret"
+        captured = []
+        with patch.object(monitor, "load_state", side_effect=RuntimeError(secret)), \
+             patch.object(monitor, "write_result", side_effect=captured.append), \
+             self.assertLogs(level="ERROR") as logs, self.assertRaisesRegex(SystemExit, "2"):
+            monitor.main()
+
+        self.assertEqual(captured[0].reasons, ["unexpected monitor failure: RuntimeError"])
+        output = "\n".join(logs.output)
+        self.assertIn("Unexpected monitor failure safely contained: type=RuntimeError", output)
+        self.assertNotIn("Traceback", output)
+        for unsafe in ("secret.example", "super-secret", "secret-value", "secret-token", "response-body-secret"):
+            self.assertNotIn(unsafe, output)
+
+
 class WebNovelCadenceTests(unittest.TestCase):
     def test_every_five_minute_cadence_hits_each_twenty_minute_cycle(self) -> None:
         for seconds in (0, 30):
