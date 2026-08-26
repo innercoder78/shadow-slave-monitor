@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import unittest
+import io
+import json
+import zipfile
 from pathlib import Path
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
@@ -366,6 +369,55 @@ class WatchdogEvaluateTests(unittest.TestCase):
         send.assert_called_once()
         self.assertEqual(new_state["latest_failed_conclusion"], "success")
 
+    def test_august_false_positive_shape_is_prevented_by_corroboration(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        state = self.state("2026-08-19T00:00:00Z")
+        original = state.copy()
+        stale_primary = [self.monitor_run(32396092427, "2026-08-20T17:10:37Z")]
+        recent = self.monitor_run(32928552910, "2026-08-26T04:00:45Z")
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate(
+                stale_primary,
+                state,
+                verify_stale=lambda runs: (watchdog.VERIFICATION_FRESH, runs + [recent]),
+            )
+
+        self.assertEqual((changed, status), (False, "fresh"))
+        self.assertEqual(new_state, original)
+        send.assert_not_called()
+
+    def test_unverified_recent_result_suppresses_alert_without_mutation(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        state = self.state("2026-08-19T00:00:00Z")
+        original = state.copy()
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            new_state, changed, status = watchdog.evaluate(
+                [self.monitor_run(32396092427, "2026-08-20T17:10:37Z")],
+                state,
+                verify_stale=lambda runs: (watchdog.VERIFICATION_UNCERTAIN, runs),
+            )
+
+        self.assertEqual((changed, status), (False, "suppressed_unverified_history"))
+        self.assertEqual(new_state, original)
+        send.assert_not_called()
+
+    def test_verified_failed_result_still_allows_genuine_alert(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        state = self.state("2026-08-19T00:00:00Z")
+        failed = self.monitor_run(32928552910, "2026-08-26T04:00:45Z", result="failed")
+
+        with patch.object(watchdog, "utc_now", return_value=now), patch.object(watchdog, "send_watchdog") as send:
+            _, changed, status = watchdog.evaluate(
+                [self.monitor_run(32396092427, "2026-08-20T17:10:37Z")],
+                state,
+                verify_stale=lambda runs: (watchdog.VERIFICATION_STALE, runs + [failed]),
+            )
+
+        self.assertEqual((changed, status), (True, "alert_sent"))
+        send.assert_called_once()
+
     def test_stale_monitor_alert_throttling_avoids_repeated_alert_for_unresolved_outage(self) -> None:
         now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
         success = {
@@ -435,6 +487,84 @@ class WatchdogArtifactTests(unittest.TestCase):
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr("run_result.json", json.dumps({"result": "bad", "reasons": [], "degraded_reasons": []}))
         self.assertIsNone(watchdog.monitor_result_from_zip(buffer.getvalue()))
+
+    @staticmethod
+    def result_zip(result: str) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("run_result.json", json.dumps({"result": result, "reasons": [], "degraded_reasons": []}))
+        return buffer.getvalue()
+
+    def test_repository_corroboration_finds_omitted_healthy_and_degraded_runs(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        for result in ("healthy", "degraded"):
+            run = {
+                "id": 32928552910,
+                "name": watchdog.MONITOR_WORKFLOW_NAME,
+                "path": watchdog.MONITOR_WORKFLOW_PATH,
+                "head_branch": "main",
+                "event": "workflow_dispatch",
+                "status": "completed",
+                "conclusion": "success",
+                "created_at": "2026-08-26T03:50:00Z",
+                "updated_at": "2026-08-26T04:00:45Z",
+            }
+            artifact = {
+                "name": "monitor-state",
+                "expired": False,
+                "created_at": "2026-08-26T04:01:00Z",
+                "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+                "workflow_run": {"id": run["id"]},
+            }
+            with self.subTest(result=result), patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+                watchdog, "utc_now", return_value=now
+            ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": [run]}, {"artifacts": [artifact]}]), patch.object(
+                watchdog, "github_get_bytes", return_value=self.result_zip(result)
+            ):
+                classification, runs = watchdog.corroborate_stale_history([])
+            self.assertEqual(classification, watchdog.VERIFICATION_FRESH)
+            self.assertEqual(watchdog.monitor_completion_result(runs[0]), result)
+
+    def test_recent_success_conclusion_with_missing_artifact_is_uncertain(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        run = {
+            "id": 32928552910, "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+            "head_branch": "main", "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+            "created_at": "2026-08-26T03:50:00Z", "updated_at": "2026-08-26T04:00:45Z",
+        }
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=now
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": [run]}, {"artifacts": []}]), self.assertLogs(level="WARNING"):
+            classification, _ = watchdog.corroborate_stale_history([])
+        self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
+
+    def test_repository_artifact_api_failure_is_safely_uncertain(self) -> None:
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "github_get", side_effect=[{"workflow_runs": []}, requests.ConnectionError("secret URL")]
+        ), self.assertLogs(level="WARNING") as logs:
+            classification, _ = watchdog.corroborate_stale_history([])
+        self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
+        self.assertNotIn("secret URL", " ".join(logs.output))
+
+    def test_materially_disagreeing_recent_histories_are_uncertain(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        primary = [{
+            "id": 32928552910, "status": "completed", "monitor_result": "failed",
+            "created_at": "2026-08-26T03:50:00Z", "updated_at": "2026-08-26T04:00:45Z",
+        }]
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=now
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": []}]), self.assertLogs(level="WARNING"):
+            classification, _ = watchdog.corroborate_stale_history(primary)
+        self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
+
+    def test_consistent_absence_of_recent_runs_confirms_stale_evidence(self) -> None:
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": []}]
+        ):
+            classification, runs = watchdog.corroborate_stale_history([])
+        self.assertEqual(classification, watchdog.VERIFICATION_STALE)
+        self.assertEqual(runs, [])
 
 
 class WorkflowPolicyTests(unittest.TestCase):
