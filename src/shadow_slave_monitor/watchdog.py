@@ -28,6 +28,7 @@ MAX_WORKFLOW_RUN_PAGES = 10
 MONITOR_ARTIFACT_NAME = "monitor-state"
 NON_FAILED_MONITOR_RESULTS = {"healthy", "degraded"}
 ALL_MONITOR_RESULTS = NON_FAILED_MONITOR_RESULTS | {"failed"}
+ACTIVE_WORKFLOW_STATUSES = {"queued", "in_progress", "waiting", "requested", "pending"}
 GITHUB_REQUEST_ATTEMPTS = 3
 GITHUB_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
 MAX_ARTIFACT_RUN_LOOKUPS = 10
@@ -304,11 +305,14 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
         artifacts, runs_by_id = _repository_monitor_artifacts(repo, runs_by_id, artifact_discovery_cutoff)
         verified: list[dict[str, Any]] = []
         result_unavailable = False
+        metadata_unavailable = False
         for run in runs_by_id.values():
             copy = dict(run)
             timestamp = run_timestamp(copy)
-            if copy.get("status") == "completed" and timestamp is not None and timestamp >= artifact_discovery_cutoff:
-                artifact = artifacts.get(str(copy.get("id")))
+            status = copy.get("status")
+            artifact = artifacts.get(str(copy.get("id")))
+            artifact_timestamp = parse_iso_datetime(artifact.get("created_at")) if artifact is not None else None
+            if status == "completed" and timestamp is not None and timestamp >= artifact_discovery_cutoff:
                 result = None
                 if artifact is not None:
                     result = monitor_result_from_zip(github_get_bytes(str(artifact["archive_download_url"])))
@@ -319,6 +323,32 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
                         "Stale-alert verification found an unavailable recent monitor result; run_id=%s timestamp=%s.",
                         run_id(copy), run_timestamp_string(copy),
                     )
+            elif (
+                status in ACTIVE_WORKFLOW_STATUSES
+                and parse_run_time(copy, "created_at") is None
+                and (
+                    (timestamp is not None and timestamp >= success_cutoff)
+                    or (artifact_timestamp is not None and artifact_timestamp >= artifact_discovery_cutoff)
+                )
+            ):
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found recent active monitor metadata with an unavailable creation time; "
+                    "run_id=%s timestamp=%s.",
+                    run_id(copy), run_timestamp_string(copy),
+                )
+            elif timestamp is not None and timestamp >= success_cutoff and status not in ACTIVE_WORKFLOW_STATUSES:
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found an indeterminate recent monitor status; run_id=%s timestamp=%s.",
+                    run_id(copy), run_timestamp_string(copy),
+                )
+            elif timestamp is None and artifact_timestamp is not None and artifact_timestamp >= artifact_discovery_cutoff:
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found a recent monitor artifact with an unavailable run timestamp; run_id=%s.",
+                    run_id(copy),
+                )
             verified.append(copy)
     except Exception as exc:
         status = exc.response.status_code if isinstance(exc, requests.HTTPError) and exc.response is not None else None
@@ -348,8 +378,8 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
             run_id(success), run_timestamp_string(success), monitor_completion_result(success),
         )
         return VERIFICATION_FRESH, merged
-    if result_unavailable:
-        logging.warning("Stale-alert verification suppressed: no fresh success was verified and a recent result is unavailable.")
+    if result_unavailable or metadata_unavailable:
+        logging.warning("Stale-alert verification suppressed: no fresh success was verified and recent evidence is incomplete.")
         return VERIFICATION_UNCERTAIN, primary_runs
     return VERIFICATION_STALE, merged
 
@@ -416,7 +446,7 @@ def history_regresses_behind_known_success(runs: list[dict[str, Any]], last_succ
 
 def active_recent_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     now = utc_now()
-    active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested", "pending"}]
+    active = [r for r in runs if r.get("status") in ACTIVE_WORKFLOW_STATUSES]
     recent = []
     for run in active:
         created = parse_run_time(run, "created_at")
