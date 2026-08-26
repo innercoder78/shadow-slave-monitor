@@ -585,6 +585,27 @@ class WatchdogArtifactTests(unittest.TestCase):
             self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
             download.assert_not_called()
 
+    def test_recent_active_run_with_unusable_created_at_fails_closed(self) -> None:
+        now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        for status, created_at in (("in_progress", None), ("queued", "not-a-time")):
+            run = {
+                "id": 20, "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+                "head_branch": "main", "event": "workflow_dispatch", "status": status,
+                "created_at": created_at, "updated_at": "2026-08-26T11:50:00Z",
+            }
+            state = WatchdogEvaluateTests.state("2026-08-26T06:00:00Z")
+            original = state.copy()
+            with self.subTest(status=status), patch.dict(
+                "os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}
+            ), patch.object(watchdog, "utc_now", return_value=now), patch.object(
+                watchdog, "github_get", side_effect=[{"workflow_runs": [run]}, {"artifacts": []}]
+            ), patch.object(watchdog, "send_watchdog") as send, self.assertLogs(level="WARNING"):
+                new_state, changed, result = watchdog.evaluate([run], state, watchdog.corroborate_stale_history)
+
+            self.assertEqual((changed, result), (False, "suppressed_unverified_history"))
+            self.assertEqual(new_state, original)
+            send.assert_not_called()
+
     def test_verified_fresh_success_wins_over_indeterminate_status(self) -> None:
         now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
         healthy = {
@@ -607,6 +628,29 @@ class WatchdogArtifactTests(unittest.TestCase):
 
         self.assertEqual(classification, watchdog.VERIFICATION_FRESH)
         self.assertEqual(watchdog.monitor_completion_result(next(run for run in runs if run["id"] == 10)), "degraded")
+
+    def test_verified_fresh_success_wins_over_active_run_with_unusable_created_at(self) -> None:
+        now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+        healthy = {
+            "id": 10, "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+            "head_branch": "main", "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+            "created_at": "2026-08-26T11:40:00Z", "updated_at": "2026-08-26T11:45:00Z",
+        }
+        active = dict(healthy, id=20, status="in_progress", created_at=None, updated_at="2026-08-26T11:50:00Z")
+        artifact = {
+            "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T11:46:00Z",
+            "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+            "workflow_run": {"id": 10},
+        }
+        with patch.dict(
+            "os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}
+        ), patch.object(watchdog, "utc_now", return_value=now), patch.object(
+            watchdog, "github_get", side_effect=[{"workflow_runs": [active, healthy]}, {"artifacts": [artifact]}]
+        ), patch.object(watchdog, "github_get_bytes", return_value=self.result_zip("healthy")):
+            classification, runs = watchdog.corroborate_stale_history([])
+
+        self.assertEqual(classification, watchdog.VERIFICATION_FRESH)
+        self.assertEqual(watchdog.monitor_completion_result(next(run for run in runs if run["id"] == 10)), "healthy")
 
     def test_recognized_active_statuses_preserve_grace_and_long_running_behavior(self) -> None:
         now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)

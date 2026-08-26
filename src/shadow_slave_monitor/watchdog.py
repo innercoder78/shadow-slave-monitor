@@ -323,6 +323,20 @@ def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, 
                         "Stale-alert verification found an unavailable recent monitor result; run_id=%s timestamp=%s.",
                         run_id(copy), run_timestamp_string(copy),
                     )
+            elif (
+                status in ACTIVE_WORKFLOW_STATUSES
+                and parse_run_time(copy, "created_at") is None
+                and (
+                    (timestamp is not None and timestamp >= success_cutoff)
+                    or (artifact_timestamp is not None and artifact_timestamp >= artifact_discovery_cutoff)
+                )
+            ):
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found recent active monitor metadata with an unavailable creation time; "
+                    "run_id=%s timestamp=%s.",
+                    run_id(copy), run_timestamp_string(copy),
+                )
             elif timestamp is not None and timestamp >= success_cutoff and status not in ACTIVE_WORKFLOW_STATUSES:
                 metadata_unavailable = True
                 logging.info(
