@@ -87,6 +87,20 @@ class StateWriterValidationTests(unittest.TestCase):
         self.assertEqual(artifact_state, json.loads((ROOT / "state" / "watchdog_state.json").read_text(encoding="utf-8")))
         self.assertEqual(metadata["artifact_type"], "watchdog")
 
+    def test_accepts_suppressed_unverified_history_watchdog_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self.write_metadata(artifact_dir, "state/watchdog_state.json")
+            self.write_valid_watchdog_state(artifact_dir)
+            self.write_watchdog_result(artifact_dir, "suppressed_unverified_history")
+
+            _, artifact_state, metadata = state_writer.validate_artifact_boundary(
+                artifact_dir, "state/watchdog_state.json"
+            )
+
+        self.assertEqual(artifact_state, json.loads((ROOT / "state" / "watchdog_state.json").read_text(encoding="utf-8")))
+        self.assertEqual(metadata["artifact_type"], "watchdog")
+
     def test_rejects_unknown_watchdog_result_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)

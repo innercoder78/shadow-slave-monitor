@@ -9,7 +9,7 @@ import os
 import time
 import zipfile
 from datetime import timedelta
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 import requests
@@ -21,14 +21,20 @@ from shadow_slave_monitor.state_manager import load_json_object, save_watchdog_s
 from shadow_slave_monitor.timeutil import parse_iso_datetime, utc_now
 
 API = "https://api.github.com"
+EXPECTED_GITHUB_REPOSITORY = "innercoder78/shadow-slave-monitor"
 MONITOR_WORKFLOW_NAME = "Shadow Slave chapter monitor"
 WATCHDOG_LOOKBACK_MARGIN = timedelta(minutes=30)
 MAX_WORKFLOW_RUN_PAGES = 10
 MONITOR_ARTIFACT_NAME = "monitor-state"
 NON_FAILED_MONITOR_RESULTS = {"healthy", "degraded"}
 ALL_MONITOR_RESULTS = NON_FAILED_MONITOR_RESULTS | {"failed"}
+ACTIVE_WORKFLOW_STATUSES = {"queued", "in_progress", "waiting", "requested", "pending"}
 GITHUB_REQUEST_ATTEMPTS = 3
 GITHUB_RETRYABLE_STATUSES = {429, 500, 502, 503, 504}
+MAX_ARTIFACT_RUN_LOOKUPS = 10
+VERIFICATION_FRESH = "fresh"
+VERIFICATION_UNCERTAIN = "uncertain"
+VERIFICATION_STALE = "stale"
 
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -192,6 +198,191 @@ def fetch_monitor_runs() -> list[dict[str, Any]]:
             break
     return annotate_monitor_results(collected)
 
+
+def _repository_monitor_runs(repo: str) -> list[dict[str, Any]]:
+    data = github_get(f"/repos/{repo}/actions/runs?branch=main&per_page=100")
+    runs = data.get("workflow_runs")
+    if not isinstance(runs, list):
+        raise RuntimeError("GitHub repository workflow_runs payload is malformed")
+    return [
+        run for run in runs
+        if isinstance(run, dict)
+        and run.get("head_branch") == "main"
+        and run.get("path") == MONITOR_WORKFLOW_PATH
+        and run.get("name") == MONITOR_WORKFLOW_NAME
+        and is_monitor_workflow_run(run)
+    ]
+
+
+def _validated_repository_run(run: Any, repo: str, expected_id: str | None = None) -> dict[str, Any] | None:
+    if not isinstance(run, dict) or run.get("head_branch") != "main" or not is_monitor_workflow_run(run):
+        return None
+    if run.get("path") != MONITOR_WORKFLOW_PATH or run.get("name") != MONITOR_WORKFLOW_NAME:
+        return None
+    identifier = run_id(run)
+    if identifier is None or (expected_id is not None and identifier != expected_id):
+        return None
+    repository = run.get("repository")
+    if isinstance(repository, dict) and repository.get("full_name") != repo:
+        return None
+    return run
+
+
+def _repository_monitor_artifacts(
+    repo: str,
+    runs_by_id: dict[str, dict[str, Any]],
+    discovery_cutoff: Any,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    data = github_get(f"/repos/{repo}/actions/artifacts?name={quote(MONITOR_ARTIFACT_NAME, safe='')}&per_page=100")
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise RuntimeError("GitHub repository artifacts payload is malformed")
+    selected: dict[str, dict[str, Any]] = {}
+    omitted_lookups = 0
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or artifact.get("name") != MONITOR_ARTIFACT_NAME or artifact.get("expired") is not False:
+            continue
+        created_at = parse_iso_datetime(artifact.get("created_at"))
+        if created_at is None:
+            raise RuntimeError("GitHub repository artifact timestamp is malformed")
+        associated = artifact.get("workflow_run")
+        associated_id = associated.get("id") if isinstance(associated, dict) else None
+        identifier = str(associated_id) if associated_id is not None else ""
+        artifact_id = artifact.get("id")
+        archive_url = artifact.get("archive_download_url")
+        expected_url = f"{API}/repos/{repo}/actions/artifacts/{quote(str(artifact_id), safe='')}/zip"
+        valid_location = (
+            identifier.isdigit()
+            and artifact_id is not None
+            and str(artifact_id).isdigit()
+            and archive_url == expected_url
+        )
+        if not valid_location:
+            if created_at >= discovery_cutoff:
+                raise RuntimeError("Recent GitHub repository artifact association is malformed")
+            continue
+        if identifier not in runs_by_id:
+            if created_at < discovery_cutoff:
+                continue
+            omitted_lookups += 1
+            if omitted_lookups > MAX_ARTIFACT_RUN_LOOKUPS:
+                raise RuntimeError("Recent GitHub repository artifact lookup limit was exceeded")
+            resolved = github_get(f"/repos/{repo}/actions/runs/{quote(identifier, safe='')}")
+            validated = _validated_repository_run(resolved, repo, identifier)
+            if validated is None:
+                raise RuntimeError("Recent GitHub repository artifact run could not be validated")
+            runs_by_id[identifier] = validated
+        previous = selected.get(identifier)
+        if previous is None or str(artifact.get("created_at") or "") > str(previous.get("created_at") or ""):
+            selected[identifier] = artifact
+    return selected, runs_by_id
+
+
+def merge_run_evidence(primary_runs: list[dict[str, Any]], corroborated_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge duplicate runs without erasing an authoritative logical result."""
+    merged = {run_id(run): dict(run) for run in primary_runs}
+    for run in corroborated_runs:
+        identifier = run_id(run)
+        copy = dict(run)
+        primary = merged.get(identifier)
+        if "monitor_result" not in copy and primary is not None and "monitor_result" in primary:
+            copy["monitor_result"] = primary["monitor_result"]
+        merged[identifier] = copy
+    return list(merged.values())
+
+
+def corroborate_stale_history(primary_runs: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    """Independently verify evidence immediately before a stale alert."""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if repo != EXPECTED_GITHUB_REPOSITORY:
+        logging.warning("Stale-alert verification suppressed: repository context is unavailable.")
+        return VERIFICATION_UNCERTAIN, primary_runs
+    try:
+        success_cutoff = utc_now() - timedelta(hours=WATCHDOG_STALE_HOURS)
+        artifact_discovery_cutoff = success_cutoff - WATCHDOG_LOOKBACK_MARGIN
+        repository_runs = _repository_monitor_runs(repo)
+        runs_by_id = {str(run["id"]): run for run in repository_runs if run.get("id") is not None}
+        artifacts, runs_by_id = _repository_monitor_artifacts(repo, runs_by_id, artifact_discovery_cutoff)
+        verified: list[dict[str, Any]] = []
+        result_unavailable = False
+        metadata_unavailable = False
+        for run in runs_by_id.values():
+            copy = dict(run)
+            timestamp = run_timestamp(copy)
+            status = copy.get("status")
+            artifact = artifacts.get(str(copy.get("id")))
+            artifact_timestamp = parse_iso_datetime(artifact.get("created_at")) if artifact is not None else None
+            if status == "completed" and timestamp is not None and timestamp >= artifact_discovery_cutoff:
+                result = None
+                if artifact is not None:
+                    result = monitor_result_from_zip(github_get_bytes(str(artifact["archive_download_url"])))
+                copy["monitor_result"] = result
+                if result is None and timestamp >= success_cutoff:
+                    result_unavailable = True
+                    logging.info(
+                        "Stale-alert verification found an unavailable recent monitor result; run_id=%s timestamp=%s.",
+                        run_id(copy), run_timestamp_string(copy),
+                    )
+            elif (
+                status in ACTIVE_WORKFLOW_STATUSES
+                and parse_run_time(copy, "created_at") is None
+                and (
+                    (timestamp is not None and timestamp >= success_cutoff)
+                    or (artifact_timestamp is not None and artifact_timestamp >= artifact_discovery_cutoff)
+                )
+            ):
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found recent active monitor metadata with an unavailable creation time; "
+                    "run_id=%s timestamp=%s.",
+                    run_id(copy), run_timestamp_string(copy),
+                )
+            elif timestamp is not None and timestamp >= success_cutoff and status not in ACTIVE_WORKFLOW_STATUSES:
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found an indeterminate recent monitor status; run_id=%s timestamp=%s.",
+                    run_id(copy), run_timestamp_string(copy),
+                )
+            elif timestamp is None and artifact_timestamp is not None and artifact_timestamp >= artifact_discovery_cutoff:
+                metadata_unavailable = True
+                logging.info(
+                    "Stale-alert verification found a recent monitor artifact with an unavailable run timestamp; run_id=%s.",
+                    run_id(copy),
+                )
+            verified.append(copy)
+    except Exception as exc:
+        status = exc.response.status_code if isinstance(exc, requests.HTTPError) and exc.response is not None else None
+        logging.warning(
+            "Stale-alert verification suppressed: GitHub evidence is incomplete; category=%s status=%s.",
+            safe_exception_category(exc), status,
+        )
+        return VERIFICATION_UNCERTAIN, primary_runs
+
+    primary_recent_ids = {
+        run_id(run) for run in primary_runs
+        if run_timestamp(run) is not None and run_timestamp(run) >= success_cutoff
+    }
+    repository_recent_ids = {
+        run_id(run) for run in verified
+        if run_timestamp(run) is not None and run_timestamp(run) >= success_cutoff
+    }
+    if primary_recent_ids - repository_recent_ids:
+        logging.warning("Stale-alert verification suppressed: workflow histories disagree about recent monitor activity.")
+        return VERIFICATION_UNCERTAIN, primary_runs
+
+    merged = merge_run_evidence(primary_runs, verified)
+    success = latest_success(verified)
+    if success is not None and run_timestamp(success) >= success_cutoff:
+        logging.info(
+            "Stale-alert verification found a fresh monitor success; run_id=%s timestamp=%s result=%s.",
+            run_id(success), run_timestamp_string(success), monitor_completion_result(success),
+        )
+        return VERIFICATION_FRESH, merged
+    if result_unavailable or metadata_unavailable:
+        logging.warning("Stale-alert verification suppressed: no fresh success was verified and recent evidence is incomplete.")
+        return VERIFICATION_UNCERTAIN, primary_runs
+    return VERIFICATION_STALE, merged
+
 def parse_run_time(run: dict[str, Any], key: str) -> Any:
     return parse_iso_datetime(run.get(key))
 
@@ -255,7 +446,7 @@ def history_regresses_behind_known_success(runs: list[dict[str, Any]], last_succ
 
 def active_recent_run(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
     now = utc_now()
-    active = [r for r in runs if r.get("status") in {"queued", "in_progress", "waiting", "requested", "pending"}]
+    active = [r for r in runs if r.get("status") in ACTIVE_WORKFLOW_STATUSES]
     recent = []
     for run in active:
         created = parse_run_time(run, "created_at")
@@ -282,7 +473,11 @@ def build_body(success: dict[str, Any] | None, latest: dict[str, Any] | None, la
         "cron-job.org, GitHub Actions, external sources, notification delivery, or repository state persistence may be involved.",
     ])
 
-def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[str, Any], bool, str]:
+def evaluate(
+    runs: list[dict[str, Any]],
+    state: dict[str, Any],
+    verify_stale: Callable[[list[dict[str, Any]]], tuple[str, list[dict[str, Any]]]] | None = None,
+) -> tuple[dict[str, Any], bool, str]:
     now = utc_now()
     if history_regresses_behind_known_success(runs, state.get("last_success_at")):
         logging.warning("GitHub Actions history regressed behind the persisted known success; suppressing evaluation.")
@@ -299,6 +494,14 @@ def evaluate(runs: list[dict[str, Any]], state: dict[str, Any]) -> tuple[dict[st
     if active and stale:
         logging.info("Recent monitor run is active; suppressing stale alert within grace period.")
         return state, changed, "suppressed_active_run"
+    if stale and verify_stale is not None:
+        verification, corroborated_runs = verify_stale(runs)
+        if verification == VERIFICATION_UNCERTAIN:
+            return state, False, "suppressed_unverified_history"
+        if verification not in {VERIFICATION_FRESH, VERIFICATION_STALE}:
+            logging.warning("Stale-alert verification suppressed: verifier returned an invalid classification.")
+            return state, False, "suppressed_unverified_history"
+        return evaluate(corroborated_runs, state, verify_stale=None)
     if not stale:
         if state.get("open_outage_id") or state.get("latest_failed_conclusion") is not None or state.get("latest_failed_run_url") is not None:
             recovery_updates = {
@@ -347,7 +550,7 @@ def main() -> None:
     try:
         runs = fetch_monitor_runs()
         state = validate_watchdog_state(load_json_object(WATCHDOG_STATE_PATH))
-        new_state, changed, status = evaluate(runs, state)
+        new_state, changed, status = evaluate(runs, state, verify_stale=corroborate_stale_history)
         result = {"changed": changed, "status": status}
         if changed:
             save_watchdog_state(new_state, WATCHDOG_STATE_PATH)
