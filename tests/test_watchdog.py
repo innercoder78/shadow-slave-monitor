@@ -510,6 +510,7 @@ class WatchdogArtifactTests(unittest.TestCase):
                 "updated_at": "2026-08-26T04:00:45Z",
             }
             artifact = {
+                "id": 55,
                 "name": "monitor-state",
                 "expired": False,
                 "created_at": "2026-08-26T04:01:00Z",
@@ -565,6 +566,96 @@ class WatchdogArtifactTests(unittest.TestCase):
             classification, runs = watchdog.corroborate_stale_history([])
         self.assertEqual(classification, watchdog.VERIFICATION_STALE)
         self.assertEqual(runs, [])
+
+    def test_artifact_only_omitted_run_prevents_august_false_alert(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        for result in ("healthy", "degraded"):
+            state = WatchdogEvaluateTests.state("2026-08-19T00:00:00Z")
+            original = state.copy()
+            primary = [WatchdogEvaluateTests.monitor_run(32396092427, "2026-08-20T17:10:37Z")]
+            resolved = WatchdogEvaluateTests.monitor_run(32928552910, "2026-08-26T04:00:45Z", result=result)
+            resolved.update({
+                "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+                "head_branch": "main", "event": "workflow_dispatch",
+                "repository": {"full_name": "innercoder78/shadow-slave-monitor"},
+            })
+            artifact = {
+                "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T04:01:00Z",
+                "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+                "workflow_run": {"id": resolved["id"]},
+            }
+            with self.subTest(result=result), patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+                watchdog, "utc_now", return_value=now
+            ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": [artifact]}, resolved]), patch.object(
+                watchdog, "github_get_bytes", return_value=self.result_zip(result)
+            ), patch.object(watchdog, "send_watchdog") as send:
+                new_state, changed, status = watchdog.evaluate(primary, state, watchdog.corroborate_stale_history)
+            self.assertEqual((changed, status), (False, "fresh"))
+            self.assertEqual(new_state, original)
+            send.assert_not_called()
+
+    def test_artifact_only_run_must_validate_as_real_monitor_workflow(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        unrelated = {
+            "id": 32928552910, "name": watchdog.MONITOR_WORKFLOW_NAME, "path": ".github/workflows/unrelated.yml",
+            "head_branch": "main", "event": "workflow_dispatch", "status": "completed",
+            "created_at": "2026-08-26T03:50:00Z", "updated_at": "2026-08-26T04:00:45Z",
+        }
+        artifact = {
+            "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T04:01:00Z",
+            "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+            "workflow_run": {"id": unrelated["id"]},
+        }
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=now
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": [artifact]}, unrelated]), patch.object(
+            watchdog, "github_get_bytes"
+        ) as download, self.assertLogs(level="WARNING"):
+            classification, _ = watchdog.corroborate_stale_history([])
+        self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
+        download.assert_not_called()
+
+    def test_artifact_only_run_lookup_failure_is_sanitized_uncertainty(self) -> None:
+        artifact = {
+            "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T04:01:00Z",
+            "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+            "workflow_run": {"id": 32928552910},
+        }
+        error = requests.ConnectionError("https://secret.example/token-value")
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+            watchdog, "utc_now", return_value=datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": []}, {"artifacts": [artifact]}, error]), self.assertLogs(
+            level="WARNING"
+        ) as logs:
+            classification, _ = watchdog.corroborate_stale_history([])
+        self.assertEqual(classification, watchdog.VERIFICATION_UNCERTAIN)
+        self.assertNotIn("secret.example", " ".join(logs.output))
+
+    def test_verified_fresh_success_wins_over_older_or_newer_unknown_result(self) -> None:
+        now = datetime(2026, 8, 26, 4, 3, 31, tzinfo=timezone.utc)
+        for unknown_time in ("2026-08-26T02:00:00Z", "2026-08-26T04:02:00Z"):
+            healthy = {
+                "id": 10, "name": watchdog.MONITOR_WORKFLOW_NAME, "path": watchdog.MONITOR_WORKFLOW_PATH,
+                "head_branch": "main", "event": "workflow_dispatch", "status": "completed", "conclusion": "success",
+                "created_at": "2026-08-26T03:50:00Z", "updated_at": "2026-08-26T04:00:45Z",
+            }
+            unknown = dict(healthy, id=20, created_at=unknown_time, updated_at=unknown_time)
+            artifact = {
+                "id": 55, "name": "monitor-state", "expired": False, "created_at": "2026-08-26T04:01:00Z",
+                "archive_download_url": "https://api.github.com/repos/innercoder78/shadow-slave-monitor/actions/artifacts/55/zip",
+                "workflow_run": {"id": healthy["id"]},
+            }
+            with self.subTest(unknown_time=unknown_time), patch.dict("os.environ", {"GITHUB_REPOSITORY": "innercoder78/shadow-slave-monitor"}), patch.object(
+                watchdog, "utc_now", return_value=now
+            ), patch.object(watchdog, "github_get", side_effect=[{"workflow_runs": [unknown, healthy]}, {"artifacts": [artifact]}]), patch.object(
+                watchdog, "github_get_bytes", return_value=self.result_zip("healthy")
+            ):
+                classification, runs = watchdog.corroborate_stale_history([])
+            self.assertEqual(classification, watchdog.VERIFICATION_FRESH)
+            self.assertEqual(
+                watchdog.monitor_completion_result(next(run for run in runs if watchdog.run_id(run) == "10")),
+                "healthy",
+            )
 
 
 class WorkflowPolicyTests(unittest.TestCase):
