@@ -1,19 +1,14 @@
 {
-  "latest_seen": 3167,
-  "latest_title": "A Small Memento",
-  "latest_url": "https://telegra.ph/3167-A-Small-Memento-08-30",
+  "latest_seen": 3168,
+  "latest_title": "Azure Sky",
+  "latest_url": "https://telegra.ph/3168-Azure-Sky-08-31",
   "latest_webnovel": 3168,
   "latest_webnovel_title": "Azure Sky",
-  "mode": "watch_free_sites",
-  "target_chapter": 3168,
-  "target_title": "Azure Sky",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4
-  },
-  "updated_at": "2026-08-31T04:45:20+00:00"
+  "public_source_failures": {},
+  "updated_at": "2026-08-31T13:05:17+00:00"
 }
