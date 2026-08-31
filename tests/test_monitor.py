@@ -29,6 +29,7 @@ def base_state() -> dict:
         "target_title": None,
         "target_url": None,
         "pending_notification": None,
+        "public_source_failures": {},
         "updated_at": "2026-06-11T00:00:00+00:00",
     }
 
@@ -78,13 +79,65 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
 
         result = monitor.RunResult()
         with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check), self.assertLogs(level="WARNING") as logs:
-            reports = monitor.check_public_sites(result)
+            failures = {}
+            reports = monitor.check_public_sites(result, failures)
         output = "\n".join(logs.output)
         self.assertEqual(reports, [report])
         self.assertIn("category=http_error type=HTTPError status=403 host=example.com attempts=1", output)
         for unsafe in ("/private", "token", "response body", "cookie", "Authorization"):
             self.assertNotIn(unsafe, output)
         self.assertTrue(result.degraded_reasons)
+        self.assertEqual(failures, {"Failed": 1})
+        self.assertIn("Failed consecutive public-source failures for current watch cycle: 1/4", output)
+
+    def test_source_is_suppressed_after_four_monitor_runs_and_skip_is_not_degraded(self) -> None:
+        failed = SourceConfig("Failed", "https://failed.example", True, ("failed.example",))
+        good = SourceConfig("Good", "https://good.example", True, ("good.example",))
+        report = ChapterReport("Good", 10, None, "https://good.example/chapter-10")
+        calls = {"Failed": 0, "Good": 0}
+
+        def check(site):
+            calls[site.name] += 1
+            if site.name == "Failed":
+                raise RuntimeError("unsafe")
+            return report
+
+        failures: dict[str, int] = {}
+        with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check):
+            for expected in range(1, 5):
+                result = monitor.RunResult()
+                self.assertEqual(monitor.check_public_sites(result, failures), [report])
+                self.assertEqual(failures, {"Failed": expected})
+                self.assertTrue(result.degraded_reasons)
+            result = monitor.RunResult()
+            with self.assertLogs(level="INFO") as logs:
+                self.assertEqual(monitor.check_public_sites(result, failures), [report])
+
+        self.assertEqual(calls, {"Failed": 4, "Good": 5})
+        self.assertFalse(result.degraded_reasons)
+        self.assertIn("reached the consecutive-failure limit", "\n".join(logs.output))
+
+    def test_success_resets_failures_and_next_failure_starts_at_one(self) -> None:
+        source = SourceConfig("Source", "https://source.example", True, ("source.example",))
+        report = ChapterReport("Source", 10, None, "https://source.example/chapter-10")
+        failures = {"Source": 3}
+        result = monitor.RunResult()
+        with patch.object(monitor, "PUBLIC_SITES", (source,)), patch.object(monitor, "check_public_site", return_value=report):
+            self.assertEqual(monitor.check_public_sites(result, failures), [report])
+        self.assertEqual(failures, {})
+        with patch.object(monitor, "PUBLIC_SITES", (source,)), patch.object(monitor, "check_public_site", side_effect=RuntimeError("unsafe")):
+            monitor.check_public_sites(monitor.RunResult(), failures)
+        self.assertEqual(failures, {"Source": 1})
+
+    def test_all_suppressed_sources_fail_closed_without_requests(self) -> None:
+        source = SourceConfig("Source", "https://source.example", True, ("source.example",))
+        failures = {"Source": 4}
+        result = monitor.RunResult()
+        with patch.object(monitor, "PUBLIC_SITES", (source,)), patch.object(monitor, "check_public_site") as check:
+            self.assertEqual(monitor.check_public_sites(result, failures), [])
+        check.assert_not_called()
+        self.assertEqual(result.reasons, ["every enabled public source is suppressed for the current watch cycle"])
+        self.assertEqual(failures, {"Source": 4})
 
     def test_every_source_failure_still_fails_run(self) -> None:
         source = SourceConfig("Failed", "https://example.com", True, ("example.com",))
@@ -211,6 +264,27 @@ class WatchFreeSitesTests(unittest.TestCase):
         })
         return state
 
+    def test_completing_cycle_clears_public_source_failures(self) -> None:
+        state = self.watch_free_state()
+        state["public_source_failures"] = {"NovelFire": 4}
+        reports = [ChapterReport("Chikari", 11, "Chapter Eleven", "https://public.example/11", "page")]
+        with patch.object(monitor, "check_public_sites", return_value=reports), patch.object(monitor, "send_new_chapter"):
+            run_main_with_state(state)
+        self.assertEqual(state["mode"], "watch_webnovel")
+        self.assertEqual(state["public_source_failures"], {})
+
+    def test_confirming_newer_target_inside_cycle_preserves_suppression(self) -> None:
+        state = self.watch_free_state()
+        state["public_source_failures"] = {"NovelFire": 4}
+        reports = [ChapterReport("Chikari", 13, "Chapter Thirteen", "https://public.example/13", "page")]
+        official = ChapterReport("WebNovel", 12, "Chapter Twelve", "https://webnovel.example/12", "catalog")
+        with patch.object(monitor, "check_public_sites", return_value=reports), \
+             patch.object(monitor, "check_webnovel", return_value=official), \
+             patch.object(monitor, "send_new_chapter"):
+            run_main_with_state(state, allow_system_exit=True)
+        self.assertEqual(state["target_chapter"], 12)
+        self.assertEqual(state["public_source_failures"], {"NovelFire": 4})
+
     def test_watch_free_sites_checks_every_run_and_does_not_save_before_target(self) -> None:
         state = self.watch_free_state()
         reports = [ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")]
@@ -222,6 +296,34 @@ class WatchFreeSitesTests(unittest.TestCase):
         self.assertEqual(saved, [])
         self.assertEqual(state["mode"], "watch_free_sites")
         self.assertEqual(state["target_chapter"], 11)
+
+    def test_failure_counter_transition_is_persisted(self) -> None:
+        state = self.watch_free_state()
+        failed = SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net",))
+        good = SourceConfig("Chikari", "https://chikari.moe/novels/shadow-slave", True, ("chikari.moe",))
+        report = ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")
+
+        def check(site):
+            if site.name == "NovelFire":
+                raise RuntimeError("unsafe")
+            return report
+
+        with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check):
+            saved = run_main_with_state(state)
+        self.assertEqual(state["public_source_failures"], {"NovelFire": 1})
+        self.assertEqual(len(saved), 1)
+
+    def test_unchanged_suppressed_source_does_not_cause_state_save(self) -> None:
+        state = self.watch_free_state()
+        state["public_source_failures"] = {"NovelFire": 4}
+        suppressed = SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net",))
+        good = SourceConfig("Chikari", "https://chikari.moe/novels/shadow-slave", True, ("chikari.moe",))
+        report = ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")
+        with patch.object(monitor, "PUBLIC_SITES", (suppressed, good)), \
+             patch.object(monitor, "check_public_site", return_value=report) as check:
+            saved = run_main_with_state(state)
+        self.assertEqual([call.args[0].name for call in check.call_args_list], ["Chikari"])
+        self.assertEqual(saved, [])
 
     def test_watch_free_sites_target_found_sends_notification_updates_state_and_saves(self) -> None:
         state = self.watch_free_state()
@@ -288,6 +390,21 @@ class PendingNotificationTests(unittest.TestCase):
 
 
 class StateMigrationTests(unittest.TestCase):
+    def test_missing_public_source_failures_migrates_to_empty_mapping(self) -> None:
+        state = base_state()
+        del state["public_source_failures"]
+        self.assertEqual(validate_state(state)["public_source_failures"], {})
+
+    def test_invalid_public_source_failure_shapes_and_counts_are_rejected(self) -> None:
+        invalid_values = ([], {"NovelFire": True}, {"NovelFire": -1}, {"NovelFire": 0},
+                          {"NovelFire": 5}, {"NovelFire": "1"}, {"Unknown": 1})
+        for value in invalid_values:
+            with self.subTest(value=value):
+                state = base_state()
+                state["public_source_failures"] = value
+                with self.assertRaises(StateError):
+                    validate_state(state)
+
     def test_legacy_timing_fields_are_tolerated_and_omitted_on_save(self) -> None:
         state = base_state()
         state["last_webnovel_check"] = "2026-06-11T12:00:00+00:00"

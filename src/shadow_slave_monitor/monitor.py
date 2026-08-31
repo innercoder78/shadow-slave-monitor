@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
+from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
 from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category, safe_exception_details
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
@@ -58,26 +58,58 @@ def aggregate_reports_for_chapter(reports: list[ChapterReport], chapter: int) ->
         ",".join(r.strategy for r in matching),
     )
 
-def check_public_sites(result: RunResult) -> list[ChapterReport]:
+def check_public_sites(result: RunResult, failure_counts: dict[str, int] | None = None) -> list[ChapterReport]:
+    failure_counts = failure_counts if failure_counts is not None else {}
     enabled = [s for s in PUBLIC_SITES if s.enabled]
     for site in PUBLIC_SITES:
         if not site.enabled:
             logging.info("Skipping disabled public site: %s.", site.name)
-    reports: list[ChapterReport] = []
+    eligible = []
+    for site in enabled:
+        if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
+            logging.info(
+                "Skipping %s because it reached the consecutive-failure limit for the current watch cycle.",
+                site.name,
+            )
+        else:
+            eligible.append(site)
+    if enabled and not eligible:
+        result.fail("every enabled public source is suppressed for the current watch cycle")
+        return []
+    reports_by_name: dict[str, ChapterReport] = {}
+    errors: dict[str, Exception] = {}
     failures: list[str] = []
-    with ThreadPoolExecutor(max_workers=min(PUBLIC_SITE_WORKERS, len(enabled) or 1)) as executor:
-        futures = {executor.submit(check_public_site, site): site for site in enabled}
+    with ThreadPoolExecutor(max_workers=min(PUBLIC_SITE_WORKERS, len(eligible) or 1)) as executor:
+        futures = {executor.submit(check_public_site, site): site for site in eligible}
         for future in as_completed(futures):
             site = futures[future]
             try:
-                reports.append(future.result())
+                reports_by_name[site.name] = future.result()
             except Exception as exc:
-                category = safe_exception_category(exc)
-                failures.append(site.name)
-                details = safe_exception_details(exc)
+                errors[site.name] = exc
+    reports: list[ChapterReport] = []
+    for site in eligible:
+        if site.name in reports_by_name:
+            reports.append(reports_by_name[site.name])
+            failure_counts.pop(site.name, None)
+        else:
+            exc = errors[site.name]
+            count = min(failure_counts.get(site.name, 0) + 1, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT)
+            failure_counts[site.name] = count
+            failures.append(site.name)
+            category = safe_exception_category(exc)
+            details = safe_exception_details(exc)
+            logging.warning(
+                "%s check failed safely: category=%s type=%s%s",
+                site.name, category, type(exc).__name__, f" {details}" if details else "",
+            )
+            logging.warning(
+                "%s consecutive public-source failures for current watch cycle: %s/%s.",
+                site.name, count, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT,
+            )
+            if count == PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
                 logging.warning(
-                    "%s check failed safely: category=%s type=%s%s",
-                    site.name, category, type(exc).__name__, f" {details}" if details else "",
+                    "%s is now suppressed for the remainder of the current watch cycle.", site.name
                 )
     if failures and reports:
         result.degrade("optional public sources failed: " + ", ".join(sorted(failures)))
@@ -91,6 +123,7 @@ def set_watch_webnovel(state: dict[str, Any]) -> None:
     state["target_chapter"] = None
     state["target_title"] = None
     state["target_url"] = None
+    state["public_source_failures"] = {}
 
 def update_webnovel(state: dict[str, Any], report: ChapterReport, result: RunResult) -> bool:
     previous = parse_int(state.get("latest_webnovel"))
@@ -178,7 +211,7 @@ def first_setup(state: dict[str, Any], result: RunResult) -> None:
     official = required_webnovel_check(state, result)
     if official is None:
         return
-    public_reports = check_public_sites(result)
+    public_reports = check_public_sites(result, state.setdefault("public_source_failures", {}))
     if result.status == Health.FAILED and not public_reports:
         return
     accepted = [r for r in public_reports if r.chapter <= official.chapter]
@@ -218,6 +251,7 @@ def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
     if baseline is not None and official.chapter <= baseline:
         set_watch_webnovel(state)
     else:
+        state["public_source_failures"] = {}
         state["mode"] = "watch_free_sites"
         state["target_chapter"] = official.chapter
         state["target_title"] = official.title
@@ -233,7 +267,7 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
         result.fail("critical configuration value target_chapter is missing")
         set_watch_webnovel(state)
         return
-    reports = check_public_sites(result)
+    reports = check_public_sites(result, state.setdefault("public_source_failures", {}))
     if not reports:
         return
     highest = max(r.chapter for r in reports)

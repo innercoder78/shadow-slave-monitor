@@ -47,9 +47,8 @@ class ChikariParserTests(unittest.TestCase):
                 "ShadowSlave.Space": True,
                 "FreeWebNovel": True,
                 "Novel Phoenix": True,
-                "NovelArrow": False,
-                "NovelFire": False,
-                "NovelBin": False,
+                "NovelArrow": True,
+                "NovelFire": True,
                 "SSNovel": True,
                 "NovelFull": True,
             },
@@ -236,9 +235,9 @@ class NovelFireParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
             return check_public_site(self.source)
 
-    def test_disabled_configuration_and_main_latest_card(self) -> None:
+    def test_enabled_configuration_and_main_latest_card(self) -> None:
         validate_source_config()
-        self.assertFalse(self.source.enabled)
+        self.assertTrue(self.source.enabled)
         html = '<p>3122Chapters</p><a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>'
         report = self.check(html)
         self.assertEqual((report.chapter, report.title, report.url),
@@ -280,11 +279,11 @@ class NovelArrowParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
             return check_public_site(self.source)
 
-    def test_source_is_disabled_in_exact_configuration(self) -> None:
+    def test_source_is_enabled_in_exact_configuration(self) -> None:
         validate_source_config()
         sites = list(PUBLIC_SITES)
         index = next(i for i, site in enumerate(sites) if site.name == "NovelArrow")
-        self.assertFalse(sites[index].enabled)
+        self.assertTrue(sites[index].enabled)
         self.assertEqual(sites[index].allowed_hosts, ("novelarrow.com", "www.novelarrow.com"))
 
     def test_realistic_latest_chapter_section(self) -> None:
