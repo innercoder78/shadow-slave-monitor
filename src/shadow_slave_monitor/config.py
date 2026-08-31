@@ -27,6 +27,7 @@ WEBNOVEL_CHECK_INTERVAL = timedelta(minutes=20)
 WEBNOVEL_CHECK_WINDOW = timedelta(minutes=8)
 SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT = 25
 PUBLIC_SITE_WORKERS = 6
+PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT = 4
 MIN_CHAPTER = 1
 MAX_CHAPTER = 10000
 TITLE_MAX_LENGTH = 180
@@ -85,9 +86,8 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("ShadowSlave.Space", "https://shadowslave.space", True, ("shadowslave.space", "www.shadowslave.space")),
     SourceConfig("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave", True, ("freewebnovel.com", "www.freewebnovel.com")),
     SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", True, ("novelphoenix.com", "www.novelphoenix.com")),
-    SourceConfig("NovelArrow", "https://novelarrow.com/novel/shadow-slave", False, ("novelarrow.com", "www.novelarrow.com")),
-    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False, ("novelfire.net", "www.novelfire.net")),
-    SourceConfig("NovelBin", "https://novelbin.com/b/shadow-slave", False, ("novelbin.com", "www.novelbin.com")),
+    SourceConfig("NovelArrow", "https://novelarrow.com/novel/shadow-slave", True, ("novelarrow.com", "www.novelarrow.com")),
+    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net", "www.novelfire.net")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),
 )

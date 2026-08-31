@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
@@ -26,6 +26,7 @@ MONITOR_STATE_FIELDS = {
     "target_title",
     "target_url",
     "pending_notification",
+    "public_source_failures",
     "updated_at",
 }
 
@@ -53,9 +54,8 @@ def validate_source_config() -> None:
         "ShadowSlave.Space": True,
         "FreeWebNovel": True,
         "Novel Phoenix": True,
-        "NovelArrow": False,
-        "NovelFire": False,
-        "NovelBin": False,
+        "NovelArrow": True,
+        "NovelFire": True,
         "SSNovel": True,
         "NovelFull": True,
     }
@@ -117,6 +117,7 @@ def initial_state() -> dict[str, Any]:
         "target_title": None,
         "target_url": None,
         "pending_notification": None,
+        "public_source_failures": {},
         "updated_at": None,
     }
 
@@ -208,6 +209,21 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     state["latest_webnovel"] = latest_webnovel
     state["target_chapter"] = target
     state["pending_notification"] = validate_pending(state.get("pending_notification"), latest_seen)
+    failures = state.get("public_source_failures")
+    if not isinstance(failures, dict):
+        raise StateError("public_source_failures must be an object")
+    enabled_names = {site.name for site in PUBLIC_SITES if site.enabled}
+    clean_failures: dict[str, int] = {}
+    for source, count in failures.items():
+        if not isinstance(source, str) or source not in enabled_names:
+            raise StateError("public_source_failures contains an unknown or disabled source")
+        if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
+            raise StateError(
+                "public_source_failures counts must be integers between 1 and "
+                f"{PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT}"
+            )
+        clean_failures[source] = count
+    state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
     return state
 
 def load_state(path: Path = STATE_PATH) -> tuple[dict[str, Any], bool]:
