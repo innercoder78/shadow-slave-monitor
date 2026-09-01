@@ -9,6 +9,11 @@
   "target_title": "Mark of Humanity",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
-  "updated_at": "2026-09-01T15:40:25+00:00"
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1
+  },
+  "updated_at": "2026-09-01T15:45:21+00:00"
 }
