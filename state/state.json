@@ -1,19 +1,14 @@
 {
-  "latest_seen": 3170,
-  "latest_title": "Mark of Humanity",
-  "latest_url": "https://telegra.ph/3170-Mark-of-Humanity-09-01",
+  "latest_seen": 3172,
+  "latest_title": "Little Flames",
+  "latest_url": "https://telegra.ph/3172-Little-Flames-09-02",
   "latest_webnovel": 3172,
   "latest_webnovel_title": "Little Flames",
-  "mode": "watch_free_sites",
-  "target_chapter": 3172,
-  "target_title": "Little Flames",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4
-  },
-  "updated_at": "2026-09-02T02:20:25+00:00"
+  "public_source_failures": {},
+  "updated_at": "2026-09-02T05:20:25+00:00"
 }
