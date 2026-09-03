@@ -9,6 +9,11 @@
   "target_title": "Life Goes On",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
-  "updated_at": "2026-09-03T02:20:22+00:00"
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1
+  },
+  "updated_at": "2026-09-03T02:25:21+00:00"
 }
