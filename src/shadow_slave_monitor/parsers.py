@@ -664,13 +664,17 @@ def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport,
         anchor for anchor in soup.find_all("a", href=True)
         if re.fullmatch(r"\s*Next(?:\s+Chapter)?\s*", anchor.get_text(" ", strip=True), re.IGNORECASE)
     ]
-    if len(next_markers) > 1:
-        raise ParseError("LightNovelUp chapter page has ambiguous Next navigation")
     next_candidate = None
     if next_markers:
-        next_candidate = lightnovelup_candidate_from_href(next_markers[0].get("href"), candidate.url)
-        if not next_candidate:
-            raise ParseError("LightNovelUp Next link is not canonical")
+        destinations: dict[tuple[int, str], ChapterReport] = {}
+        for marker in next_markers:
+            validated = lightnovelup_candidate_from_href(marker.get("href"), candidate.url)
+            if not validated:
+                raise ParseError("LightNovelUp Next link is not canonical")
+            destinations[(validated.chapter, validated.url)] = validated
+        if len(destinations) != 1:
+            raise ParseError("LightNovelUp chapter page has ambiguous Next navigation")
+        next_candidate = next(iter(destinations.values()))
         if next_candidate.chapter != candidate.chapter + 1:
             raise ParseError("LightNovelUp Next link is not a sensible monotonic advance")
     report = ChapterReport("", candidate.chapter, possible_titles[0] if possible_titles else None, candidate.url)

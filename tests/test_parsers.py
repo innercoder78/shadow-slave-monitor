@@ -1010,9 +1010,10 @@ class LightNovelUpParserTests(unittest.TestCase):
     chapter_3174 = "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
 
     @staticmethod
-    def page(chapter: int, title: str, next_href: str | None = None) -> str:
-        navigation = f'<a href="{next_href}">Next</a>' if next_href else '<a href="/previous">Prev</a>'
-        return f"<html><head><title>Shadow Slave - Chapter {chapter} {title} - Light Novel Fastest Update</title></head><body><h1>Shadow Slave - Chapter {chapter} {title}</h1>{navigation}</body></html>"
+    def page(chapter: int, title: str, next_href: str | None = None, *, duplicate_next: bool = False) -> str:
+        before = f'<a href="{next_href}">Next</a>' if next_href else '<a href="/previous">Prev</a>'
+        after = f'<a href="{next_href}">Next</a>' if next_href and duplicate_next else ""
+        return f"<html><head><title>Shadow Slave - Chapter {chapter} {title} - Light Novel Fastest Update</title></head><body>{before}<article><h1>Shadow Slave - Chapter {chapter} {title}</h1><p>Chapter body</p></article>{after}</body></html>"
 
     def test_enabled_configuration(self) -> None:
         self.assertEqual(self.source, SourceConfig(
@@ -1025,7 +1026,7 @@ class LightNovelUpParserTests(unittest.TestCase):
         self.assertIsNone(lightnovelup_candidate_from_href(href, self.source.url))
 
     def test_live_navigation_bootstraps_to_3174_and_extracts_visible_title(self) -> None:
-        pages = [self.page(3173, "Life Goes On", self.chapter_3174),
+        pages = [self.page(3173, "Life Goes On", self.chapter_3174, duplicate_next=True),
                  self.page(3174, "Tatal’s Basilisk")]
         with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=pages) as fetch:
             report = check_lightnovelup(self.source)
@@ -1069,8 +1070,9 @@ class LightNovelUpParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html",
                    return_value=self.page(3172, "Wrong", self.chapter_3174)), self.assertRaises(ParseError):
             check_lightnovelup(self.source)
+        different_destination = "https://lightnovelup.com/novel/shadow-slave/chapter-3174-a-different-slug/"
         ambiguous = self.page(3173, "Life Goes On", self.chapter_3174).replace(
-            "</body>", f'<a href="{self.chapter_3174}">Next Chapter</a></body>')
+            "</body>", f'<a href="{different_destination}">Next Chapter</a></body>')
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=ambiguous), self.assertRaises(ParseError):
             check_lightnovelup(self.source)
 
