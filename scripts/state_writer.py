@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -211,6 +212,15 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
     art_web = artifact.get("latest_webnovel") or 0
     if cur_seen < art_seen or cur_web < art_web:
         return False
+    current_positions = current.get("source_positions", {})
+    artifact_positions = artifact.get("source_positions", {})
+    for source, artifact_position in artifact_positions.items():
+        current_position = current_positions.get(source)
+        if current_position is None or current_position["chapter"] < artifact_position["chapter"]:
+            return False
+        if (current_position["chapter"] == artifact_position["chapter"]
+                and current_position["url"] != artifact_position["url"]):
+            return False
     art_first, art_pending_latest = pending_range(artifact)
     cur_first, cur_pending_latest = pending_range(current)
     if art_pending_latest is not None:
@@ -239,6 +249,33 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
     if max_known_chapter(current) < max_known_chapter(artifact):
         return False
     return True
+
+
+def reconcile_monitor_cursor_advancement(
+    current: dict[str, Any], artifact: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Merge a cursor-only stale artifact without overwriting newer monitor state."""
+    artifact_without_cursor = copy.deepcopy(artifact)
+    artifact_without_cursor["source_positions"] = copy.deepcopy(current.get("source_positions", {}))
+    if not monitor_artifact_superseded(current, artifact_without_cursor):
+        return None
+    merged = copy.deepcopy(current)
+    merged_positions = merged.setdefault("source_positions", {})
+    advanced = False
+    for source, position in artifact.get("source_positions", {}).items():
+        current_position = merged_positions.get(source)
+        if current_position is None or position["chapter"] > current_position["chapter"]:
+            merged_positions[source] = copy.deepcopy(position)
+            advanced = True
+        elif position["chapter"] == current_position["chapter"] and position["url"] != current_position["url"]:
+            return None
+    if not advanced:
+        return None
+    current_updated = timestamp_value(current.get("updated_at"))
+    artifact_updated = timestamp_value(artifact.get("updated_at"))
+    if artifact_updated is not None and (current_updated is None or artifact_updated > current_updated):
+        merged["updated_at"] = artifact["updated_at"]
+    return validate_state(merged)
 
 
 def numeric_id(value: Any) -> int | None:
@@ -403,7 +440,12 @@ def persist_with_retries(artifact_dir: Path, state_file: str) -> None:
             print(f"Stale {state_file} artifact is semantically superseded by current repository state.")
             return
         if classification == "conflicting":
-            raise SystemExit(f"stale {state_file} artifact conflicts with current repository state; refusing overwrite")
+            merged = (reconcile_monitor_cursor_advancement(current_state, artifact_state)
+                      if state_file == "state/state.json" else None)
+            if merged is None:
+                raise SystemExit(f"stale {state_file} artifact conflicts with current repository state; refusing overwrite")
+            artifact_state = merged
+            atomic_write_json(artifact_state_path, artifact_state)
         if not apply_state_artifact(state_file, artifact_state_path, artifact_state):
             return
         if not commit_state_file(state_file):

@@ -5,9 +5,11 @@ import copy
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
@@ -27,6 +29,7 @@ MONITOR_STATE_FIELDS = {
     "target_url",
     "pending_notification",
     "public_source_failures",
+    "source_positions",
     "updated_at",
 }
 
@@ -120,6 +123,7 @@ def initial_state() -> dict[str, Any]:
         "target_url": None,
         "pending_notification": None,
         "public_source_failures": {},
+        "source_positions": {},
         "updated_at": None,
     }
 
@@ -226,6 +230,33 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
             )
         clean_failures[source] = count
     state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
+    positions = state.get("source_positions")
+    if not isinstance(positions, dict):
+        raise StateError("source_positions must be an object")
+    clean_positions: dict[str, dict[str, Any]] = {}
+    for source, position in positions.items():
+        if source != "LightNovelUp" or not isinstance(position, dict) or set(position) != {"chapter", "url"}:
+            raise StateError("source_positions contains an unknown source or invalid fields")
+        chapter = valid_chapter(position.get("chapter"), allow_none=False)
+        url = position.get("url")
+        if not isinstance(url, str) or "%" in url:
+            raise StateError("source_positions contains an invalid URL")
+        try:
+            parsed = urlparse(url)
+        except ValueError as exc:
+            raise StateError("source_positions contains an invalid URL") from exc
+        host = (parsed.hostname or "").casefold()
+        match = re.fullmatch(
+            r"/novel/shadow-slave/chapter-(\d{1,5})-[a-z0-9]+(?:-[a-z0-9]+)*/?",
+            parsed.path,
+            flags=re.IGNORECASE,
+        )
+        if (parsed.scheme != "https" or host not in {"lightnovelup.com", "www.lightnovelup.com"}
+                or parsed.netloc.casefold() != host or parsed.params or parsed.query or parsed.fragment
+                or not match or int(match.group(1)) != chapter):
+            raise StateError("source_positions contains a noncanonical URL")
+        clean_positions[source] = {"chapter": chapter, "url": url}
+    state["source_positions"] = clean_positions
     return state
 
 def load_state(path: Path = STATE_PATH) -> tuple[dict[str, Any], bool]:

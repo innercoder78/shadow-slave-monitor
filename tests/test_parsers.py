@@ -13,8 +13,8 @@ from shadow_slave_monitor.parsers import (
     parse_chikari_candidates,
     parse_chikari_chapter_title,
     parse_freewebnovel_candidates,
-    parse_lightnovelup_chapter_page,
-    parse_lightnovelup_read_last,
+    check_lightnovelup,
+    lightnovelup_candidate_from_href,
     parse_novel_phoenix_candidates,
     parse_novelfull_candidates,
     parse_readwn_candidates,
@@ -965,7 +965,7 @@ class ReadwnParserTests(unittest.TestCase):
         )
         html = '''
           <a href="/book/shadow-slave/chapter-9999-noise">Chapter 9999 Noise</a>
-          <section><h2>Latest Chapters</h2><div>
+          <section><h2>6 Latest Chapters</h2><div>
             <a href="/book/shadow-slave/chapter-3173-life-goes-on">Chapter 3173 Life Goes On</a>
             <a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Chapter 3174 — Tatal's Basilisk</a>
           </div></section>
@@ -1006,73 +1006,93 @@ class ReadwnParserTests(unittest.TestCase):
 
 class LightNovelUpParserTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
+    chapter_3173 = "https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/"
+    chapter_3174 = "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
+
+    @staticmethod
+    def page(chapter: int, title: str, next_href: str | None = None) -> str:
+        navigation = f'<a href="{next_href}">Next</a>' if next_href else '<a href="/previous">Prev</a>'
+        return f"<html><head><title>Shadow Slave - Chapter {chapter} {title} - Light Novel Fastest Update</title></head><body><h1>Shadow Slave - Chapter {chapter} {title}</h1>{navigation}</body></html>"
 
     def test_enabled_configuration(self) -> None:
-        self.assertEqual(
-            self.source,
-            SourceConfig("LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True,
-                         ("lightnovelup.com", "www.lightnovelup.com")),
-        )
+        self.assertEqual(self.source, SourceConfig(
+            "LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True,
+            ("lightnovelup.com", "www.lightnovelup.com"),
+        ))
 
-    def test_supplied_canonical_urls_and_matching_title(self) -> None:
-        examples = (
-            (3174, "tatals-basilisk"),
-            (3173, "life-goes-on"),
-            (3171, "wedding-of-the-century"),
-            (3153, "an-army-a-fortress-and-a-general"),
-        )
-        for chapter, slug in examples:
-            url = f"https://lightnovelup.com/novel/shadow-slave/chapter-{chapter}-{slug}"
-            html = f"<h1>Shadow Slave - Chapter {chapter} Tatal's Basilisk</h1>"
-            report = parse_lightnovelup_chapter_page(html, url)
-            self.assertEqual(report.chapter, chapter)
-        report = parse_lightnovelup_chapter_page(
-            "<h1>Shadow Slave - Chapter 3174 Tatal's Basilisk</h1>",
-            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk",
-        )
-        self.assertEqual(report.title, "Tatal's Basilisk")
+    def test_read_last_on_novel_page_is_not_chapter_discovery(self) -> None:
+        href = "https://lightnovelup.com/novel/shadow-slave/"
+        self.assertIsNone(lightnovelup_candidate_from_href(href, self.source.url))
 
-    def test_heading_is_optional_but_contradiction_is_rejected(self) -> None:
-        url = "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk"
-        self.assertIsNone(parse_lightnovelup_chapter_page("<h1>Shadow Slave</h1>", url).title)
-        with self.assertRaises(ParseError):
-            parse_lightnovelup_chapter_page("<h1>Shadow Slave - Chapter 3173 Wrong</h1>", url)
+    def test_live_navigation_bootstraps_to_3174_and_extracts_visible_title(self) -> None:
+        pages = [self.page(3173, "Life Goes On", self.chapter_3174),
+                 self.page(3174, "Tatal’s Basilisk")]
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=pages) as fetch:
+            report = check_lightnovelup(self.source)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3174, "Tatal’s Basilisk", self.chapter_3174))
+        self.assertEqual((report.position_chapter, report.position_url), (3174, self.chapter_3174))
+        self.assertEqual(fetch.call_args_list,
+                         [call(self.source, self.chapter_3173), call(self.source, self.chapter_3174)])
 
-    def test_read_last_must_be_unique_and_canonical(self) -> None:
-        valid = '<a href="/novel/shadow-slave/chapter-3174-tatals-basilisk"><span>Read Last</span></a>'
-        report = parse_lightnovelup_read_last(BeautifulSoup(valid, "html.parser"), self.source.url)
-        self.assertEqual(report.chapter, 3174)
-        invalid = (
-            '<a href="https://evil.example/novel/shadow-slave/chapter-3174-title">Read Last</a>',
-            '<a href="/novel/other/chapter-3174-title">Read Last</a>',
-            '<a href="/novel/shadow-slave/chapter-3174-title?x=1">Read Last</a>',
-            '<a href="/novel/shadow-slave/chapter-3174-title#next">Read Last</a>',
-            '<a href="/novel/shadow-slave/chapter-3174-title">Read Last</a><a href="/novel/shadow-slave/chapter-3173-old">Read Last</a>',
-            '<button>Read Last</button>',
+    def test_saved_latest_cursor_is_quiet_and_hypothetical_next_advances(self) -> None:
+        cursor = {"chapter": 3174, "url": self.chapter_3174}
+        with patch("shadow_slave_monitor.parsers.fetch_html",
+                   return_value=self.page(3174, "Tatal’s Basilisk")) as fetch:
+            report = check_lightnovelup(self.source, cursor)
+        self.assertEqual(report.position_chapter, 3174)
+        fetch.assert_called_once_with(self.source, self.chapter_3174)
+
+        chapter_3175 = "https://lightnovelup.com/novel/shadow-slave/chapter-3175-a-real-site-slug/"
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[
+            self.page(3174, "Tatal’s Basilisk", chapter_3175),
+            self.page(3175, "A Real Site Title"),
+        ]):
+            advanced = check_lightnovelup(self.source, cursor)
+        self.assertEqual((advanced.chapter, advanced.url), (3175, chapter_3175))
+
+    def test_invalid_next_navigation_fails_closed(self) -> None:
+        bad_next = (
+            self.chapter_3173,
+            "https://lightnovelup.com/novel/shadow-slave/chapter-3172-little-flames/",
+            "https://evil.example/novel/shadow-slave/chapter-3174-title/",
+            "https://lightnovelup.com/novel/other/chapter-3174-title/",
+            "https://lightnovelup.com/novel/shadow-slave/chapter-3199-jump/",
+            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/?query=bad",
         )
-        for html in invalid:
-            with self.subTest(html=html):
-                self.assertIsNone(parse_lightnovelup_read_last(BeautifulSoup(html, "html.parser"), self.source.url))
+        for href in bad_next:
+            with self.subTest(href=href), patch("shadow_slave_monitor.parsers.fetch_html",
+                                                return_value=self.page(3173, "Life Goes On", href)), self.assertRaises(ParseError):
+                check_lightnovelup(self.source)
 
-    def test_check_uses_site_provided_url_and_chapter_heading(self) -> None:
-        novel = '<a href="/novel/shadow-slave/chapter-3174-tatals-basilisk">Read Last</a>'
-        chapter = "<h1>Shadow Slave - Chapter 3174 Tatal's Basilisk</h1><span>Next</span>"
-        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[novel, chapter]) as fetch:
-            report = check_public_site(self.source)
-        self.assertEqual((report.chapter, report.title), (3174, "Tatal's Basilisk"))
-        self.assertEqual(fetch.call_args_list, [call(self.source), call(self.source, report.url)])
+    def test_heading_disagreement_and_ambiguous_next_fail_closed(self) -> None:
+        with patch("shadow_slave_monitor.parsers.fetch_html",
+                   return_value=self.page(3172, "Wrong", self.chapter_3174)), self.assertRaises(ParseError):
+            check_lightnovelup(self.source)
+        ambiguous = self.page(3173, "Life Goes On", self.chapter_3174).replace(
+            "</body>", f'<a href="{self.chapter_3174}">Next Chapter</a></body>')
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=ambiguous), self.assertRaises(ParseError):
+            check_lightnovelup(self.source)
 
-    def test_malformed_chapter_urls_fail_closed(self) -> None:
-        urls = (
-            "http://lightnovelup.com/novel/shadow-slave/chapter-3174-title",
-            "https://lightnovelup.com:443/novel/shadow-slave/chapter-3174-title",
-            "https://lightnovelup.com/novel/shadow-slave/chapter-3174",
-            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/extra",
-            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-%74itle",
-        )
-        for url in urls:
-            with self.subTest(url=url), self.assertRaises(ParseError):
-                parse_lightnovelup_chapter_page("", url)
+    def test_cycle_and_traversal_limit_fail_closed(self) -> None:
+        from shadow_slave_monitor import parsers
+        with patch.object(parsers, "LIGHTNOVELUP_MAX_TRAVERSAL", 1), \
+             patch("shadow_slave_monitor.parsers.fetch_html",
+                   return_value=self.page(3173, "Life Goes On", self.chapter_3174)), \
+             self.assertRaisesRegex(ParseError, "traversal limit"):
+            check_lightnovelup(self.source)
+
+    def test_canonical_url_examples_and_malformed_urls(self) -> None:
+        examples = (self.chapter_3174, self.chapter_3173,
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3171-wedding-of-the-century/",
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3153-an-army-a-fortress-and-a-general/")
+        self.assertEqual([lightnovelup_candidate_from_href(url, self.source.url).chapter for url in examples],
+                         [3174, 3173, 3171, 3153])
+        for url in ("http://lightnovelup.com/novel/shadow-slave/chapter-3174-title/",
+                    "https://lightnovelup.com:443/novel/shadow-slave/chapter-3174-title/",
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/#bad",
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3174-%74itle/"):
+            self.assertIsNone(lightnovelup_candidate_from_href(url, self.source.url))
 
 
 if __name__ == "__main__":

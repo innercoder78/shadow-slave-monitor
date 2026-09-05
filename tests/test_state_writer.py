@@ -30,6 +30,40 @@ def chdir(path: Path):
 
 
 class StateWriterValidationTests(unittest.TestCase):
+    def test_monitor_cursor_supersession_never_discards_a_newer_artifact_cursor(self) -> None:
+        current = state_writer.validate_state(json.loads((ROOT / "state" / "state.json").read_text()))
+        artifact = json.loads(json.dumps(current))
+        current["source_positions"] = {
+            "LightNovelUp": {"chapter": 3174, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"}
+        }
+        artifact["source_positions"] = {
+            "LightNovelUp": {"chapter": 3175, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3175-new-chapter/"}
+        }
+        self.assertFalse(state_writer.monitor_artifact_superseded(current, artifact))
+        self.assertTrue(state_writer.monitor_artifact_superseded(artifact, current))
+        current["public_source_failures"] = {"Readwn": 1}
+        merged = state_writer.reconcile_monitor_cursor_advancement(current, artifact)
+        self.assertEqual(merged["source_positions"], artifact["source_positions"])
+        self.assertEqual(merged["public_source_failures"], {"Readwn": 1})
+
+    def test_cursor_reconciliation_rejects_regressions_and_other_conflicts(self) -> None:
+        current = state_writer.validate_state(json.loads((ROOT / "state" / "state.json").read_text()))
+        current["source_positions"] = {
+            "LightNovelUp": {"chapter": 3175, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3175-new-chapter/"}
+        }
+        older = json.loads(json.dumps(current))
+        older["source_positions"]["LightNovelUp"] = {
+            "chapter": 3174, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
+        }
+        self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, older))
+
+        conflicting = json.loads(json.dumps(current))
+        conflicting["latest_webnovel"] = (current.get("latest_webnovel") or 1) + 1
+        conflicting["source_positions"]["LightNovelUp"] = {
+            "chapter": 3176, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3176-another-chapter/"
+        }
+        self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, conflicting))
+
     def write_metadata(self, artifact_dir: Path, state_file: str = "state/state.json", *, base_sha256: str | None = None) -> None:
         artifact_type = "monitor" if state_file == "state/state.json" else "watchdog"
         state_name = "state.json" if state_file == "state/state.json" else "watchdog_state.json"
@@ -270,6 +304,30 @@ class StateWriterPersistenceTests(unittest.TestCase):
 
             self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
             self.assertEqual(json.loads((repo / state_file).read_text(encoding="utf-8"))["updated_at"], "2026-06-11T12:00:00+00:00")
+
+    def test_cursor_only_advancement_commits_and_reaches_push_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.initialize_repo(repo)
+            state_file = "state/state.json"
+            state_data = json.loads((repo / state_file).read_text(encoding="utf-8"))
+            state_data["source_positions"] = {
+                "LightNovelUp": {
+                    "chapter": 3174,
+                    "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/",
+                }
+            }
+            artifact_dir = Path(tmp) / "artifact"
+            self.write_artifact(repo, artifact_dir, state_file, state_data, self.sha256(repo / state_file))
+            push_calls: list[list[str]] = []
+
+            with chdir(repo):
+                self.persist(artifact_dir, state_file, push_calls)
+
+            self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
+            persisted = json.loads((repo / state_file).read_text(encoding="utf-8"))
+            self.assertEqual(persisted["source_positions"], state_data["source_positions"])
 
 
 if __name__ == "__main__":
