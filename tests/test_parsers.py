@@ -13,8 +13,11 @@ from shadow_slave_monitor.parsers import (
     parse_chikari_candidates,
     parse_chikari_chapter_title,
     parse_freewebnovel_candidates,
+    check_lightnovelup,
+    lightnovelup_candidate_from_href,
     parse_novel_phoenix_candidates,
     parse_novelfull_candidates,
+    parse_readwn_candidates,
     parse_shadowslave_space_chapter_title,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
@@ -46,6 +49,8 @@ class ChikariParserTests(unittest.TestCase):
                 "Novel Buddy": True,
                 "ShadowSlave.Space": True,
                 "FreeWebNovel": True,
+                "Readwn": True,
+                "LightNovelUp": True,
                 "Novel Phoenix": True,
                 "NovelArrow": True,
                 "NovelFire": True,
@@ -53,6 +58,7 @@ class ChikariParserTests(unittest.TestCase):
                 "NovelFull": True,
             },
         )
+
 
     def test_realistic_unordered_series_page_uses_highest_canonical_link(self) -> None:
         html = """
@@ -942,6 +948,153 @@ class TelegramParserTests(unittest.TestCase):
             2986,
             "A Memory Most Dreadful",
         )
+
+
+class ReadwnParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "Readwn")
+
+    def check(self, html: str) -> ChapterReport:
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
+            return check_public_site(self.source)
+
+    def test_enabled_configuration_and_semantic_latest_section(self) -> None:
+        self.assertEqual(
+            self.source,
+            SourceConfig("Readwn", "https://readwn.org/book/shadow-slave", True,
+                         ("readwn.org", "www.readwn.org")),
+        )
+        html = '''
+          <a href="/book/shadow-slave/chapter-9999-noise">Chapter 9999 Noise</a>
+          <section><h2>6 Latest Chapters</h2><div>
+            <a href="/book/shadow-slave/chapter-3173-life-goes-on">Chapter 3173 Life Goes On</a>
+            <a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Chapter 3174 — Tatal's Basilisk</a>
+          </div></section>
+          <p>999999 views · 2026-09-05 · 4.9 rating · page 8888</p>
+        '''
+        report = self.check(html)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3174, "Tatal's Basilisk",
+                          "https://readwn.org/book/shadow-slave/chapter-3174-tatals-basilisk"))
+
+    def test_relative_absolute_and_titleless_canonical_links(self) -> None:
+        html = '''<section><h3>Latest Release</h3><div>
+          <a href="https://www.readwn.org/book/shadow-slave/chapter-3173-life-goes-on">Latest chapter</a>
+          <a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Read now</a>
+        </div></section>'''
+        candidates = parse_readwn_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+        self.assertEqual([item.chapter for item in candidates], [3173, 3174])
+        self.assertIsNone(candidates[1].title)
+
+    def test_untrusted_latest_information_fails_closed(self) -> None:
+        bad_links = (
+            '<a href="/book/shadow-slave/chapter-3173-life">Chapter 3174 Wrong</a>',
+            '<a href="https://evil.example/book/shadow-slave/chapter-3174-title">Chapter 3174 Title</a>',
+            '<a href="/book/shadow-slave/3174-title">Chapter 3174 Title</a>',
+            '<a href="http://readwn.org/book/shadow-slave/chapter-3174-title">Chapter 3174 Title</a>',
+            '<a href="/book/shadow-slave/chapter-3174-title?next=9999">Chapter 3174 Title</a>',
+        )
+        for link in bad_links:
+            html = f"<section><h2>Latest Chapters</h2><div>{link}</div></section><p>Chapter 9999 Noise</p>"
+            with self.subTest(link=link), self.assertRaises(ParseError):
+                self.check(html)
+
+    def test_missing_semantic_latest_area_does_not_scan_other_links(self) -> None:
+        html = '<a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Chapter 3174 Tatal\'s Basilisk</a>'
+        with self.assertRaises(ParseError):
+            self.check(html)
+
+
+class LightNovelUpParserTests(unittest.TestCase):
+    source = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
+    chapter_3173 = "https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/"
+    chapter_3174 = "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
+
+    @staticmethod
+    def page(chapter: int, title: str, next_href: str | None = None, *, duplicate_next: bool = False) -> str:
+        before = f'<a href="{next_href}">Next</a>' if next_href else '<a href="/previous">Prev</a>'
+        after = f'<a href="{next_href}">Next</a>' if next_href and duplicate_next else ""
+        return f"<html><head><title>Shadow Slave - Chapter {chapter} {title} - Light Novel Fastest Update</title></head><body>{before}<article><h1>Shadow Slave - Chapter {chapter} {title}</h1><p>Chapter body</p></article>{after}</body></html>"
+
+    def test_enabled_configuration(self) -> None:
+        self.assertEqual(self.source, SourceConfig(
+            "LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True,
+            ("lightnovelup.com", "www.lightnovelup.com"),
+        ))
+
+    def test_read_last_on_novel_page_is_not_chapter_discovery(self) -> None:
+        href = "https://lightnovelup.com/novel/shadow-slave/"
+        self.assertIsNone(lightnovelup_candidate_from_href(href, self.source.url))
+
+    def test_live_navigation_bootstraps_to_3174_and_extracts_visible_title(self) -> None:
+        pages = [self.page(3173, "Life Goes On", self.chapter_3174, duplicate_next=True),
+                 self.page(3174, "Tatal’s Basilisk")]
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=pages) as fetch:
+            report = check_lightnovelup(self.source)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (3174, "Tatal’s Basilisk", self.chapter_3174))
+        self.assertEqual((report.position_chapter, report.position_url), (3174, self.chapter_3174))
+        self.assertEqual(fetch.call_args_list,
+                         [call(self.source, self.chapter_3173), call(self.source, self.chapter_3174)])
+
+    def test_saved_latest_cursor_is_quiet_and_hypothetical_next_advances(self) -> None:
+        cursor = {"chapter": 3174, "url": self.chapter_3174}
+        with patch("shadow_slave_monitor.parsers.fetch_html",
+                   return_value=self.page(3174, "Tatal’s Basilisk")) as fetch:
+            report = check_lightnovelup(self.source, cursor)
+        self.assertEqual(report.position_chapter, 3174)
+        fetch.assert_called_once_with(self.source, self.chapter_3174)
+
+        chapter_3175 = "https://lightnovelup.com/novel/shadow-slave/chapter-3175-a-real-site-slug/"
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[
+            self.page(3174, "Tatal’s Basilisk", chapter_3175),
+            self.page(3175, "A Real Site Title"),
+        ]):
+            advanced = check_lightnovelup(self.source, cursor)
+        self.assertEqual((advanced.chapter, advanced.url), (3175, chapter_3175))
+
+    def test_invalid_next_navigation_fails_closed(self) -> None:
+        bad_next = (
+            self.chapter_3173,
+            "https://lightnovelup.com/novel/shadow-slave/chapter-3172-little-flames/",
+            "https://evil.example/novel/shadow-slave/chapter-3174-title/",
+            "https://lightnovelup.com/novel/other/chapter-3174-title/",
+            "https://lightnovelup.com/novel/shadow-slave/chapter-3199-jump/",
+            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/?query=bad",
+        )
+        for href in bad_next:
+            with self.subTest(href=href), patch("shadow_slave_monitor.parsers.fetch_html",
+                                                return_value=self.page(3173, "Life Goes On", href)), self.assertRaises(ParseError):
+                check_lightnovelup(self.source)
+
+    def test_heading_disagreement_and_ambiguous_next_fail_closed(self) -> None:
+        with patch("shadow_slave_monitor.parsers.fetch_html",
+                   return_value=self.page(3172, "Wrong", self.chapter_3174)), self.assertRaises(ParseError):
+            check_lightnovelup(self.source)
+        different_destination = "https://lightnovelup.com/novel/shadow-slave/chapter-3174-a-different-slug/"
+        ambiguous = self.page(3173, "Life Goes On", self.chapter_3174).replace(
+            "</body>", f'<a href="{different_destination}">Next Chapter</a></body>')
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=ambiguous), self.assertRaises(ParseError):
+            check_lightnovelup(self.source)
+
+    def test_cycle_and_traversal_limit_fail_closed(self) -> None:
+        from shadow_slave_monitor import parsers
+        with patch.object(parsers, "LIGHTNOVELUP_MAX_TRAVERSAL", 1), \
+             patch("shadow_slave_monitor.parsers.fetch_html",
+                   return_value=self.page(3173, "Life Goes On", self.chapter_3174)), \
+             self.assertRaisesRegex(ParseError, "traversal limit"):
+            check_lightnovelup(self.source)
+
+    def test_canonical_url_examples_and_malformed_urls(self) -> None:
+        examples = (self.chapter_3174, self.chapter_3173,
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3171-wedding-of-the-century/",
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3153-an-army-a-fortress-and-a-general/")
+        self.assertEqual([lightnovelup_candidate_from_href(url, self.source.url).chapter for url in examples],
+                         [3174, 3173, 3171, 3153])
+        for url in ("http://lightnovelup.com/novel/shadow-slave/chapter-3174-title/",
+                    "https://lightnovelup.com:443/novel/shadow-slave/chapter-3174-title/",
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/#bad",
+                    "https://lightnovelup.com/novel/shadow-slave/chapter-3174-%74itle/"):
+            self.assertIsNone(lightnovelup_candidate_from_href(url, self.source.url))
 
 
 if __name__ == "__main__":

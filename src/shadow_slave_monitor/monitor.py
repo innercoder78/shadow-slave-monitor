@@ -58,8 +58,13 @@ def aggregate_reports_for_chapter(reports: list[ChapterReport], chapter: int) ->
         ",".join(r.strategy for r in matching),
     )
 
-def check_public_sites(result: RunResult, failure_counts: dict[str, int] | None = None) -> list[ChapterReport]:
+def check_public_sites(
+    result: RunResult,
+    failure_counts: dict[str, int] | None = None,
+    source_positions: dict[str, dict[str, Any]] | None = None,
+) -> list[ChapterReport]:
     failure_counts = failure_counts if failure_counts is not None else {}
+    source_positions = source_positions if source_positions is not None else {}
     enabled = [s for s in PUBLIC_SITES if s.enabled]
     for site in PUBLIC_SITES:
         if not site.enabled:
@@ -80,7 +85,14 @@ def check_public_sites(result: RunResult, failure_counts: dict[str, int] | None 
     errors: dict[str, Exception] = {}
     failures: list[str] = []
     with ThreadPoolExecutor(max_workers=min(PUBLIC_SITE_WORKERS, len(eligible) or 1)) as executor:
-        futures = {executor.submit(check_public_site, site): site for site in eligible}
+        futures = {
+            executor.submit(
+                check_public_site,
+                site,
+                dict(source_positions[site.name]) if site.name in source_positions else None,
+            ) if site.name == "LightNovelUp" else executor.submit(check_public_site, site): site
+            for site in eligible
+        }
         for future in as_completed(futures):
             site = futures[future]
             try:
@@ -90,7 +102,15 @@ def check_public_sites(result: RunResult, failure_counts: dict[str, int] | None 
     reports: list[ChapterReport] = []
     for site in eligible:
         if site.name in reports_by_name:
-            reports.append(reports_by_name[site.name])
+            report = reports_by_name[site.name]
+            reports.append(report)
+            if report.position_chapter is not None and report.position_url is not None:
+                previous = source_positions.get(site.name)
+                if previous is None or report.position_chapter > previous["chapter"]:
+                    source_positions[site.name] = {
+                        "chapter": report.position_chapter,
+                        "url": report.position_url,
+                    }
             failure_counts.pop(site.name, None)
         else:
             exc = errors[site.name]
@@ -211,7 +231,9 @@ def first_setup(state: dict[str, Any], result: RunResult) -> None:
     official = required_webnovel_check(state, result)
     if official is None:
         return
-    public_reports = check_public_sites(result, state.setdefault("public_source_failures", {}))
+    public_reports = check_public_sites(
+        result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {})
+    )
     if result.status == Health.FAILED and not public_reports:
         return
     accepted = [r for r in public_reports if r.chapter <= official.chapter]
@@ -267,7 +289,9 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
         result.fail("critical configuration value target_chapter is missing")
         set_watch_webnovel(state)
         return
-    reports = check_public_sites(result, state.setdefault("public_source_failures", {}))
+    reports = check_public_sites(
+        result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {})
+    )
     if not reports:
         return
     highest = max(r.chapter for r in reports)

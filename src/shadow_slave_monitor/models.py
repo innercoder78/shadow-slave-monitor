@@ -15,6 +15,8 @@ class ChapterReport:
     title: str | None
     url: str
     strategy: str = "unknown"
+    position_chapter: int | None = None
+    position_url: str | None = None
 
 @dataclass(slots=True)
 class RunResult:
