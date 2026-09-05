@@ -90,6 +90,8 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net", "www.novelfire.net")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),
+    SourceConfig("Readwn", "https://readwn.org/book/shadow-slave", True, ("readwn.org", "www.readwn.org")),
+    SourceConfig("LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True, ("lightnovelup.com", "www.lightnovelup.com")),
 )
 
 PUBLIC_SITE_ORDER = {site.name: index for index, site in enumerate(PUBLIC_SITES)}

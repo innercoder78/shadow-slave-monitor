@@ -11,7 +11,7 @@ from unittest.mock import patch
 import requests
 
 from shadow_slave_monitor import monitor
-from shadow_slave_monitor.config import SourceConfig
+from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.notifications import NotificationDeliveryError
 from shadow_slave_monitor.state_manager import StateError, save_state, validate_state
@@ -60,6 +60,27 @@ def run_main_with_state(state: dict, *, first: bool = False, allow_system_exit: 
 
 
 class PublicSourceFailureLoggingTests(unittest.TestCase):
+    def test_new_sources_participate_in_order_and_degrade_independently(self) -> None:
+        readwn = next(site for site in PUBLIC_SITES if site.name == "Readwn")
+        lightnovelup = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
+        report = ChapterReport("LightNovelUp", 3174, "Tatal's Basilisk",
+                               "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk")
+
+        def check(site: SourceConfig) -> ChapterReport:
+            if site.name == "Readwn":
+                raise RuntimeError("template changed")
+            return report
+
+        result = monitor.RunResult()
+        failures: dict[str, int] = {}
+        with patch.object(monitor, "PUBLIC_SITES", (readwn, lightnovelup)), \
+             patch.object(monitor, "check_public_site", side_effect=check):
+            reports = monitor.check_public_sites(result, failures)
+
+        self.assertEqual(reports, [report])
+        self.assertEqual(failures, {"Readwn": 1})
+        self.assertEqual(result.degraded_reasons, ["optional public sources failed: Readwn"])
+
     def test_http_failure_logs_sanitized_diagnostics_and_degrades(self) -> None:
         failed = SourceConfig("Failed", "https://example.com/private?token=secret", True, ("example.com",))
         good = SourceConfig("Good", "https://good.example", True, ("good.example",))

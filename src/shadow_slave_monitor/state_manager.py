@@ -53,6 +53,8 @@ def validate_source_config() -> None:
         "Novel Buddy": True,
         "ShadowSlave.Space": True,
         "FreeWebNovel": True,
+        "Readwn": True,
+        "LightNovelUp": True,
         "Novel Phoenix": True,
         "NovelArrow": True,
         "NovelFire": True,
