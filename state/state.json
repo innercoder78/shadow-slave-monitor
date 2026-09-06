@@ -1,26 +1,20 @@
 {
-  "latest_seen": 3176,
-  "latest_title": "First of Her Kind",
-  "latest_url": "https://telegra.ph/3176-First-of-Her-Kind-09-05",
+  "latest_seen": 3177,
+  "latest_title": "Parting",
+  "latest_url": "https://telegra.ph/3177-Parting-09-06",
   "latest_webnovel": 3177,
   "latest_webnovel_title": "Parting",
-  "mode": "watch_free_sites",
-  "target_chapter": 3177,
-  "target_title": "Parting",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "source_positions": {
     "LightNovelUp": {
       "chapter": 3176,
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3176-first-of-her-kind/"
     }
   },
-  "updated_at": "2026-09-06T16:20:20+00:00"
+  "updated_at": "2026-09-06T18:40:17+00:00"
 }
