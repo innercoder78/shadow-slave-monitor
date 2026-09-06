@@ -9,12 +9,18 @@
   "target_title": "Parting",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1,
+    "Readwn": 1
+  },
   "source_positions": {
     "LightNovelUp": {
-      "chapter": 3174,
-      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
+      "chapter": 3176,
+      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3176-first-of-her-kind/"
     }
   },
-  "updated_at": "2026-09-06T16:00:24+00:00"
+  "updated_at": "2026-09-06T16:05:20+00:00"
 }
