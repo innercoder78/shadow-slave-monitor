@@ -2,12 +2,12 @@
   "latest_seen": 3176,
   "latest_title": "First of Her Kind",
   "latest_url": "https://telegra.ph/3176-First-of-Her-Kind-09-05",
-  "latest_webnovel": 3176,
-  "latest_webnovel_title": "First of Her Kind",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3177,
+  "latest_webnovel_title": "Parting",
+  "mode": "watch_free_sites",
+  "target_chapter": 3177,
+  "target_title": "Parting",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
     }
   },
-  "updated_at": "2026-09-05T19:45:19+00:00"
+  "updated_at": "2026-09-06T16:00:24+00:00"
 }
