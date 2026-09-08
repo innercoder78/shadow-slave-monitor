@@ -1,26 +1,20 @@
 {
-  "latest_seen": 3178,
-  "latest_title": "Promise of Blood",
-  "latest_url": "https://telegra.ph/3178-Promise-of-Blood-09-07",
+  "latest_seen": 3179,
+  "latest_title": "Kingdom of Peace",
+  "latest_url": "https://telegra.ph/3179-Kingdom-of-Peace-09-08",
   "latest_webnovel": 3179,
   "latest_webnovel_title": "Kingdom of Peace",
-  "mode": "watch_free_sites",
-  "target_chapter": 3179,
-  "target_title": "Kingdom of Peace",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "source_positions": {
     "LightNovelUp": {
       "chapter": 3178,
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3178-promise-of-blood/"
     }
   },
-  "updated_at": "2026-09-08T16:20:22+00:00"
+  "updated_at": "2026-09-08T20:40:19+00:00"
 }
