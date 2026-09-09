@@ -2,12 +2,12 @@
   "latest_seen": 3179,
   "latest_title": "Kingdom of Peace",
   "latest_url": "https://telegra.ph/3179-Kingdom-of-Peace-09-08",
-  "latest_webnovel": 3179,
-  "latest_webnovel_title": "Kingdom of Peace",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3180,
+  "latest_webnovel_title": "Slither of Doubt",
+  "mode": "watch_free_sites",
+  "target_chapter": 3180,
+  "target_title": "Slither of Doubt",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3178-promise-of-blood/"
     }
   },
-  "updated_at": "2026-09-08T20:40:19+00:00"
+  "updated_at": "2026-09-09T16:00:26+00:00"
 }
