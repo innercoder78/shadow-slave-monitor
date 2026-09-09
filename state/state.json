@@ -9,12 +9,18 @@
   "target_title": "Slither of Doubt",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1,
+    "Readwn": 1
+  },
   "source_positions": {
     "LightNovelUp": {
-      "chapter": 3178,
-      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3178-promise-of-blood/"
+      "chapter": 3179,
+      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3179-kingdom-of-peace/"
     }
   },
-  "updated_at": "2026-09-09T16:00:26+00:00"
+  "updated_at": "2026-09-09T16:05:26+00:00"
 }
