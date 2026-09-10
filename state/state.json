@@ -2,12 +2,12 @@
   "latest_seen": 3180,
   "latest_title": "Slither of Doubt",
   "latest_url": "https://telegra.ph/3180-Slither-of-Doubt-09-09",
-  "latest_webnovel": 3180,
-  "latest_webnovel_title": "Slither of Doubt",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3181,
+  "latest_webnovel_title": "Bringer of Light",
+  "mode": "watch_free_sites",
+  "target_chapter": 3181,
+  "target_title": "Bringer of Light",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3179-kingdom-of-peace/"
     }
   },
-  "updated_at": "2026-09-09T17:50:26+00:00"
+  "updated_at": "2026-09-10T16:00:26+00:00"
 }
