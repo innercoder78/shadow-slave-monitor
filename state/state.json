@@ -2,12 +2,12 @@
   "latest_seen": 3181,
   "latest_title": "Bringer of Light",
   "latest_url": "https://telegra.ph/3181-Bringer-of-Light-09-10",
-  "latest_webnovel": 3181,
-  "latest_webnovel_title": "Bringer of Light",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3182,
+  "latest_webnovel_title": "Plight of Gods",
+  "mode": "watch_free_sites",
+  "target_chapter": 3182,
+  "target_title": "Plight of Gods",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3180-slither-of-doubt/"
     }
   },
-  "updated_at": "2026-09-10T17:20:21+00:00"
+  "updated_at": "2026-09-11T16:00:29+00:00"
 }
