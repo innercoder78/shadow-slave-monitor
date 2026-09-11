@@ -61,6 +61,25 @@ def run_main_with_state(state: dict, *, first: bool = False, allow_system_exit: 
 
 
 class PublicSourceFailureLoggingTests(unittest.TestCase):
+    def test_new_optional_source_failure_does_not_hide_healthy_source(self) -> None:
+        failed = next(site for site in PUBLIC_SITES if site.name == "Novel Live")
+        good = next(site for site in PUBLIC_SITES if site.name == "Chikari")
+        report = ChapterReport("Chikari", 3182, "Plight of Gods",
+                               "https://chikari.moe/novels/shadow-slave/3182")
+
+        def check(site: SourceConfig, source_position=None) -> ChapterReport:
+            if site is failed:
+                raise RuntimeError("untrusted template")
+            return report
+
+        result = monitor.RunResult()
+        failures: dict[str, int] = {}
+        with patch.object(monitor, "PUBLIC_SITES", (failed, good)), \
+             patch.object(monitor, "check_public_site", side_effect=check):
+            self.assertEqual(monitor.check_public_sites(result, failures), [report])
+        self.assertEqual(failures, {"Novel Live": 1})
+        self.assertEqual(result.degraded_reasons, ["optional public sources failed: Novel Live"])
+
     def test_new_sources_participate_in_order_and_degrade_independently(self) -> None:
         readwn = next(site for site in PUBLIC_SITES if site.name == "Readwn")
         lightnovelup = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
