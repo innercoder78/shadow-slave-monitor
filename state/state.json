@@ -9,12 +9,19 @@
   "target_title": "Gift of War",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Live": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1,
+    "Readwn": 1
+  },
   "source_positions": {
     "LightNovelUp": {
-      "chapter": 3181,
-      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3181-bringer-of-light/"
+      "chapter": 3182,
+      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3182-plight-of-gods/"
     }
   },
-  "updated_at": "2026-09-12T16:00:24+00:00"
+  "updated_at": "2026-09-12T16:05:21+00:00"
 }
