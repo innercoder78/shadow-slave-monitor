@@ -9,12 +9,19 @@
   "target_title": "Insidious Traps",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Live": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1,
+    "Readwn": 1
+  },
   "source_positions": {
     "LightNovelUp": {
-      "chapter": 3182,
-      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3182-plight-of-gods/"
+      "chapter": 3183,
+      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3183-gift-of-war/"
     }
   },
-  "updated_at": "2026-09-13T15:40:20+00:00"
+  "updated_at": "2026-09-13T15:45:23+00:00"
 }
