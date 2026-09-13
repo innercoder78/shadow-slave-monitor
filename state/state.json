@@ -1,27 +1,20 @@
 {
-  "latest_seen": 3183,
-  "latest_title": "Gift of War",
-  "latest_url": "https://telegra.ph/3183-Gift-of-War-09-12",
+  "latest_seen": 3184,
+  "latest_title": "Insidious Traps",
+  "latest_url": "https://telegra.ph/3184-Insidious-Traps-09-13",
   "latest_webnovel": 3184,
   "latest_webnovel_title": "Insidious Traps",
-  "mode": "watch_free_sites",
-  "target_chapter": 3184,
-  "target_title": "Insidious Traps",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "source_positions": {
     "LightNovelUp": {
       "chapter": 3183,
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3183-gift-of-war/"
     }
   },
-  "updated_at": "2026-09-13T16:00:22+00:00"
+  "updated_at": "2026-09-13T17:05:20+00:00"
 }
