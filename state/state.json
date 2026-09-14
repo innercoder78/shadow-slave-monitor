@@ -1,27 +1,20 @@
 {
-  "latest_seen": 3184,
-  "latest_title": "Insidious Traps",
-  "latest_url": "https://telegra.ph/3184-Insidious-Traps-09-13",
+  "latest_seen": 3185,
+  "latest_title": "Mundane Fortune",
+  "latest_url": "https://telegra.ph/3185-Mundane-Fortune-09-14",
   "latest_webnovel": 3185,
   "latest_webnovel_title": "Mundane Fortune",
-  "mode": "watch_free_sites",
-  "target_chapter": 3185,
-  "target_title": "Mundane Fortune",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "source_positions": {
     "LightNovelUp": {
       "chapter": 3184,
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3184-insidious-traps/"
     }
   },
-  "updated_at": "2026-09-14T15:40:33+00:00"
+  "updated_at": "2026-09-14T16:10:25+00:00"
 }
