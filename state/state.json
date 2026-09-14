@@ -2,12 +2,12 @@
   "latest_seen": 3184,
   "latest_title": "Insidious Traps",
   "latest_url": "https://telegra.ph/3184-Insidious-Traps-09-13",
-  "latest_webnovel": 3184,
-  "latest_webnovel_title": "Insidious Traps",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3185,
+  "latest_webnovel_title": "Mundane Fortune",
+  "mode": "watch_free_sites",
+  "target_chapter": 3185,
+  "target_title": "Mundane Fortune",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3183-gift-of-war/"
     }
   },
-  "updated_at": "2026-09-13T17:05:20+00:00"
+  "updated_at": "2026-09-14T15:20:20+00:00"
 }
