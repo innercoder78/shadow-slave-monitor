@@ -9,12 +9,19 @@
   "target_title": "Lots of Fishes",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Chikari": 1,
+    "Novel Live": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1,
+    "Readwn": 1
+  },
   "source_positions": {
     "LightNovelUp": {
-      "chapter": 3184,
-      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3184-insidious-traps/"
+      "chapter": 3185,
+      "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3185-mundane-fortune/"
     }
   },
-  "updated_at": "2026-09-15T15:40:22+00:00"
+  "updated_at": "2026-09-15T15:45:29+00:00"
 }
