@@ -2,12 +2,12 @@
   "latest_seen": 3185,
   "latest_title": "Mundane Fortune",
   "latest_url": "https://telegra.ph/3185-Mundane-Fortune-09-14",
-  "latest_webnovel": 3185,
-  "latest_webnovel_title": "Mundane Fortune",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3186,
+  "latest_webnovel_title": "Lots of Fishes",
+  "mode": "watch_free_sites",
+  "target_chapter": 3186,
+  "target_title": "Lots of Fishes",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3184-insidious-traps/"
     }
   },
-  "updated_at": "2026-09-14T16:10:25+00:00"
+  "updated_at": "2026-09-15T15:40:22+00:00"
 }
