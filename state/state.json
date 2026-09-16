@@ -2,12 +2,12 @@
   "latest_seen": 3186,
   "latest_title": "Lots of Fishes",
   "latest_url": "https://telegra.ph/3186-Lots-of-Fishes-09-15",
-  "latest_webnovel": 3186,
-  "latest_webnovel_title": "Lots of Fishes",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3187,
+  "latest_webnovel_title": "Pursuit of Light",
+  "mode": "watch_free_sites",
+  "target_chapter": 3187,
+  "target_title": "Pursuit of Light",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3185-mundane-fortune/"
     }
   },
-  "updated_at": "2026-09-15T20:30:21+00:00"
+  "updated_at": "2026-09-16T15:45:19+00:00"
 }
