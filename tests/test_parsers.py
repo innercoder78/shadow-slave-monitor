@@ -58,6 +58,9 @@ class ChikariParserTests(unittest.TestCase):
                 "SSNovel": True,
                 "NovelFull": True,
                 "Novel Live": True,
+                "ReadNovelFull": True,
+                "ReChapters": True,
+                "FreeWebNovel.net": True,
             },
         )
 

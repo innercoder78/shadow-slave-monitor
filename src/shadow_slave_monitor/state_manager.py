@@ -64,6 +64,9 @@ def validate_source_config() -> None:
         "SSNovel": True,
         "NovelFull": True,
         "Novel Live": True,
+        "ReadNovelFull": True,
+        "ReChapters": True,
+        "FreeWebNovel.net": True,
     }
     actual = {site.name: site.enabled for site in PUBLIC_SITES}
     if actual != expected:

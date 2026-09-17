@@ -61,7 +61,7 @@ class NewChapterNotificationTests(unittest.TestCase):
         expected_lines = [f"{site.name} [{site.url}]" for site in PUBLIC_SITES]
         self.assertEqual(body.splitlines()[4:], expected_lines)
         self.assertIn("\n\nSOURCES:\n", body)
-        self.assertNotIn("Chapters ", body)
+        self.assertNotIn("\nChapters ", body)
         self.assertNotIn("Source:", body)
         self.assertFalse(body.splitlines()[1].endswith("."))
 
