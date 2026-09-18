@@ -28,6 +28,9 @@ WEBNOVEL_CHECK_WINDOW = timedelta(minutes=8)
 SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT = 25
 PUBLIC_SITE_WORKERS = 6
 PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT = 4
+# Bump when materially changed public-source parsing should invalidate failure
+# suppression accumulated under an older parser implementation.
+PUBLIC_SOURCE_PARSER_REVISION = 2
 MIN_CHAPTER = 1
 MAX_CHAPTER = 10000
 TITLE_MAX_LENGTH = 180

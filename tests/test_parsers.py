@@ -16,6 +16,7 @@ from shadow_slave_monitor.parsers import (
     check_lightnovelup,
     lightnovelup_candidate_from_href,
     parse_novel_phoenix_candidates,
+    parse_novelarrow_candidates,
     parse_novel_live_candidates,
     parse_novelfull_candidates,
     parse_readwn_candidates,
@@ -1178,6 +1179,51 @@ class LightNovelUpParserTests(unittest.TestCase):
                     "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/#bad",
                     "https://lightnovelup.com/novel/shadow-slave/chapter-3174-%74itle/"):
             self.assertIsNone(lightnovelup_candidate_from_href(url, self.source.url))
+
+
+class TargetAwareLiveShapeTests(unittest.TestCase):
+    def test_verified_title_only_shapes_require_authoritative_target(self) -> None:
+        free_html = """<section><h2>Latest Chapters</h2><div>
+          <a href='/novel/shadow-slave/chapter-3189'>Chapter Entertaining Guest</a>
+          <a href='/novel/shadow-slave/chapter-3188'>Chapter 3188 Lost Soul</a>
+        </div></section>"""
+        soup = BeautifulSoup(free_html, "html.parser")
+        targeted = parse_freewebnovel_candidates(
+            soup, "https://freewebnovel.com/novel/shadow-slave", 3189, "Entertaining Guest")
+        self.assertEqual(targeted[0].chapter, 3189)
+        self.assertEqual(max(c.chapter for c in parse_freewebnovel_candidates(
+            soup, "https://freewebnovel.com/novel/shadow-slave")), 3188)
+
+        arrow_html = """<div><h2>Latest chapter</h2><div>
+          <a href='/chapter/shadow-slave/chapter-entertaining-guest'>Chapter Entertaining Guest</a>
+          <span>9999 Chapters</span></div></div>"""
+        reports = parse_novelarrow_candidates(
+            BeautifulSoup(arrow_html, "html.parser"),
+            "https://novelarrow.com/novel/shadow-slave", 3189, "Entertaining Guest")
+        self.assertEqual([(r.chapter, r.title) for r in reports], [(3189, "Entertaining Guest")])
+
+        full_html = """<section><h2>Latest chapters</h2><div>
+          <a href='/shadow-slave/chapter-entertaining-guest.html'>Chapter Entertaining Guest</a>
+          <a href='/shadow-slave/chapter-3188-lost-soul.html'>Chapter 3188 Lost Soul</a>
+        </div></section>"""
+        reports = parse_novelfull_candidates(
+            BeautifulSoup(full_html, "html.parser"), "https://novelfull.com/shadow-slave.html",
+            3189, "Entertaining Guest")
+        self.assertEqual(reports[0].chapter, 3189)
+
+    def test_telegram_title_only_newest_requires_numbered_predecessor(self) -> None:
+        html = """<div class='tgme_widget_message'>
+          <div class='tgme_widget_message_document_title'>3188 Lost Soul.docx</div>
+          <a href='https://telegra.ph/3188-Lost-Soul-09-17-2'>old</a></div>
+          <div class='tgme_widget_message'>
+          <div class='tgme_widget_message_document_title'>Entertaining Guest.docx</div>
+          <a href='https://telegra.ph/Entertaining-Guest-09-18'>new</a></div>"""
+        soup = BeautifulSoup(html, "html.parser")
+        reports = parse_telegram_candidates(
+            soup, "https://t.me/s/shadow_slave_fastes", 3189, "Entertaining Guest")
+        self.assertEqual(max(r.chapter for r in reports), 3189)
+        self.assertEqual(max(r.chapter for r in parse_telegram_candidates(
+            soup, "https://t.me/s/shadow_slave_fastes")), 3188)
 
 
 if __name__ == "__main__":

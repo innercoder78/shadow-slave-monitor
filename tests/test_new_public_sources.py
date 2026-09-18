@@ -148,7 +148,7 @@ class FreeWebNovelNetTests(unittest.TestCase):
 
     def test_authoritative_target_requires_first_item_and_predecessor(self) -> None:
         def listing(predecessor: int = 3188) -> str:
-            return f'''<section><h2>6 Latest Chapters</h2>
+            return f'''<section><h2>6 Latest Chapters [ Updated an hour ago ]</h2>
             <a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a>
             <a href="/shadow-slave/chapter-{predecessor}-lost-soul.html">Chapter {predecessor} Lost Soul</a></section>'''
         self.assertEqual(max(c.chapter for c in self.parse(listing())), 3188)

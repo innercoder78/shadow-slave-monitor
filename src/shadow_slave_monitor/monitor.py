@@ -24,6 +24,11 @@ class PendingDeliveryOutcome(StrEnum):
     NOT_DELIVERED = "not_delivered"
     DELIVERED = "delivered"
 
+TARGET_AWARE_PUBLIC_SOURCES = frozenset({
+    "Telegram", "FreeWebNovel", "NovelArrow", "NovelFull",
+    "ReadNovelFull", "ReChapters", "FreeWebNovel.net",
+})
+
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -88,14 +93,13 @@ def check_public_sites(
     failures: list[str] = []
     with ThreadPoolExecutor(max_workers=min(PUBLIC_SITE_WORKERS, len(eligible) or 1)) as executor:
         futures = {}
-        target_aware_sources = {"ReadNovelFull", "ReChapters", "FreeWebNovel.net"}
         for site in eligible:
             if site.name == "LightNovelUp":
                 future = executor.submit(
                     check_public_site, site,
                     dict(source_positions[site.name]) if site.name in source_positions else None,
                 )
-            elif site.name in target_aware_sources and expected_chapter is not None:
+            elif site.name in TARGET_AWARE_PUBLIC_SOURCES and expected_chapter is not None:
                 future = executor.submit(
                     check_public_site, site, None, expected_chapter, expected_title
                 )
