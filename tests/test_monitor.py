@@ -409,6 +409,16 @@ class WatchFreeSitesTests(unittest.TestCase):
         self.assertIsNone(state["pending_notification"])
         self.assertEqual(state["mode"], "watch_webnovel")
 
+    def test_watch_free_sites_propagates_authoritative_target(self) -> None:
+        state = self.watch_free_state()
+        report = ChapterReport("ReadNovelFull", 11, "Chapter Eleven", "https://public.example/11", "target")
+        with patch.object(monitor, "check_public_sites", return_value=[report]) as check_public_sites, \
+             patch.object(monitor, "send_new_chapter") as send_new_chapter:
+            run_main_with_state(state)
+        self.assertEqual(check_public_sites.call_args.args[3:], (11, "Chapter Eleven"))
+        send_new_chapter.assert_called_once()
+        self.assertEqual((state["latest_seen"], state["mode"]), (11, "watch_webnovel"))
+
     def test_public_report_above_target_rechecks_webnovel_and_rejects_unconfirmed_jump(self) -> None:
         state = self.watch_free_state()
         reports = [ChapterReport("Chikari", 12, "Chapter Twelve", "https://public.example/12", "page")]

@@ -92,6 +92,25 @@ class ReadNovelFullTests(unittest.TestCase):
             with self.subTest(href=href):
                 self.assertEqual(self.parse(f'<h3>Latest chapter</h3><a href="{href}">Chapter 3186: Title</a>'), [])
 
+    def test_authoritative_target_confirms_title_only_latest(self) -> None:
+        listing = '<section><h3>Latest chapter</h3><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a></section>'
+        self.assertEqual(self.parse(listing), [])
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Entertaining Guest</h1>']):
+            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
+        self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Wrong Guest</h1>']):
+            with self.assertRaises(ParseError):
+                check_public_site(self.source, None, 3189, "Entertaining Guest")
+
+    def test_title_only_latest_rejects_wrong_target_and_ambiguity(self) -> None:
+        link = '<a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a>'
+        self.assertEqual(parse_readnovelfull_candidates(
+            BeautifulSoup(f'<h3>Latest chapter</h3>{link}', "html.parser"), self.source.url,
+            3189, "Different Title"), [])
+        self.assertEqual(parse_readnovelfull_candidates(
+            BeautifulSoup(f'<h3>Latest chapter</h3>{link}<h3>Latest chapter</h3>{link}', "html.parser"),
+            self.source.url, 3189, "Entertaining Guest"), [])
+
 
 class FreeWebNovelNetTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "FreeWebNovel.net")
@@ -126,6 +145,19 @@ class FreeWebNovelNetTests(unittest.TestCase):
     def test_existing_com_parser_rejects_net(self) -> None:
         soup = BeautifulSoup('<h2>Latest Chapters</h2><a href="https://freewebnovel.net/shadow-slave/chapter-3167-title.html">Chapter 3167 Title</a>', "html.parser")
         self.assertEqual(parse_freewebnovel_candidates(soup, "https://freewebnovel.com/novel/shadow-slave"), [])
+
+    def test_authoritative_target_requires_first_item_and_predecessor(self) -> None:
+        def listing(predecessor: int = 3188) -> str:
+            return f'''<section><h2>6 Latest Chapters</h2>
+            <a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a>
+            <a href="/shadow-slave/chapter-{predecessor}-lost-soul.html">Chapter {predecessor} Lost Soul</a></section>'''
+        self.assertEqual(max(c.chapter for c in self.parse(listing())), 3188)
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing(), '<h2>Chapter Entertaining Guest</h2>']):
+            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
+        self.assertEqual(report.chapter, 3189)
+        rejected = parse_freewebnovel_net_candidates(
+            BeautifulSoup(listing(3187), "html.parser"), self.source.url, 3189, "Entertaining Guest")
+        self.assertEqual(max(c.chapter for c in rejected), 3187)
 
 
 class ReChaptersTests(unittest.TestCase):
@@ -170,6 +202,19 @@ class ReChaptersTests(unittest.TestCase):
         for page in pages:
             with self.subTest(page=page), patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, page]):
                 with self.assertRaises(ParseError): check_public_site(self.source)
+
+    def test_authoritative_target_confirms_title_only_newest_first_entry(self) -> None:
+        listing = '''<p>3181 chapters</p><p>Ch. 3101–3181</p><p>Newest first</p>
+        <a href="/book/shadow-slave-r2k2ivbd6ez4/newest9xyz">Chapter Entertaining Guest</a>
+        <a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a>'''
+        self.assertEqual([c.chapter for c in self.parse(listing)], [3188])
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Entertaining Guest</h1>']):
+            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
+        self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
+        no_order = listing.replace("Newest first", "Chapter list")
+        candidates = parse_rechapters_candidates(
+            BeautifulSoup(no_order, "html.parser"), self.source.url, 3189, "Entertaining Guest")
+        self.assertEqual([c.chapter for c in candidates], [3188])
 
 
 class NewSourceIntegrationTests(unittest.TestCase):
