@@ -148,7 +148,7 @@ class FreeWebNovelNetTests(unittest.TestCase):
 
     def test_authoritative_target_requires_first_item_and_predecessor(self) -> None:
         def listing(predecessor: int = 3188) -> str:
-            return f'''<section><h2>6 Latest Chapters</h2>
+            return f'''<section><h2>6 Latest Chapters [ Updated an hour ago ]</h2>
             <a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a>
             <a href="/shadow-slave/chapter-{predecessor}-lost-soul.html">Chapter {predecessor} Lost Soul</a></section>'''
         self.assertEqual(max(c.chapter for c in self.parse(listing())), 3188)
@@ -158,6 +158,17 @@ class FreeWebNovelNetTests(unittest.TestCase):
         rejected = parse_freewebnovel_net_candidates(
             BeautifulSoup(listing(3187), "html.parser"), self.source.url, 3189, "Entertaining Guest")
         self.assertEqual(max(c.chapter for c in rejected), 3187)
+        for html, title in (
+            (listing().replace("6 Latest Chapters [ Updated an hour ago ]", "This is the latest news"), "Entertaining Guest"),
+            (listing(), "Wrong Title"),
+        ):
+            with self.subTest(html=html, title=title):
+                reports = parse_freewebnovel_net_candidates(
+                    BeautifulSoup(html, "html.parser"), self.source.url, 3189, title)
+                self.assertFalse(any(c.chapter == 3189 for c in reports))
+        with patch("shadow_slave_monitor.parsers.fetch_html",
+                   side_effect=[listing(), "<h2>Chapter Wrong Title</h2>"]), self.assertRaises(ParseError):
+            check_public_site(self.source, None, 3189, "Entertaining Guest")
 
 
 class ReChaptersTests(unittest.TestCase):

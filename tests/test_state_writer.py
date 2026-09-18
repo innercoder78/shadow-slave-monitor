@@ -305,6 +305,33 @@ class StateWriterPersistenceTests(unittest.TestCase):
             self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
             self.assertEqual(json.loads((repo / state_file).read_text(encoding="utf-8"))["updated_at"], "2026-06-11T12:00:00+00:00")
 
+    def test_legacy_repository_accepts_migrated_monitor_artifact_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.initialize_repo(repo)
+            state_file = "state/state.json"
+            legacy = json.loads((repo / state_file).read_text(encoding="utf-8"))
+            self.assertNotIn("public_source_failure_revision", legacy)
+            migrated = state_writer.validate_state(legacy)
+            artifact_dir = Path(tmp) / "artifact"
+            self.write_artifact(repo, artifact_dir, state_file, migrated, self.sha256(repo / state_file))
+            watchdog_before = (repo / "state/watchdog_state.json").read_bytes()
+            push_calls: list[list[str]] = []
+
+            with chdir(repo):
+                self.persist(artifact_dir, state_file, push_calls)
+
+            persisted = json.loads((repo / state_file).read_text(encoding="utf-8"))
+            self.assertEqual(persisted["public_source_failure_revision"], migrated["public_source_failure_revision"])
+            self.assertEqual((repo / "state/watchdog_state.json").read_bytes(), watchdog_before)
+            changed = subprocess.run(
+                ["git", "show", "--pretty=format:", "--name-only", "HEAD"], cwd=repo,
+                check=True, stdout=subprocess.PIPE, text=True,
+            ).stdout.splitlines()
+            self.assertEqual(changed, ["state/state.json"])
+            self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
+
     def test_cursor_only_advancement_commits_and_reaches_push_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

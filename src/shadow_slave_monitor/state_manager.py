@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SOURCE_PARSER_REVISION, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
@@ -29,6 +29,7 @@ MONITOR_STATE_FIELDS = {
     "target_url",
     "pending_notification",
     "public_source_failures",
+    "public_source_failure_revision",
     "source_positions",
     "updated_at",
 }
@@ -127,6 +128,7 @@ def initial_state() -> dict[str, Any]:
         "target_url": None,
         "pending_notification": None,
         "public_source_failures": {},
+        "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
         "source_positions": {},
         "updated_at": None,
     }
@@ -219,6 +221,12 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     state["latest_webnovel"] = latest_webnovel
     state["target_chapter"] = target
     state["pending_notification"] = validate_pending(state.get("pending_notification"), latest_seen)
+    # Absence denotes the legacy schema; do not let initial_state's current
+    # default hide that one-time migration signal.
+    has_revision = "public_source_failure_revision" in data
+    revision = data.get("public_source_failure_revision")
+    if has_revision and (isinstance(revision, bool) or not isinstance(revision, int) or revision < 1):
+        raise StateError("public_source_failure_revision must be a positive integer")
     failures = state.get("public_source_failures")
     if not isinstance(failures, dict):
         raise StateError("public_source_failures must be an object")
@@ -233,7 +241,10 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
                 f"{PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT}"
             )
         clean_failures[source] = count
+    if revision != PUBLIC_SOURCE_PARSER_REVISION:
+        clean_failures = {}
     state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
+    state["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION
     positions = state.get("source_positions")
     if not isinstance(positions, dict):
         raise StateError("source_positions must be an object")

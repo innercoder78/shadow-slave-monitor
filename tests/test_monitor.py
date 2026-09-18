@@ -11,7 +11,7 @@ from unittest.mock import patch
 import requests
 
 from shadow_slave_monitor import monitor
-from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
+from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SOURCE_PARSER_REVISION, SourceConfig
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.notifications import NotificationDeliveryError
 from shadow_slave_monitor.state_manager import StateError, save_state, validate_state
@@ -30,6 +30,7 @@ def base_state() -> dict:
         "target_url": None,
         "pending_notification": None,
         "public_source_failures": {},
+        "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
         "source_positions": {},
         "updated_at": "2026-06-11T00:00:00+00:00",
     }
@@ -409,6 +410,23 @@ class WatchFreeSitesTests(unittest.TestCase):
         self.assertIsNone(state["pending_notification"])
         self.assertEqual(state["mode"], "watch_webnovel")
 
+    def test_multiple_target_confirmations_aggregate_once_in_configured_order(self) -> None:
+        state = self.watch_free_state()
+        reports = [
+            ChapterReport("NovelFull", 11, "Chapter Eleven", "https://public.example/full", "target"),
+            ChapterReport("Telegram", 11, "Chapter Eleven", "https://public.example/chat", "target"),
+            ChapterReport("FreeWebNovel", 11, "Chapter Eleven", "https://public.example/free", "target"),
+        ]
+        with patch.object(monitor, "check_public_sites", return_value=reports), \
+             patch.object(monitor, "send_new_chapter") as send_new_chapter:
+            run_main_with_state(state)
+
+        send_new_chapter.assert_called_once()
+        aggregate = send_new_chapter.call_args.args[2]
+        self.assertEqual(aggregate.source, "Telegram, FreeWebNovel, NovelFull")
+        self.assertEqual((state["latest_seen"], state["mode"]), (11, "watch_webnovel"))
+        self.assertEqual(state["public_source_failures"], {})
+
     def test_watch_free_sites_propagates_authoritative_target(self) -> None:
         state = self.watch_free_state()
         report = ChapterReport("ReadNovelFull", 11, "Chapter Eleven", "https://public.example/11", "target")
@@ -491,6 +509,29 @@ class StateMigrationTests(unittest.TestCase):
         state = base_state()
         del state["public_source_failures"]
         self.assertEqual(validate_state(state)["public_source_failures"], {})
+
+    def test_stale_parser_revision_clears_suppression_once(self) -> None:
+        state = base_state()
+        state["mode"] = "watch_free_sites"
+        state["latest_webnovel"] = 11
+        state["target_chapter"] = 11
+        state["target_title"] = "Eleven"
+        state["public_source_failures"] = {"ReadNovelFull": 4}
+        del state["public_source_failure_revision"]
+        migrated = validate_state(state)
+        self.assertEqual(migrated["public_source_failures"], {})
+        self.assertEqual(migrated["public_source_failure_revision"], PUBLIC_SOURCE_PARSER_REVISION)
+        migrated["public_source_failures"] = {"ReadNovelFull": 4}
+        self.assertEqual(validate_state(migrated)["public_source_failures"], {"ReadNovelFull": 4})
+        migrated["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION - 1
+        self.assertEqual(validate_state(migrated)["public_source_failures"], {})
+
+    def test_malformed_parser_revision_is_rejected(self) -> None:
+        for value in (None, True, False, 0, -1, "2", 2.0, [], {}):
+            state = base_state()
+            state["public_source_failure_revision"] = value
+            with self.subTest(value=value), self.assertRaises(StateError):
+                validate_state(state)
 
     def test_invalid_public_source_failure_shapes_and_counts_are_rejected(self) -> None:
         invalid_values = ([], {"NovelFire": True}, {"NovelFire": -1}, {"NovelFire": 0},

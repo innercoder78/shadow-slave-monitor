@@ -16,6 +16,7 @@ from shadow_slave_monitor.parsers import (
     check_lightnovelup,
     lightnovelup_candidate_from_href,
     parse_novel_phoenix_candidates,
+    parse_novelarrow_candidates,
     parse_novel_live_candidates,
     parse_novelfull_candidates,
     parse_readwn_candidates,
@@ -443,6 +444,32 @@ class NovelArrowParserTests(unittest.TestCase):
             "https://novelarrow.com/chapter/shadow-slave/chapter-3128-song-of-fire",
         )
 
+    def test_title_only_target_is_confirmed_by_strict_document_title(self) -> None:
+        listing = ("<h2>Latest chapter</h2><div><a href='/chapter/shadow-slave/"
+                   "chapter-entertaining-guest'>Chapter Entertaining Guest</a></div>")
+        page = "<title>Shadow Slave / Chapter Entertaining Guest | Read on NovelArrow</title><h1>Reader</h1>"
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, page]):
+            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
+        self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
+
+    def test_title_only_target_page_confirmation_fails_closed(self) -> None:
+        listing = ("<h2>Latest chapter</h2><div><a href='/chapter/shadow-slave/"
+                   "chapter-entertaining-guest'>Chapter Entertaining Guest</a></div>")
+        bad_pages = (
+            "<title>Shadow Slave / Chapter Wrong Title | Read on NovelArrow</title>",
+            "<title>Shadow Slave / Chapter 3188 Wrong | Read on NovelArrow</title>",
+            ("<title>Shadow Slave / Chapter Entertaining Guest | Read on NovelArrow</title>"
+             "<h1>Chapter Different Title</h1>"),
+            "<title>Shadow Slave reader</title><h1>Reader</h1>",
+        )
+        for page in bad_pages:
+            with self.subTest(page=page), patch(
+                "shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, page]
+            ), self.assertRaises(ParseError):
+                check_public_site(self.source, None, 3189, "Entertaining Guest")
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=listing), self.assertRaises(ParseError):
+            check_public_site(self.source, None, 3189, "Wrong Title")
+
 
 class ShadowSlaveSpaceParserTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "ShadowSlave.Space")
@@ -647,6 +674,27 @@ class FreeWebNovelParserTests(unittest.TestCase):
           <aside><a href="/novel/other/chapter-9998">Chapter 9998 Other Novel</a></aside>
         """
         self.assertEqual(self.check(html).chapter, 3144)
+
+    def test_title_only_target_requires_first_safe_matching_numeric_url(self) -> None:
+        def parse(html: str, title: str = "Entertaining Guest") -> list[ChapterReport]:
+            return parse_freewebnovel_candidates(
+                BeautifulSoup(html, "html.parser"), self.source.url, 3189, title)
+        good = ("<section><h2>Latest Chapters</h2><div>"
+                "<a href='/novel/shadow-slave/chapter-3189'>Chapter Entertaining Guest</a>"
+                "<a href='/novel/shadow-slave/chapter-3188'>Chapter 3188 Lost Soul</a></div></section>")
+        self.assertEqual(parse(good)[0].chapter, 3189)
+        rejected = (
+            good.replace("chapter-3189", "chapter-3187", 1),
+            good.replace("Chapter Entertaining Guest", "Chapter Wrong Title", 1),
+            good.replace("<div>", "<div><a href='/novel/shadow-slave/chapter-3188'>Chapter 3188 Lost Soul</a>", 1),
+            good.replace("<h2>Latest Chapters</h2>", "<h2>Archive</h2>"),
+            good.replace("/novel/shadow-slave/chapter-3189", "http://freewebnovel.com/novel/shadow-slave/chapter-3189"),
+        )
+        for html in rejected:
+            with self.subTest(html=html):
+                self.assertFalse(any(r.chapter == 3189 for r in parse(html)))
+        self.assertFalse(any(r.chapter == 3189 for r in parse_freewebnovel_candidates(
+            BeautifulSoup(good, "html.parser"), self.source.url)))
 
     def test_visible_and_href_chapter_numbers_must_match(self) -> None:
         html = """
@@ -928,6 +976,32 @@ class NovelFullParserTests(unittest.TestCase):
             report = check_public_site(self.source)
         self.assertEqual((report.chapter, report.title), (3160, "Rushing Towards a Nightmare"))
 
+    def test_title_only_target_requires_first_entry_exact_predecessor_and_page_heading(self) -> None:
+        listing = ("<section><h2>Latest chapters</h2><div>"
+                   "<a href='/shadow-slave/chapter-entertaining-guest.html'>Chapter Entertaining Guest</a>"
+                   "<a href='/shadow-slave/chapter-3188-lost-soul.html'>Chapter 3188 Lost Soul</a></div></section>")
+        candidates = parse_novelfull_candidates(
+            BeautifulSoup(listing, "html.parser"), self.source.url, 3189, "Entertaining Guest")
+        self.assertEqual(candidates[0].chapter, 3189)
+        changes = (
+            ("chapter-3188-lost-soul", "chapter-3187-lost-soul"),
+            ("Chapter Entertaining Guest", "Chapter Wrong Title"),
+            ("chapter-entertaining-guest.html", "chapter-entertaining-guest.html?bad=1"),
+        )
+        for old, new in changes:
+            with self.subTest(new=new):
+                reports = parse_novelfull_candidates(
+                    BeautifulSoup(listing.replace(old, new), "html.parser"), self.source.url,
+                    3189, "Entertaining Guest")
+                self.assertFalse(any(r.chapter == 3189 for r in reports))
+        not_first = listing.replace("<div>", "<div><a href='/shadow-slave/chapter-3188-lost-soul.html'>Chapter 3188 Lost Soul</a>", 1)
+        self.assertFalse(any(r.chapter == 3189 for r in parse_novelfull_candidates(
+            BeautifulSoup(not_first, "html.parser"), self.source.url, 3189, "Entertaining Guest")))
+        self.assertFalse(any(r.chapter == 3189 for r in self.parse(listing)))
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, "<h1>Chapter Wrong Title</h1>"]), \
+             self.assertRaises(ParseError):
+            check_public_site(self.source, None, 3189, "Entertaining Guest")
+
 
 class PublicSourceLoggingTests(unittest.TestCase):
     def test_novelfull_success_log_always_includes_detected_url(self) -> None:
@@ -1178,6 +1252,88 @@ class LightNovelUpParserTests(unittest.TestCase):
                     "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/#bad",
                     "https://lightnovelup.com/novel/shadow-slave/chapter-3174-%74itle/"):
             self.assertIsNone(lightnovelup_candidate_from_href(url, self.source.url))
+
+
+class TargetAwareLiveShapeTests(unittest.TestCase):
+    def test_verified_title_only_shapes_require_authoritative_target(self) -> None:
+        free_html = """<section><h2>Latest Chapters</h2><div>
+          <a href='/novel/shadow-slave/chapter-3189'>Chapter Entertaining Guest</a>
+          <a href='/novel/shadow-slave/chapter-3188'>Chapter 3188 Lost Soul</a>
+        </div></section>"""
+        soup = BeautifulSoup(free_html, "html.parser")
+        targeted = parse_freewebnovel_candidates(
+            soup, "https://freewebnovel.com/novel/shadow-slave", 3189, "Entertaining Guest")
+        self.assertEqual(targeted[0].chapter, 3189)
+        self.assertEqual(max(c.chapter for c in parse_freewebnovel_candidates(
+            soup, "https://freewebnovel.com/novel/shadow-slave")), 3188)
+
+        arrow_html = """<div><h2>Latest chapter</h2><div>
+          <a href='/chapter/shadow-slave/chapter-entertaining-guest'>Chapter Entertaining Guest</a>
+          <span>9999 Chapters</span></div></div>"""
+        reports = parse_novelarrow_candidates(
+            BeautifulSoup(arrow_html, "html.parser"),
+            "https://novelarrow.com/novel/shadow-slave", 3189, "Entertaining Guest")
+        self.assertEqual([(r.chapter, r.title) for r in reports], [(3189, "Entertaining Guest")])
+
+        full_html = """<section><h2>Latest chapters</h2><div>
+          <a href='/shadow-slave/chapter-entertaining-guest.html'>Chapter Entertaining Guest</a>
+          <a href='/shadow-slave/chapter-3188-lost-soul.html'>Chapter 3188 Lost Soul</a>
+        </div></section>"""
+        reports = parse_novelfull_candidates(
+            BeautifulSoup(full_html, "html.parser"), "https://novelfull.com/shadow-slave.html",
+            3189, "Entertaining Guest")
+        self.assertEqual(reports[0].chapter, 3189)
+
+    def test_telegram_title_only_newest_requires_numbered_predecessor(self) -> None:
+        html = """<div class='tgme_widget_message'>
+          <div class='tgme_widget_message_document_title'>3188 Lost Soul.docx</div>
+          <a href='https://telegra.ph/3188-Lost-Soul-09-17-2'>old</a></div>
+          <div class='tgme_widget_message'>
+          <div class='tgme_widget_message_document_title'>Entertaining Guest.docx</div>
+          <a href='https://telegra.ph/Entertaining-Guest-09-18'>new</a></div>"""
+        soup = BeautifulSoup(html, "html.parser")
+        reports = parse_telegram_candidates(
+            soup, "https://t.me/s/shadow_slave_fastes", 3189, "Entertaining Guest")
+        self.assertEqual(max(r.chapter for r in reports), 3189)
+        self.assertEqual(max(r.chapter for r in parse_telegram_candidates(
+            soup, "https://t.me/s/shadow_slave_fastes")), 3188)
+
+    def test_telegram_target_must_be_newest_unambiguous_chapter_message(self) -> None:
+        numbered = ("<div class='tgme_widget_message'><div class='tgme_widget_message_document_title'>"
+                    "3188 Lost Soul.docx</div><a href='https://telegra.ph/3188-Lost-Soul-09-17'>old</a></div>")
+        target = ("<div class='tgme_widget_message'><div class='tgme_widget_message_document_title'>"
+                  "Entertaining Guest.docx</div><a href='https://telegra.ph/Entertaining-Guest-09-18'>target</a></div>")
+        later = ("<div class='tgme_widget_message'><div class='tgme_widget_message_document_title'>"
+                 "Different Later Title.docx</div><a href='https://telegra.ph/Different-Later-Title-09-18'>later</a></div>")
+        newer_numbered = numbered.replace("3188", "3190").replace("Lost-Soul", "Later").replace("Lost Soul", "Later")
+        cases = (numbered + target + later, numbered + target + newer_numbered, numbered + target + target)
+        for html in cases:
+            reports = parse_telegram_candidates(
+                BeautifulSoup(html, "html.parser"), "https://t.me/s/shadow_slave_fastes",
+                3189, "Entertaining Guest")
+            with self.subTest(html=html):
+                self.assertFalse(any(r.chapter == 3189 for r in reports))
+
+    def test_telegram_target_rejects_disagreement_unsafe_links_and_wrong_predecessor(self) -> None:
+        target = ("<div class='tgme_widget_message'><div class='tgme_widget_message_document_title'>"
+                  "Entertaining Guest.docx</div><a href='{url}'>target</a></div>")
+        predecessor = ("<div class='tgme_widget_message'><div class='tgme_widget_message_document_title'>"
+                       "{chapter} Lost Soul.docx</div><a href='https://telegra.ph/{chapter}-Lost-Soul-09-17'>old</a></div>")
+        urls = ("https://telegra.ph/Wrong-Title-09-18", "http://telegra.ph/Entertaining-Guest-09-18",
+                "https://evil.example/Entertaining-Guest-09-18",
+                "https://telegra.ph/Entertaining-Guest-09-18?bad=1",
+                "https://telegra.ph/Entertaining-Guest-09-18#bad")
+        for url in urls:
+            html = predecessor.format(chapter=3188) + target.format(url=url)
+            reports = parse_telegram_candidates(BeautifulSoup(html, "html.parser"),
+                "https://t.me/s/shadow_slave_fastes", 3189, "Entertaining Guest")
+            with self.subTest(url=url):
+                self.assertFalse(any(r.chapter == 3189 for r in reports))
+        wrong = predecessor.format(chapter=3187) + target.format(
+            url="https://telegra.ph/Entertaining-Guest-09-18")
+        self.assertFalse(any(r.chapter == 3189 for r in parse_telegram_candidates(
+            BeautifulSoup(wrong, "html.parser"), "https://t.me/s/shadow_slave_fastes",
+            3189, "Entertaining Guest")))
 
 
 if __name__ == "__main__":
