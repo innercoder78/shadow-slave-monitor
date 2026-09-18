@@ -2,12 +2,12 @@
   "latest_seen": 3188,
   "latest_title": "Lost Soul",
   "latest_url": "https://telegra.ph/3188-Lost-Soul-09-17-2",
-  "latest_webnovel": 3188,
-  "latest_webnovel_title": "Lost Soul",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3189,
+  "latest_webnovel_title": "Entertaining Guest",
+  "mode": "watch_free_sites",
+  "target_chapter": 3189,
+  "target_title": "Entertaining Guest",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "source_positions": {
@@ -16,5 +16,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3186-lots-of-fishes/"
     }
   },
-  "updated_at": "2026-09-17T18:35:19+00:00"
+  "updated_at": "2026-09-18T15:45:21+00:00"
 }
