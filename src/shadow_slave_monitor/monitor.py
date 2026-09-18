@@ -62,6 +62,8 @@ def check_public_sites(
     result: RunResult,
     failure_counts: dict[str, int] | None = None,
     source_positions: dict[str, dict[str, Any]] | None = None,
+    expected_chapter: int | None = None,
+    expected_title: str | None = None,
 ) -> list[ChapterReport]:
     failure_counts = failure_counts if failure_counts is not None else {}
     source_positions = source_positions if source_positions is not None else {}
@@ -85,14 +87,21 @@ def check_public_sites(
     errors: dict[str, Exception] = {}
     failures: list[str] = []
     with ThreadPoolExecutor(max_workers=min(PUBLIC_SITE_WORKERS, len(eligible) or 1)) as executor:
-        futures = {
-            executor.submit(
-                check_public_site,
-                site,
-                dict(source_positions[site.name]) if site.name in source_positions else None,
-            ) if site.name == "LightNovelUp" else executor.submit(check_public_site, site): site
-            for site in eligible
-        }
+        futures = {}
+        target_aware_sources = {"ReadNovelFull", "ReChapters", "FreeWebNovel.net"}
+        for site in eligible:
+            if site.name == "LightNovelUp":
+                future = executor.submit(
+                    check_public_site, site,
+                    dict(source_positions[site.name]) if site.name in source_positions else None,
+                )
+            elif site.name in target_aware_sources and expected_chapter is not None:
+                future = executor.submit(
+                    check_public_site, site, None, expected_chapter, expected_title
+                )
+            else:
+                future = executor.submit(check_public_site, site)
+            futures[future] = site
         for future in as_completed(futures):
             site = futures[future]
             try:
@@ -290,7 +299,8 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
         set_watch_webnovel(state)
         return
     reports = check_public_sites(
-        result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {})
+        result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {}),
+        target, state.get("target_title"),
     )
     if not reports:
         return
