@@ -1588,10 +1588,10 @@ def parse_telegram_candidates(
                     slug_titles.append((clean_title(slug.replace("-", " ")) or "", url))
             if len(docs) == 1 and len(slug_titles) == 1 and not trusted_numbers:
                 doc_title, (slug_title, url) = docs[0], slug_titles[0]
-                if (_normalized_title(doc_title) == _normalized_title(slug_title)
-                        == _normalized_title(expected_title)):
-                    title_messages.append((index, doc_title, url))
+                if _normalized_title(doc_title) == _normalized_title(slug_title):
                     chapter_bearing_indexes.append(index)
+                    if _normalized_title(doc_title) == _normalized_title(expected_title):
+                        title_messages.append((index, doc_title, url))
         if (len(title_messages) == 1 and chapter_bearing_indexes
                 and title_messages[0][0] == max(chapter_bearing_indexes)):
             index, title, url = title_messages[0]
@@ -1726,6 +1726,50 @@ def _confirm_title_only_chapter_page(html: str, expected_title: str) -> str:
     return titles[0]
 
 
+def _confirm_novelarrow_chapter_page(
+    html: str, expected_chapter: int, expected_title: str,
+) -> str:
+    """Confirm a title-only target using only trusted headings or document title."""
+    expected_normalized = _normalized_title(expected_title)
+    if not expected_normalized:
+        raise ParseError("NovelArrow expected title is missing")
+    soup = BeautifulSoup(html, "html.parser")
+    confirmations: list[str] = []
+    for heading in soup.find_all(["h1", "h2"]):
+        text = heading.get_text(" ", strip=True)
+        numbered = parse_chapter_text(text)
+        if numbered:
+            if numbered[0] != expected_chapter:
+                raise ParseError("NovelArrow chapter heading contradicted expected target")
+            if numbered[1] and _normalized_title(numbered[1]) != expected_normalized:
+                raise ParseError("NovelArrow chapter heading contradicted expected target")
+            if numbered[1]:
+                confirmations.append(numbered[1])
+            continue
+        title = _title_only_label(text)
+        if title:
+            confirmations.append(title)
+
+    if soup.title:
+        document_text = re.sub(r"\s+", " ", soup.title.get_text(" ", strip=True)).strip()
+        numbered = parse_chapter_text(document_text)
+        if numbered and numbered[0] != expected_chapter:
+            raise ParseError("NovelArrow document title contradicted expected target")
+        match = re.fullmatch(
+            r"Shadow\s+Slave\s*/\s*Chapter\s+(.+?)\s*\|\s*Read\s+on\s+NovelArrow",
+            document_text, re.IGNORECASE,
+        )
+        if match:
+            title = clean_title(match.group(1))
+            if title:
+                confirmations.append(title)
+
+    normalized = {_normalized_title(title) for title in confirmations}
+    if normalized != {expected_normalized}:
+        raise ParseError("NovelArrow chapter page did not unambiguously confirm expected title")
+    return expected_title
+
+
 def check_public_site(
     site: SourceConfig, source_position: dict[str, Any] | None = None,
     expected_chapter: int | None = None, expected_title: str | None = None,
@@ -1750,7 +1794,10 @@ def check_public_site(
           and expected_chapter is not None and best.chapter == expected_chapter
           and best.title and _normalized_title(best.title) == _normalized_title(expected_title)
           and parse_chapter_from_href(best.url) is None):
-        page_title = _confirm_title_only_chapter_page(fetch_html(site, best.url), best.title)
+        page_html = fetch_html(site, best.url)
+        page_title = (_confirm_novelarrow_chapter_page(page_html, best.chapter, best.title)
+                      if site.name == "NovelArrow"
+                      else _confirm_title_only_chapter_page(page_html, best.title))
         best = ChapterReport("", best.chapter, page_title, best.url)
     report = ChapterReport(site.name, best.chapter, best.title, best.url, f"{site.name}:latest_candidate")
     if report.source == "ShadowSlave.Space" and report.title is None:

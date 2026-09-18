@@ -410,6 +410,23 @@ class WatchFreeSitesTests(unittest.TestCase):
         self.assertIsNone(state["pending_notification"])
         self.assertEqual(state["mode"], "watch_webnovel")
 
+    def test_multiple_target_confirmations_aggregate_once_in_configured_order(self) -> None:
+        state = self.watch_free_state()
+        reports = [
+            ChapterReport("NovelFull", 11, "Chapter Eleven", "https://public.example/full", "target"),
+            ChapterReport("Telegram", 11, "Chapter Eleven", "https://public.example/chat", "target"),
+            ChapterReport("FreeWebNovel", 11, "Chapter Eleven", "https://public.example/free", "target"),
+        ]
+        with patch.object(monitor, "check_public_sites", return_value=reports), \
+             patch.object(monitor, "send_new_chapter") as send_new_chapter:
+            run_main_with_state(state)
+
+        send_new_chapter.assert_called_once()
+        aggregate = send_new_chapter.call_args.args[2]
+        self.assertEqual(aggregate.source, "Telegram, FreeWebNovel, NovelFull")
+        self.assertEqual((state["latest_seen"], state["mode"]), (11, "watch_webnovel"))
+        self.assertEqual(state["public_source_failures"], {})
+
     def test_watch_free_sites_propagates_authoritative_target(self) -> None:
         state = self.watch_free_state()
         report = ChapterReport("ReadNovelFull", 11, "Chapter Eleven", "https://public.example/11", "target")
@@ -506,9 +523,11 @@ class StateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["public_source_failure_revision"], PUBLIC_SOURCE_PARSER_REVISION)
         migrated["public_source_failures"] = {"ReadNovelFull": 4}
         self.assertEqual(validate_state(migrated)["public_source_failures"], {"ReadNovelFull": 4})
+        migrated["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION - 1
+        self.assertEqual(validate_state(migrated)["public_source_failures"], {})
 
     def test_malformed_parser_revision_is_rejected(self) -> None:
-        for value in (True, 0, -1, "2"):
+        for value in (None, True, False, 0, -1, "2", 2.0, [], {}):
             state = base_state()
             state["public_source_failure_revision"] = value
             with self.subTest(value=value), self.assertRaises(StateError):

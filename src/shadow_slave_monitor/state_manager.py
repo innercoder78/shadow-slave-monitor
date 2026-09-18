@@ -223,8 +223,9 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     state["pending_notification"] = validate_pending(state.get("pending_notification"), latest_seen)
     # Absence denotes the legacy schema; do not let initial_state's current
     # default hide that one-time migration signal.
+    has_revision = "public_source_failure_revision" in data
     revision = data.get("public_source_failure_revision")
-    if revision is not None and (isinstance(revision, bool) or not isinstance(revision, int) or revision < 1):
+    if has_revision and (isinstance(revision, bool) or not isinstance(revision, int) or revision < 1):
         raise StateError("public_source_failure_revision must be a positive integer")
     failures = state.get("public_source_failures")
     if not isinstance(failures, dict):

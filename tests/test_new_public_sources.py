@@ -158,6 +158,17 @@ class FreeWebNovelNetTests(unittest.TestCase):
         rejected = parse_freewebnovel_net_candidates(
             BeautifulSoup(listing(3187), "html.parser"), self.source.url, 3189, "Entertaining Guest")
         self.assertEqual(max(c.chapter for c in rejected), 3187)
+        for html, title in (
+            (listing().replace("6 Latest Chapters [ Updated an hour ago ]", "This is the latest news"), "Entertaining Guest"),
+            (listing(), "Wrong Title"),
+        ):
+            with self.subTest(html=html, title=title):
+                reports = parse_freewebnovel_net_candidates(
+                    BeautifulSoup(html, "html.parser"), self.source.url, 3189, title)
+                self.assertFalse(any(c.chapter == 3189 for c in reports))
+        with patch("shadow_slave_monitor.parsers.fetch_html",
+                   side_effect=[listing(), "<h2>Chapter Wrong Title</h2>"]), self.assertRaises(ParseError):
+            check_public_site(self.source, None, 3189, "Entertaining Guest")
 
 
 class ReChaptersTests(unittest.TestCase):
