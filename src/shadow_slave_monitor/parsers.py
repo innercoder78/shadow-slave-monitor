@@ -1081,6 +1081,32 @@ def rechapters_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterRepor
     return ChapterReport("", chapter, title, url)
 
 
+def _rechapters_chapter_list_anchors(soup: BeautifulSoup, base_url: str) -> list[Any]:
+    """Return ordered, labelled chapter links from one semantic newest-first list."""
+    order_markers = soup.find_all(string=re.compile(r"^\s*Newest\s+first\s*$", re.IGNORECASE))
+    if len(order_markers) != 1 or not order_markers[0].parent:
+        return []
+
+    container = order_markers[0].parent
+    while container and getattr(container, "name", None) not in {"body", "html", "[document]"}:
+        list_markers = container.find_all(
+            string=re.compile(r"^\s*Chapter\s+list\s*$", re.IGNORECASE)
+        )
+        canonical = [
+            anchor for anchor in container.find_all("a", href=True)
+            if rechapters_candidate_url(anchor, base_url)
+        ]
+        if len(list_markers) == 1 and canonical:
+            labelled = [
+                anchor for anchor in canonical
+                if (_title_only_label(anchor.get_text(" ", strip=True))
+                    or rechapters_candidate_from_anchor(anchor, base_url))
+            ]
+            return labelled
+        container = container.parent
+    return []
+
+
 def parse_rechapters_candidates(
     soup: BeautifulSoup, base_url: str,
     expected_chapter: int | None = None, expected_title: str | None = None,
@@ -1093,9 +1119,8 @@ def parse_rechapters_candidates(
     numbered = list(found.values())
     if chapter_validity_category(expected_chapter) is not None or not _normalized_title(expected_title):
         return numbered
-    order_markers = soup.find_all(string=re.compile(r"^\s*Newest\s+first\s*$", re.IGNORECASE))
-    anchors = soup.find_all("a", href=True)
-    if len(order_markers) != 1 or len(anchors) < 2:
+    anchors = _rechapters_chapter_list_anchors(soup, base_url)
+    if len(anchors) < 2:
         return numbered
     first_url = rechapters_candidate_url(anchors[0], base_url)
     first_title = _title_only_label(anchors[0].get_text(" ", strip=True))

@@ -204,17 +204,62 @@ class ReChaptersTests(unittest.TestCase):
                 with self.assertRaises(ParseError): check_public_site(self.source)
 
     def test_authoritative_target_confirms_title_only_newest_first_entry(self) -> None:
-        listing = '''<p>3181 chapters</p><p>Ch. 3101–3181</p><p>Newest first</p>
+        listing = '''<nav><a href="/">Home</a><a href="/discover">Discover</a>
+        <a href="/account">Account</a></nav>
+        <a href="/book/shadow-slave-r2k2ivbd6ez4/outside9x">Chapter Wrong Outside</a>
+        <section><h2>Chapter list</h2><p>3184 chapters · Updated today</p>
+        <p>Newest first</p><p>Ch. 3101–3184</p>
         <a href="/book/shadow-slave-r2k2ivbd6ez4/newest9xyz">Chapter Entertaining Guest</a>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a>'''
-        self.assertEqual([c.chapter for c in self.parse(listing)], [3188])
+        <a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a>
+        <a href="/book/shadow-slave-r2k2ivbd6ez4/previous7x">Ch 3187: Pursuit of Light</a></section>'''
+        self.assertEqual([c.chapter for c in self.parse(listing)], [3188, 3187])
         with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Entertaining Guest</h1>']):
             report = check_public_site(self.source, None, 3189, "Entertaining Guest")
         self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
         no_order = listing.replace("Newest first", "Chapter list")
         candidates = parse_rechapters_candidates(
             BeautifulSoup(no_order, "html.parser"), self.source.url, 3189, "Entertaining Guest")
-        self.assertEqual([c.chapter for c in candidates], [3188])
+        self.assertEqual([c.chapter for c in candidates], [3188, 3187])
+
+    def test_title_only_inference_requires_first_entry_and_exact_predecessor(self) -> None:
+        template = '''<section><h2>Chapter list</h2><p>Newest first</p>{entries}</section>'''
+        title = '<a href="/book/shadow-slave-r2k2ivbd6ez4/newest9xyz">Chapter Entertaining Guest</a>'
+        predecessor = '<a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a>'
+        wrong = '<a href="/book/shadow-slave-r2k2ivbd6ez4/previous7x">Ch 3187: Pursuit of Light</a>'
+        cases = [title, predecessor + title, title + wrong]
+        for entries in cases:
+            with self.subTest(entries=entries):
+                candidates = parse_rechapters_candidates(
+                    BeautifulSoup(template.format(entries=entries), "html.parser"),
+                    self.source.url, 3189, "Entertaining Guest",
+                )
+                self.assertNotIn(3189, [candidate.chapter for candidate in candidates])
+
+    def test_title_only_inference_rejects_title_page_and_unsafe_url_mismatches(self) -> None:
+        def listing(href: str, title: str = "Entertaining Guest") -> str:
+            return f'''<section><h2>Chapter list</h2><p>Newest first</p>
+            <a href="{href}">Chapter {title}</a>
+            <a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a></section>'''
+
+        valid_href = "/book/shadow-slave-r2k2ivbd6ez4/newest9xyz"
+        candidates = parse_rechapters_candidates(
+            BeautifulSoup(listing(valid_href), "html.parser"), self.source.url,
+            3189, "Different Title",
+        )
+        self.assertNotIn(3189, [candidate.chapter for candidate in candidates])
+        for href in ("http://rechapters.com/book/shadow-slave-r2k2ivbd6ez4/newest9xyz",
+                     "/book/shadow-slave-r2k2ivbd6ez4/newest9xyz?bad=1"):
+            with self.subTest(href=href):
+                candidates = parse_rechapters_candidates(
+                    BeautifulSoup(listing(href), "html.parser"), self.source.url,
+                    3189, "Entertaining Guest",
+                )
+                self.assertNotIn(3189, [candidate.chapter for candidate in candidates])
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[
+            listing(valid_href), '<h1>Chapter Different Guest</h1>',
+        ]):
+            with self.assertRaises(ParseError):
+                check_public_site(self.source, None, 3189, "Entertaining Guest")
 
 
 class NewSourceIntegrationTests(unittest.TestCase):
