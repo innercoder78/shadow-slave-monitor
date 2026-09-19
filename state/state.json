@@ -2,19 +2,20 @@
   "latest_seen": 3189,
   "latest_title": "Entertaining Guest",
   "latest_url": "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4/x9qbtqagt3",
-  "latest_webnovel": 3189,
-  "latest_webnovel_title": "Entertaining Guest",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3190,
+  "latest_webnovel_title": "Freedom of Choice",
+  "mode": "watch_free_sites",
+  "target_chapter": 3190,
+  "target_title": "Freedom of Choice",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
+  "public_source_failure_revision": 2,
   "source_positions": {
     "LightNovelUp": {
       "chapter": 3188,
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-18T19:20:29+00:00"
+  "updated_at": "2026-09-19T16:00:25+00:00"
 }
