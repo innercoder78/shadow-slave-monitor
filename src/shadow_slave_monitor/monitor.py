@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
+from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL, PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
 from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category, safe_exception_details
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
@@ -63,12 +63,20 @@ def aggregate_reports_for_chapter(reports: list[ChapterReport], chapter: int) ->
         ",".join(r.strategy for r in matching),
     )
 
+def public_source_recovery_window_open() -> bool:
+    """Return whether suppressed sources receive their deterministic UTC probe."""
+    now = utc_now()
+    elapsed = now.minute * 60 + now.second + now.microsecond / 1_000_000
+    return elapsed % PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL.total_seconds() < PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW.total_seconds()
+
 def check_public_sites(
     result: RunResult,
     failure_counts: dict[str, int] | None = None,
     source_positions: dict[str, dict[str, Any]] | None = None,
     expected_chapter: int | None = None,
     expected_title: str | None = None,
+    previous_chapter: int | None = None,
+    previous_title: str | None = None,
 ) -> list[ChapterReport]:
     failure_counts = failure_counts if failure_counts is not None else {}
     source_positions = source_positions if source_positions is not None else {}
@@ -77,16 +85,19 @@ def check_public_sites(
         if not site.enabled:
             logging.info("Skipping disabled public site: %s.", site.name)
     eligible = []
+    recovery_window = public_source_recovery_window_open()
     for site in enabled:
-        if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
+        if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT and not recovery_window:
             logging.info(
-                "Skipping %s because it reached the consecutive-failure limit for the current watch cycle.",
+                "Skipping %s because it is temporarily suppressed after consecutive failures; periodic recovery probes remain enabled.",
                 site.name,
             )
         else:
             eligible.append(site)
+            if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
+                logging.info("Retrying previously suppressed public source during recovery window: %s.", site.name)
     if enabled and not eligible:
-        result.fail("every enabled public source is suppressed for the current watch cycle")
+        result.fail("every enabled public source is temporarily suppressed outside the recovery window")
         return []
     reports_by_name: dict[str, ChapterReport] = {}
     errors: dict[str, Exception] = {}
@@ -101,7 +112,8 @@ def check_public_sites(
                 )
             elif site.name in TARGET_AWARE_PUBLIC_SOURCES and expected_chapter is not None:
                 future = executor.submit(
-                    check_public_site, site, None, expected_chapter, expected_title
+                    check_public_site, site, None, expected_chapter, expected_title,
+                    previous_chapter, previous_title,
                 )
             else:
                 future = executor.submit(check_public_site, site)
@@ -142,7 +154,7 @@ def check_public_sites(
             )
             if count == PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
                 logging.warning(
-                    "%s is now suppressed for the remainder of the current watch cycle.", site.name
+                    "%s is temporarily suppressed after consecutive failures; periodic recovery probes remain enabled.", site.name
                 )
     if failures and reports:
         result.degrade("optional public sources failed: " + ", ".join(sorted(failures)))
@@ -304,7 +316,7 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
         return
     reports = check_public_sites(
         result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {}),
-        target, state.get("target_title"),
+        target, state.get("target_title"), parse_int(state.get("latest_seen")), state.get("latest_title"),
     )
     if not reports:
         return
