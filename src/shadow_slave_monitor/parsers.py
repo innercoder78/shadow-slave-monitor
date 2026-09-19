@@ -497,7 +497,7 @@ def freewebnovel_candidate_from_anchor(
 ) -> ChapterReport | None:
     """Parse a chapter only when its URL and visible label independently agree."""
     href = anchor.get("href")
-    if not href:
+    if not isinstance(href, str) or not href or "%" in href:
         return None
 
     url = urljoin(base_url, href)
@@ -707,6 +707,10 @@ def _trusted_title_chapter(
         and _normalized_title(trusted_title) == normalized
     }
     return next(iter(matches)) if len(matches) == 1 else None
+
+
+def _has_title_context(chapter: int | None, title: str | None) -> bool:
+    return chapter_validity_category(chapter) is None and _normalized_title(title) is not None
 
 
 def _title_only_label(text: str) -> str | None:
@@ -1007,7 +1011,8 @@ def parse_novelfull_candidates(
         if candidate and (candidate.chapter, candidate.url) not in seen:
             seen.add((candidate.chapter, candidate.url))
             candidates.append(candidate)
-    if chapter_validity_category(expected_chapter) is not None or not _normalized_title(expected_title):
+    if not (_has_title_context(expected_chapter, expected_title)
+            or _has_title_context(previous_chapter, previous_title)):
         return candidates
     markers = soup.find_all(string=re.compile(r"^\s*Latest\s+chapters\s*$", re.IGNORECASE))
     if len(markers) != 1 or not markers[0].parent:
@@ -1028,7 +1033,7 @@ def parse_novelfull_candidates(
     if first:
         first_chapter = _trusted_title_chapter(first[0], expected_chapter, expected_title,
                                                previous_chapter, previous_title)
-        if first_chapter == previous_chapter:
+        if first_chapter is not None and first_chapter == previous_chapter:
             return [ChapterReport("", first_chapter, first[0], first[1]), *candidates]
         predecessor = (novelfull_candidate_from_anchor(anchors[1], base_url)
                        or _title_only_report(anchors[1], base_url,
@@ -1127,7 +1132,8 @@ def parse_freewebnovel_net_candidates(
         candidate = freewebnovel_net_candidate_from_anchor(anchor, base_url)
         if candidate:
             found[(candidate.chapter, candidate.url)] = candidate
-    if chapter_validity_category(expected_chapter) is not None or not _normalized_title(expected_title):
+    if not (_has_title_context(expected_chapter, expected_title)
+            or _has_title_context(previous_chapter, previous_title)):
         return list(found.values())
     markers = soup.find_all(string=re.compile(
         r"^\s*\d{1,3}\s+Latest\s+Chapters?\s*(?:\[\s*Updated\s+[^\]\r\n]+\s*\])?\s*$",
@@ -1154,7 +1160,7 @@ def parse_freewebnovel_net_candidates(
         return list(found.values())
     first_chapter = _trusted_title_chapter(first[0], expected_chapter, expected_title,
                                            previous_chapter, previous_title)
-    if first_chapter == previous_chapter:
+    if first_chapter is not None and first_chapter == previous_chapter:
         return [ChapterReport("", first_chapter, first[0], first[1]), *found.values()]
     predecessor = (freewebnovel_net_candidate_from_anchor(anchors[1], base_url)
                    or _title_only_report(anchors[1], base_url,
@@ -1244,7 +1250,8 @@ def parse_rechapters_candidates(
         if candidate:
             found[(candidate.chapter, candidate.url)] = candidate
     numbered = list(found.values())
-    if chapter_validity_category(expected_chapter) is not None or not _normalized_title(expected_title):
+    if not (_has_title_context(expected_chapter, expected_title)
+            or _has_title_context(previous_chapter, previous_title)):
         return numbered
     anchors = _rechapters_chapter_list_anchors(soup, base_url)
     if len(anchors) < 2:
@@ -1255,7 +1262,7 @@ def parse_rechapters_candidates(
         return numbered
     first_chapter = _trusted_title_chapter(first_title, expected_chapter, expected_title,
                                            previous_chapter, previous_title)
-    if first_chapter == previous_chapter:
+    if first_chapter is not None and first_chapter == previous_chapter:
         return [ChapterReport("", first_chapter, first_title, first_url), *numbered]
     predecessor = rechapters_candidate_from_anchor(anchors[1], base_url)
     if not predecessor:
@@ -1529,12 +1536,23 @@ def parse_telegram_doc_title(text: str) -> tuple[int, str | None] | None:
 
 
 def parse_telegram_telegra_link(href: str) -> ChapterReport | None:
-    parsed_url = urlparse(href)
-    if parsed_url.netloc.casefold() not in {"telegra.ph", "www.telegra.ph"}:
+    if not isinstance(href, str) or not href or "%" in href:
+        return None
+    try:
+        parsed_url = urlparse(href)
+        host = (parsed_url.hostname or "").casefold()
+    except (TypeError, ValueError):
+        return None
+    if (parsed_url.scheme != "https" or host not in {"telegra.ph", "www.telegra.ph"}
+            or parsed_url.netloc.casefold() != host or parsed_url.params
+            or parsed_url.query or parsed_url.fragment):
         return None
 
-    slug = unquote(parsed_url.path.rstrip("/").rsplit("/", maxsplit=1)[-1])
-    match = re.match(r"^(\d{3,5})-(.+)$", slug)
+    path = re.fullmatch(r"/([^/]+)/?", parsed_url.path)
+    if not path:
+        return None
+    slug = path.group(1)
+    match = re.fullmatch(r"(\d{3,5})-(.+)", slug)
     if not match:
         return None
 
@@ -1638,19 +1656,18 @@ def parse_telegram_candidates(
             if doc_candidate.chapter not in telegra_by_chapter:
                 add(doc_candidate)
 
-    if (message_nodes and chapter_validity_category(expected_chapter) is None
-            and _normalized_title(expected_title)):
+    if (message_nodes and (_has_title_context(expected_chapter, expected_title)
+                           or _has_title_context(previous_chapter, previous_title))):
         title_messages: list[tuple[int, str, str, int | None]] = []
-        chapter_bearing_indexes: list[int] = []
-        numbered_before: list[tuple[int, int]] = []
+        chapter_evidence: list[tuple[int, int | None]] = []
         for index, node in enumerate(message_nodes):
             numbered = telegram_doc_candidates_from_node(node, base_url)
             telegraphs = [parse_telegram_telegra_link(urljoin(base_url, a["href"]))
                           for a in node.find_all("a", href=True)]
             trusted_numbers = {r.chapter for r in [*numbered, *telegraphs] if r}
             if trusted_numbers:
-                chapter_bearing_indexes.append(index)
-                numbered_before.extend((index, chapter) for chapter in trusted_numbers)
+                chapter_evidence.append((index, next(iter(trusted_numbers))
+                                         if len(trusted_numbers) == 1 else None))
 
             docs = []
             for title_node in node.select(".tgme_widget_message_document_title"):
@@ -1681,26 +1698,30 @@ def parse_telegram_candidates(
             if len(docs) == 1 and len(slug_titles) == 1 and not trusted_numbers:
                 doc_title, (slug_title, url) = docs[0], slug_titles[0]
                 if _normalized_title(doc_title) == _normalized_title(slug_title):
-                    chapter_bearing_indexes.append(index)
                     resolved = _trusted_title_chapter(
                         doc_title, expected_chapter, expected_title,
                         previous_chapter, previous_title,
                     )
                     title_messages.append((index, doc_title, url, resolved))
-        resolved_messages = [message for message in title_messages if message[3] is not None]
-        if chapter_bearing_indexes and len(resolved_messages) == 1:
-            index, title, url, chapter = resolved_messages[0]
-            if index == max(chapter_bearing_indexes) and chapter == previous_chapter:
+                    chapter_evidence.append((index, resolved))
+        previous_messages = [message for message in title_messages
+                             if message[3] is not None and message[3] == previous_chapter]
+        newest_index = chapter_evidence[-1][0] if chapter_evidence else None
+        if len(previous_messages) == 1:
+            index, title, url, chapter = previous_messages[0]
+            if index == newest_index:
                 add(ChapterReport("", chapter, title, url))
-        targets = [message for message in title_messages if message[3] == expected_chapter]
-        if len(targets) == 1 and chapter_bearing_indexes and targets[0][0] == max(chapter_bearing_indexes):
+        targets = ([message for message in title_messages if message[3] == expected_chapter]
+                   if _has_title_context(expected_chapter, expected_title) else [])
+        if len(targets) == 1 and targets[0][0] == newest_index:
             index, title, url, _ = targets[0]
-            prior = [chapter for message_index, chapter in numbered_before if message_index < index]
-            prior.extend(
-                chapter for message_index, _, _, chapter in title_messages
-                if message_index < index and chapter is not None
+            target_position = next(
+                position for position, evidence in enumerate(chapter_evidence)
+                if evidence[0] == index
             )
-            if prior and max(prior) == expected_chapter - 1:
+            predecessor = (chapter_evidence[target_position - 1][1]
+                           if target_position > 0 else None)
+            if predecessor == expected_chapter - 1:
                 add(ChapterReport("", expected_chapter, title, url))
 
     if message_nodes and not candidates:

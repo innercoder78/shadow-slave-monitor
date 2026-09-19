@@ -16,6 +16,7 @@ from shadow_slave_monitor.parsers import (
     parse_readnovelfull_candidates,
     parse_rechapters_candidates,
     parse_telegram_candidates,
+    parse_telegram_telegra_link,
 )
 
 
@@ -89,6 +90,94 @@ class PreviousContextParserTests(unittest.TestCase):
         self.assertEqual(max(r.chapter for r in waiting), 3189)
         self.assertEqual(max(r.chapter for r in released), 3190)
         self.assertNotIn(3189, [r.chapter for r in without_previous])
+
+    def test_telegram_requires_immediate_resolved_predecessor(self) -> None:
+        def title_message(title: str, suffix: str) -> str:
+            slug = title.replace(" ", "-")
+            return (f'<div class="tgme_widget_message"><span class="tgme_widget_message_document_title">'
+                    f'{title}.docx</span><a href="https://telegra.ph/{slug}-{suffix}">Read</a></div>')
+        def numbered_message(chapter: int, title: str) -> str:
+            return (f'<div class="tgme_widget_message"><a href="https://telegra.ph/'
+                    f'{chapter}-{title.replace(" ", "-")}-01-01">Read</a></div>')
+        previous = title_message("Entertaining Guest", "01-02")
+        unknown = title_message("Unknown Arrival", "01-03")
+        target = title_message("Freedom of Choice", "01-04")
+        cases = (
+            (numbered_message(3188, "Lost Soul") + previous + target, True),
+            (numbered_message(3188, "Lost Soul") + previous + unknown + target, False),
+            (previous + numbered_message(3187, "Older") + target, False),
+            (previous + unknown, False),
+            (previous + target + unknown, False),
+        )
+        for html, accepted in cases:
+            with self.subTest(accepted=accepted, html=html):
+                reports = parse_telegram_candidates(
+                    BeautifulSoup(html, "html.parser"), "https://t.me/s/example", *CONTEXT)
+                self.assertEqual(3190 in [report.chapter for report in reports], accepted)
+                if unknown in html and not target in html:
+                    self.assertNotIn(3189, [report.chapter for report in reports])
+
+    def test_numbered_telegram_links_require_canonical_https_urls(self) -> None:
+        good = "https://telegra.ph/3189-Entertaining-Guest-01-01"
+        self.assertEqual(parse_telegram_telegra_link(good).chapter, 3189)
+        invalid = (
+            "http://telegra.ph/3189-Entertaining-Guest-01-01",
+            "https://telegra.ph:443/3189-Entertaining-Guest-01-01",
+            "https://user@telegra.ph/3189-Entertaining-Guest-01-01",
+            "https://telegra.ph/3189-Entertaining-Guest-01-01?x=1",
+            "https://telegra.ph/3189-Entertaining-Guest-01-01#bad",
+            "https://telegra.ph/%33%31%38%39-Entertaining-Guest-01-01",
+        )
+        target = ('<div class="tgme_widget_message"><span class="tgme_widget_message_document_title">'
+                  'Freedom of Choice.docx</span><a href="https://telegra.ph/Freedom-of-Choice-01-02">Read</a></div>')
+        for href in invalid:
+            with self.subTest(href=href):
+                self.assertIsNone(parse_telegram_telegra_link(href))
+                predecessor = f'<div class="tgme_widget_message"><a href="{href}">Read</a></div>'
+                reports = parse_telegram_candidates(
+                    BeautifulSoup(predecessor + target, "html.parser"),
+                    "https://t.me/s/example", *CONTEXT)
+                self.assertNotIn(3190, [report.chapter for report in reports])
+
+    def test_previous_inference_does_not_require_expected_title(self) -> None:
+        context = (3190, None, 3189, "Entertaining Guest")
+        cases = (
+            (parse_novelfull_candidates, "https://novelfull.com/shadow-slave.html",
+             '<section><h2>Latest chapters</h2><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a><a href="/shadow-slave/chapter-3188-lost-soul.html">Chapter 3188 Lost Soul</a></section>'),
+            (parse_freewebnovel_net_candidates, "https://freewebnovel.net/shadow-slave.html",
+             '<section><h2>6 Latest Chapters [ Updated now ]</h2><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a><a href="/shadow-slave/chapter-3188-lost-soul.html">Chapter 3188 Lost Soul</a></section>'),
+            (parse_rechapters_candidates, "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4",
+             '<section><h2>Chapter list</h2><p>Newest first</p><a href="/book/shadow-slave-r2k2ivbd6ez4/previous9x">Chapter Entertaining Guest</a><a href="/book/shadow-slave-r2k2ivbd6ez4/numbered8x">Ch 3188: Lost Soul</a></section>'),
+        )
+        for parser, base, html in cases:
+            with self.subTest(parser=parser.__name__):
+                reports = parser(BeautifulSoup(html, "html.parser"), base, *context)
+                self.assertEqual(max(report.chapter for report in reports), 3189)
+                self.assertTrue(all(report.chapter is not None for report in reports))
+                target_html = html.replace("Entertaining Guest", "Freedom of Choice").replace(
+                    "entertaining-guest", "freedom-of-choice").replace("previous9x", "target0xx")
+                target_reports = parser(BeautifulSoup(target_html, "html.parser"), base, *context)
+                self.assertNotIn(3190, [report.chapter for report in target_reports])
+
+        telegram = ('<div class="tgme_widget_message"><span class="tgme_widget_message_document_title">'
+                    'Entertaining Guest.docx</span><a href="https://telegra.ph/Entertaining-Guest-01-02">Read</a></div>')
+        reports = parse_telegram_candidates(
+            BeautifulSoup(telegram, "html.parser"), "https://t.me/s/example", *context)
+        self.assertEqual(max(report.chapter for report in reports), 3189)
+        target_telegram = telegram.replace("Entertaining Guest", "Freedom of Choice").replace(
+            "Entertaining-Guest", "Freedom-of-Choice")
+        target_reports = parse_telegram_candidates(
+            BeautifulSoup(target_telegram, "html.parser"), "https://t.me/s/example", *context)
+        self.assertNotIn(3190, [report.chapter for report in target_reports])
+
+    def test_missing_previous_context_never_emits_none_chapter(self) -> None:
+        html = ('<section><h2>Latest chapters</h2>'
+                '<a href="/shadow-slave/chapter-unknown-arrival.html">Chapter Unknown Arrival</a>'
+                '<a href="/shadow-slave/chapter-3188-lost-soul.html">Chapter 3188 Lost Soul</a></section>')
+        reports = parse_novelfull_candidates(
+            BeautifulSoup(html, "html.parser"), "https://novelfull.com/shadow-slave.html",
+            3190, None, None, None)
+        self.assertTrue(all(report.chapter is not None for report in reports))
 
     def test_ambiguous_equal_titles_and_non_adjacent_previous_fail_closed(self) -> None:
         html = ('<section><h2>Latest chapters</h2>'
