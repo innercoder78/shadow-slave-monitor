@@ -312,8 +312,14 @@ class StateWriterPersistenceTests(unittest.TestCase):
             self.initialize_repo(repo)
             state_file = "state/state.json"
             legacy = json.loads((repo / state_file).read_text(encoding="utf-8"))
-            self.assertNotIn("public_source_failure_revision", legacy)
+            legacy["public_source_failure_revision"] = 2
+            legacy["public_source_failures"] = {"Chikari": 4}
+            (repo / state_file).write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+            subprocess.run(["git", "add", state_file], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-m", "Set old parser revision"], cwd=repo, check=True,
+                           stdout=subprocess.PIPE)
             migrated = state_writer.validate_state(legacy)
+            self.assertEqual(migrated["public_source_failures"], {})
             artifact_dir = Path(tmp) / "artifact"
             self.write_artifact(repo, artifact_dir, state_file, migrated, self.sha256(repo / state_file))
             watchdog_before = (repo / "state/watchdog_state.json").read_bytes()

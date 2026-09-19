@@ -171,7 +171,8 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
             return report
 
         failures: dict[str, int] = {}
-        with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check):
+        with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=False):
             for expected in range(1, 5):
                 result = monitor.RunResult()
                 self.assertEqual(monitor.check_public_sites(result, failures), [report])
@@ -183,7 +184,7 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
 
         self.assertEqual(calls, {"Failed": 4, "Good": 5})
         self.assertFalse(result.degraded_reasons)
-        self.assertIn("reached the consecutive-failure limit", "\n".join(logs.output))
+        self.assertIn("temporarily suppressed", "\n".join(logs.output))
 
     def test_success_resets_failures_and_next_failure_starts_at_one(self) -> None:
         source = SourceConfig("Source", "https://source.example", True, ("source.example",))
@@ -201,10 +202,11 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
         source = SourceConfig("Source", "https://source.example", True, ("source.example",))
         failures = {"Source": 4}
         result = monitor.RunResult()
-        with patch.object(monitor, "PUBLIC_SITES", (source,)), patch.object(monitor, "check_public_site") as check:
+        with patch.object(monitor, "PUBLIC_SITES", (source,)), patch.object(monitor, "check_public_site") as check, \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=False):
             self.assertEqual(monitor.check_public_sites(result, failures), [])
         check.assert_not_called()
-        self.assertEqual(result.reasons, ["every enabled public source is suppressed for the current watch cycle"])
+        self.assertEqual(result.reasons, ["every enabled public source is temporarily suppressed outside the recovery window"])
         self.assertEqual(failures, {"Source": 4})
 
     def test_every_source_failure_still_fails_run(self) -> None:
@@ -388,6 +390,7 @@ class WatchFreeSitesTests(unittest.TestCase):
         good = SourceConfig("Chikari", "https://chikari.moe/novels/shadow-slave", True, ("chikari.moe",))
         report = ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")
         with patch.object(monitor, "PUBLIC_SITES", (suppressed, good)), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=False), \
              patch.object(monitor, "check_public_site", return_value=report) as check:
             saved = run_main_with_state(state)
         self.assertEqual([call.args[0].name for call in check.call_args_list], ["Chikari"])
@@ -433,7 +436,7 @@ class WatchFreeSitesTests(unittest.TestCase):
         with patch.object(monitor, "check_public_sites", return_value=[report]) as check_public_sites, \
              patch.object(monitor, "send_new_chapter") as send_new_chapter:
             run_main_with_state(state)
-        self.assertEqual(check_public_sites.call_args.args[3:], (11, "Chapter Eleven"))
+        self.assertEqual(check_public_sites.call_args.args[3:], (11, "Chapter Eleven", 10, "Chapter Ten"))
         send_new_chapter.assert_called_once()
         self.assertEqual((state["latest_seen"], state["mode"]), (11, "watch_webnovel"))
 

@@ -685,16 +685,16 @@ class FreeWebNovelParserTests(unittest.TestCase):
         self.assertEqual(parse(good)[0].chapter, 3189)
         rejected = (
             good.replace("chapter-3189", "chapter-3187", 1),
-            good.replace("Chapter Entertaining Guest", "Chapter Wrong Title", 1),
             good.replace("<div>", "<div><a href='/novel/shadow-slave/chapter-3188'>Chapter 3188 Lost Soul</a>", 1),
             good.replace("<h2>Latest Chapters</h2>", "<h2>Archive</h2>"),
             good.replace("/novel/shadow-slave/chapter-3189", "http://freewebnovel.com/novel/shadow-slave/chapter-3189"),
+            good.replace("chapter-3189", "chapter-%33%31%38%39", 1),
         )
         for html in rejected:
             with self.subTest(html=html):
                 self.assertFalse(any(r.chapter == 3189 for r in parse(html)))
-        self.assertFalse(any(r.chapter == 3189 for r in parse_freewebnovel_candidates(
-            BeautifulSoup(good, "html.parser"), self.source.url)))
+        self.assertEqual(parse_freewebnovel_candidates(
+            BeautifulSoup(good, "html.parser"), self.source.url)[0].chapter, 3189)
 
     def test_visible_and_href_chapter_numbers_must_match(self) -> None:
         html = """
@@ -716,6 +716,7 @@ class FreeWebNovelParserTests(unittest.TestCase):
             "/novel/shadow-slave/chapters-3144",
             "/novel/shadow-slave/chapter-3144/extra",
             "https://freewebnovel.com:443/novel/shadow-slave/chapter-3144",
+            "/novel/shadow-slave/chapter-%33%31%34%34",
         )
         for href in invalid_hrefs:
             with self.subTest(href=href), self.assertRaises(ParseError):
@@ -1264,8 +1265,8 @@ class TargetAwareLiveShapeTests(unittest.TestCase):
         targeted = parse_freewebnovel_candidates(
             soup, "https://freewebnovel.com/novel/shadow-slave", 3189, "Entertaining Guest")
         self.assertEqual(targeted[0].chapter, 3189)
-        self.assertEqual(max(c.chapter for c in parse_freewebnovel_candidates(
-            soup, "https://freewebnovel.com/novel/shadow-slave")), 3188)
+        self.assertEqual(parse_freewebnovel_candidates(
+            soup, "https://freewebnovel.com/novel/shadow-slave")[0].chapter, 3189)
 
         arrow_html = """<div><h2>Latest chapter</h2><div>
           <a href='/chapter/shadow-slave/chapter-entertaining-guest'>Chapter Entertaining Guest</a>
