@@ -170,6 +170,54 @@ class FreeWebNovelNetTests(unittest.TestCase):
                    side_effect=[listing(), "<h2>Chapter Wrong Title</h2>"]), self.assertRaises(ParseError):
             check_public_site(self.source, None, 3189, "Entertaining Guest")
 
+    def test_target_context_accepts_numbered_first_latest_entry(self) -> None:
+        html = '''
+          <a href="/shadow-slave/chapter-3999-untrusted.html">Chapter 3999 Untrusted</a>
+          <section><h2>6 Latest Chapters [ Updated an hour ago ]</h2>
+            <a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3191 There and Back Again</a>
+            <a href="/shadow-slave/chapter-3190-freedom-of-choice.html">Chapter 3190 Freedom of Choice</a>
+          </section>
+        '''
+        contexts = (
+            (3192, "A Hypothetical Future", 3191, "There and Back Again"),
+            (3191, "There and Back Again", 3190, "Freedom of Choice"),
+        )
+        for context in contexts:
+            with self.subTest(context=context):
+                candidates = parse_freewebnovel_net_candidates(
+                    BeautifulSoup(html, "html.parser"), self.source.url, *context
+                )
+                self.assertEqual([candidate.chapter for candidate in candidates], [3191])
+
+    def test_target_context_rejects_numbered_first_visible_url_mismatch(self) -> None:
+        html = '''
+          <section><h2>6 Latest Chapters [ Updated an hour ago ]</h2>
+            <a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3192 There and Back Again</a>
+            <a href="/shadow-slave/chapter-3190-freedom-of-choice.html">Chapter 3190 Freedom of Choice</a>
+          </section>
+        '''
+        candidates = parse_freewebnovel_net_candidates(
+            BeautifulSoup(html, "html.parser"), self.source.url,
+            3192, "A Hypothetical Future", 3191, "There and Back Again",
+        )
+        self.assertEqual(candidates, [])
+
+    def test_target_context_accepts_single_numbered_latest_but_not_single_title_only(self) -> None:
+        marker = "<h2>6 Latest Chapters [ Updated an hour ago ]</h2>"
+        numbered = '<a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3191 There and Back Again</a>'
+        title_only = '<a href="/shadow-slave/chapter-there-and-back-again.html">Chapter There and Back Again</a>'
+        context = (3192, "A Hypothetical Future", 3191, "There and Back Again")
+
+        candidates = parse_freewebnovel_net_candidates(
+            BeautifulSoup(f"<section>{marker}{numbered}</section>", "html.parser"),
+            self.source.url, *context,
+        )
+        self.assertEqual([candidate.chapter for candidate in candidates], [3191])
+        self.assertEqual(parse_freewebnovel_net_candidates(
+            BeautifulSoup(f"<section>{marker}{title_only}</section>", "html.parser"),
+            self.source.url, *context,
+        ), [])
+
 
 class ReChaptersTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "ReChapters")
