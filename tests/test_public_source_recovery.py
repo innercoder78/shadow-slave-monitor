@@ -84,6 +84,25 @@ class PreviousContextParserTests(unittest.TestCase):
         self.assertEqual(parse_novel_buddy_candidates(
             BeautifulSoup(duplicated, "html.parser"), base, *CONTEXT), [])
 
+    def test_duplicate_markers_never_fall_back_to_global_candidates(self) -> None:
+        cases = (
+            (parse_freewebnovel_candidates, "https://freewebnovel.com/novel/shadow-slave",
+             "6 Latest Chapters", "/novel/shadow-slave/chapter-3188"),
+            (parse_novelfull_candidates, "https://novelfull.com/shadow-slave.html",
+             "Latest chapters", "/shadow-slave/chapter-3188-lost-soul.html"),
+            (parse_freewebnovel_net_candidates, "https://freewebnovel.net/shadow-slave.html",
+             "6 Latest Chapters", "/shadow-slave/chapter-3188-lost-soul.html"),
+            (parse_novel_buddy_candidates, "https://novelbuddy.me/shadow-slave",
+             "Newest", "/shadow-slave/chapter-3188-lost-soul"),
+        )
+        for parser, base, marker, numbered_url in cases:
+            html = (f'<section><h3>{marker}</h3><a href="{numbered_url}">Chapter 3188 Lost Soul</a></section>'
+                    f'<section><h3>{marker}</h3><a href="{numbered_url}">Chapter 3188 Lost Soul</a></section>'
+                    '<aside><a href="/shadow-slave/chapter-freedom-of-choice.html">'
+                    'Chapter Freedom of Choice</a></aside>')
+            with self.subTest(parser=parser.__name__):
+                self.assertEqual(parser(BeautifulSoup(html, "html.parser"), base, *CONTEXT), [])
+
     def test_read_latest_reports_known_previous(self) -> None:
         source = next(site for site in PUBLIC_SITES if site.name == "ReadNovelFull")
         html = '<section><h3>Latest chapter</h3><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a></section>'
