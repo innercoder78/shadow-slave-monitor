@@ -170,6 +170,38 @@ class FreeWebNovelNetTests(unittest.TestCase):
                    side_effect=[listing(), "<h2>Chapter Wrong Title</h2>"]), self.assertRaises(ParseError):
             check_public_site(self.source, None, 3189, "Entertaining Guest")
 
+    def test_target_context_accepts_numbered_first_latest_entry(self) -> None:
+        html = '''
+          <a href="/shadow-slave/chapter-3999-untrusted.html">Chapter 3999 Untrusted</a>
+          <section><h2>6 Latest Chapters [ Updated an hour ago ]</h2>
+            <a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3191 There and Back Again</a>
+            <a href="/shadow-slave/chapter-3190-freedom-of-choice.html">Chapter 3190 Freedom of Choice</a>
+          </section>
+        '''
+        contexts = (
+            (3192, "A Hypothetical Future", 3191, "There and Back Again"),
+            (3191, "There and Back Again", 3190, "Freedom of Choice"),
+        )
+        for context in contexts:
+            with self.subTest(context=context):
+                candidates = parse_freewebnovel_net_candidates(
+                    BeautifulSoup(html, "html.parser"), self.source.url, *context
+                )
+                self.assertEqual([candidate.chapter for candidate in candidates], [3191])
+
+    def test_target_context_rejects_numbered_first_visible_url_mismatch(self) -> None:
+        html = '''
+          <section><h2>6 Latest Chapters [ Updated an hour ago ]</h2>
+            <a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3192 There and Back Again</a>
+            <a href="/shadow-slave/chapter-3190-freedom-of-choice.html">Chapter 3190 Freedom of Choice</a>
+          </section>
+        '''
+        candidates = parse_freewebnovel_net_candidates(
+            BeautifulSoup(html, "html.parser"), self.source.url,
+            3192, "A Hypothetical Future", 3191, "There and Back Again",
+        )
+        self.assertEqual(candidates, [])
+
 
 class ReChaptersTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "ReChapters")

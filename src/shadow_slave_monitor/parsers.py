@@ -1128,6 +1128,9 @@ def parse_novelfull_candidates(
     _, anchors = _semantic_section_anchors(soup, marker_pattern)
     if len(anchors) < 2:
         return []
+    numbered_first = novelfull_candidate_from_anchor(anchors[0], base_url)
+    if numbered_first:
+        return [numbered_first]
     first = _title_slug_candidate(anchors[0], base_url, {"novelfull.com", "www.novelfull.com"})
     if first:
         first_chapter = _trusted_title_chapter(first[0], expected_chapter, expected_title,
@@ -1243,6 +1246,9 @@ def parse_freewebnovel_net_candidates(
     _, anchors = _semantic_section_anchors(soup, marker_pattern)
     if len(anchors) < 2:
         return []
+    numbered_first = freewebnovel_net_candidate_from_anchor(anchors[0], base_url)
+    if numbered_first:
+        return [numbered_first]
     first = _title_slug_candidate(
         anchors[0], base_url, {"freewebnovel.net", "www.freewebnovel.net"}
     )
