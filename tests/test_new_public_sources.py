@@ -202,6 +202,22 @@ class FreeWebNovelNetTests(unittest.TestCase):
         )
         self.assertEqual(candidates, [])
 
+    def test_target_context_accepts_single_numbered_latest_but_not_single_title_only(self) -> None:
+        marker = "<h2>6 Latest Chapters [ Updated an hour ago ]</h2>"
+        numbered = '<a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3191 There and Back Again</a>'
+        title_only = '<a href="/shadow-slave/chapter-there-and-back-again.html">Chapter There and Back Again</a>'
+        context = (3192, "A Hypothetical Future", 3191, "There and Back Again")
+
+        candidates = parse_freewebnovel_net_candidates(
+            BeautifulSoup(f"<section>{marker}{numbered}</section>", "html.parser"),
+            self.source.url, *context,
+        )
+        self.assertEqual([candidate.chapter for candidate in candidates], [3191])
+        self.assertEqual(parse_freewebnovel_net_candidates(
+            BeautifulSoup(f"<section>{marker}{title_only}</section>", "html.parser"),
+            self.source.url, *context,
+        ), [])
+
 
 class ReChaptersTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "ReChapters")

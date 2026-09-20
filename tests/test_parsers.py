@@ -1053,6 +1053,22 @@ class NovelFullParserTests(unittest.TestCase):
         )
         self.assertEqual(candidates, [])
 
+    def test_target_context_accepts_single_numbered_latest_but_not_single_title_only(self) -> None:
+        marker = "<h2>Latest chapters</h2>"
+        numbered = '<a href="/shadow-slave/chapter-3191-there-and-back-again.html">Chapter 3191 There and Back Again</a>'
+        title_only = '<a href="/shadow-slave/chapter-there-and-back-again.html">Chapter There and Back Again</a>'
+        context = (3192, "A Hypothetical Future", 3191, "There and Back Again")
+
+        candidates = parse_novelfull_candidates(
+            BeautifulSoup(f"<section>{marker}{numbered}</section>", "html.parser"),
+            self.source.url, *context,
+        )
+        self.assertEqual([candidate.chapter for candidate in candidates], [3191])
+        self.assertEqual(parse_novelfull_candidates(
+            BeautifulSoup(f"<section>{marker}{title_only}</section>", "html.parser"),
+            self.source.url, *context,
+        ), [])
+
     def test_title_only_target_requires_first_entry_exact_predecessor_and_page_heading(self) -> None:
         listing = ("<section><h2>Latest chapters</h2><div>"
                    "<a href='/shadow-slave/chapter-entertaining-guest.html'>Chapter Entertaining Guest</a>"
