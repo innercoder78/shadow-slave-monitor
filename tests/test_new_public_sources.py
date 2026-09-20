@@ -157,7 +157,7 @@ class FreeWebNovelNetTests(unittest.TestCase):
         self.assertEqual(report.chapter, 3189)
         rejected = parse_freewebnovel_net_candidates(
             BeautifulSoup(listing(3187), "html.parser"), self.source.url, 3189, "Entertaining Guest")
-        self.assertEqual(max(c.chapter for c in rejected), 3187)
+        self.assertEqual(rejected, [])
         for html, title in (
             (listing().replace("6 Latest Chapters [ Updated an hour ago ]", "This is the latest news"), "Entertaining Guest"),
             (listing(), "Wrong Title"),

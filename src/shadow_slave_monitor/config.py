@@ -32,7 +32,7 @@ PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL = timedelta(minutes=30)
 PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW = timedelta(minutes=5)
 # Bump when materially changed public-source parsing should invalidate failure
 # suppression accumulated under an older parser implementation.
-PUBLIC_SOURCE_PARSER_REVISION = 3
+PUBLIC_SOURCE_PARSER_REVISION = 4
 MIN_CHAPTER = 1
 MAX_CHAPTER = 10000
 TITLE_MAX_LENGTH = 180

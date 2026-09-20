@@ -10,7 +10,9 @@ from shadow_slave_monitor import monitor
 from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
 from shadow_slave_monitor.models import ChapterReport, RunResult
 from shadow_slave_monitor.parsers import (
+    parse_freewebnovel_candidates,
     parse_freewebnovel_net_candidates,
+    parse_novel_buddy_candidates,
     parse_novelfull_candidates,
     parse_novelarrow_candidates,
     parse_readnovelfull_candidates,
@@ -44,6 +46,43 @@ class PreviousContextParserTests(unittest.TestCase):
             with self.subTest(parser=parser.__name__):
                 self.assert_transition(parser, base, f"<section>{heading}{previous}{numbered}</section>",
                                        f"<section>{heading}{target}{previous}{numbered}</section>")
+
+    def test_nested_production_shapes_preserve_newest_order(self) -> None:
+        cases = (
+            (parse_freewebnovel_candidates, "https://freewebnovel.com/novel/shadow-slave",
+             "/novel/shadow-slave/chapter-{slug}", "6 Latest Chapters [ Updated now ]"),
+            (parse_novelfull_candidates, "https://novelfull.com/shadow-slave.html",
+             "/shadow-slave/chapter-{slug}.html", "Latest chapters"),
+            (parse_freewebnovel_net_candidates, "https://freewebnovel.net/shadow-slave.html",
+             "/shadow-slave/chapter-{slug}.html", "6 Latest Chapters [ Updated now ]"),
+            (parse_novel_buddy_candidates, "https://novelbuddy.me/shadow-slave",
+             "/shadow-slave/chapter-{slug}", "Newest"),
+        )
+        for parser, base, path, heading in cases:
+            def page(first_title: str, first_slug: str, include_previous: bool) -> str:
+                previous = (f'<li><a href="{path.format(slug="entertaining-guest")}">'
+                            'Chapter Entertaining Guest</a></li>') if include_previous else ""
+                return (f'<section><div class="heading"><h3><span>{heading}</span></h3></div><ul>'
+                        f'<li><a href="{path.format(slug=first_slug)}">Chapter {first_title}</a></li>'
+                        f'{previous}<li><a href="{path.format(slug="3188-lost-soul")}">'
+                        'Chapter 3188 Lost Soul</a></li></ul><h3>Chapter List</h3>'
+                        '<a href="/shadow-slave/chapter-9999-bad">Chapter 9999 Bad</a></section>')
+            waiting = page("Entertaining Guest", "3189" if parser is parse_freewebnovel_candidates else "entertaining-guest", False)
+            released = page("Freedom of Choice", "3190" if parser is parse_freewebnovel_candidates else "freedom-of-choice", True)
+            with self.subTest(parser=parser.__name__):
+                self.assert_transition(parser, base, waiting, released)
+
+    def test_nested_sections_fail_closed_on_unknown_or_duplicate_newest(self) -> None:
+        base = "https://novelbuddy.me/shadow-slave"
+        unknown = ('<section><h3><span>Newest</span></h3><ul>'
+                   '<li><a href="/shadow-slave/chapter-unknown-arrival">Chapter Unknown Arrival</a></li>'
+                   '<li><a href="/shadow-slave/chapter-freedom-of-choice">Chapter Freedom of Choice</a></li>'
+                   '</ul></section>')
+        self.assertEqual(parse_novel_buddy_candidates(
+            BeautifulSoup(unknown, "html.parser"), base, *CONTEXT), [])
+        duplicated = unknown + '<section><h3>Newest</h3></section>'
+        self.assertEqual(parse_novel_buddy_candidates(
+            BeautifulSoup(duplicated, "html.parser"), base, *CONTEXT), [])
 
     def test_read_latest_reports_known_previous(self) -> None:
         source = next(site for site in PUBLIC_SITES if site.name == "ReadNovelFull")
