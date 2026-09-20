@@ -25,7 +25,7 @@ class PendingDeliveryOutcome(StrEnum):
     DELIVERED = "delivered"
 
 TARGET_AWARE_PUBLIC_SOURCES = frozenset({
-    "Telegram", "FreeWebNovel", "NovelArrow", "NovelFull",
+    "Telegram", "Novel Buddy", "FreeWebNovel", "NovelArrow", "NovelFull",
     "ReadNovelFull", "ReChapters", "FreeWebNovel.net",
 })
 
@@ -143,7 +143,8 @@ def check_public_sites(
             failure_counts[site.name] = count
             failures.append(site.name)
             category = safe_exception_category(exc)
-            details = safe_exception_details(exc)
+            details = (f"reason={exc.reason}" if isinstance(exc, ParseError)
+                       else safe_exception_details(exc))
             logging.warning(
                 "%s check failed safely: category=%s type=%s%s",
                 site.name, category, type(exc).__name__, f" {details}" if details else "",

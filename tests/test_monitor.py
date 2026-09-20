@@ -430,6 +430,48 @@ class WatchFreeSitesTests(unittest.TestCase):
         self.assertEqual((state["latest_seen"], state["mode"]), (11, "watch_webnovel"))
         self.assertEqual(state["public_source_failures"], {})
 
+    def test_real_waiting_reports_are_healthy_then_only_target_reports_notify(self) -> None:
+        state = self.watch_free_state()
+        state.update({
+            "latest_seen": 3189,
+            "latest_title": "Entertaining Guest",
+            "latest_webnovel": 3190,
+            "latest_webnovel_title": "Freedom of Choice",
+            "target_chapter": 3190,
+            "target_title": "Freedom of Choice",
+        })
+        names = ("FreeWebNovel", "Novel Buddy", "NovelFull", "FreeWebNovel.net")
+        sites = tuple(site for site in PUBLIC_SITES if site.name in names)
+
+        def previous(site, *_args):
+            return ChapterReport(site.name, 3189, "Entertaining Guest", site.url, "previous")
+
+        with patch.object(monitor, "PUBLIC_SITES", sites), \
+             patch.object(monitor, "check_public_site", side_effect=previous), \
+             patch.object(monitor, "send_new_chapter") as send_new_chapter:
+            saved = run_main_with_state(state)
+        send_new_chapter.assert_not_called()
+        self.assertEqual(saved, [])
+        self.assertEqual(state["public_source_failures"], {})
+        self.assertEqual((state["mode"], state["target_chapter"]), ("watch_free_sites", 3190))
+        self.assertIsNone(monitor.aggregate_reports_for_chapter(
+            [previous(site) for site in sites], 3190))
+
+        reports = [
+            ChapterReport("NovelFull", 3190, "Freedom of Choice", "https://public.example/full", "target"),
+            ChapterReport("Novel Buddy", 3189, "Entertaining Guest", "https://public.example/buddy", "previous"),
+            ChapterReport("FreeWebNovel", 3190, "Freedom of Choice", "https://public.example/free", "target"),
+            ChapterReport("FreeWebNovel.net", 3189, "Entertaining Guest", "https://public.example/net", "previous"),
+        ]
+        with patch.object(monitor, "check_public_sites", return_value=reports), \
+             patch.object(monitor, "send_new_chapter") as send_new_chapter:
+            run_main_with_state(state)
+        send_new_chapter.assert_called_once()
+        aggregate = send_new_chapter.call_args.args[2]
+        self.assertEqual(aggregate.source, "FreeWebNovel, NovelFull")
+        self.assertEqual((state["latest_seen"], state["mode"]), (3190, "watch_webnovel"))
+        self.assertEqual(state["public_source_failures"], {})
+
     def test_watch_free_sites_propagates_authoritative_target(self) -> None:
         state = self.watch_free_state()
         report = ChapterReport("ReadNovelFull", 11, "Chapter Eleven", "https://public.example/11", "target")

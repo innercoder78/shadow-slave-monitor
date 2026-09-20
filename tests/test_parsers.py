@@ -16,6 +16,7 @@ from shadow_slave_monitor.parsers import (
     check_lightnovelup,
     lightnovelup_candidate_from_href,
     parse_novel_phoenix_candidates,
+    parse_novel_buddy_candidates,
     parse_novelarrow_candidates,
     parse_novel_live_candidates,
     parse_novelfull_candidates,
@@ -316,6 +317,49 @@ class NovelBuddyParserTests(unittest.TestCase):
         for html in invalid:
             with self.subTest(html=html), self.assertRaises(ParseError):
                 self.check(html)
+
+    def test_title_only_context_never_emits_none_or_uses_none_arithmetic(self) -> None:
+        previous = ('<section><h3>Newest</h3><a href="/shadow-slave/chapter-entertaining-guest">'
+                    'Chapter Entertaining Guest</a></section>')
+        unknown = previous.replace("entertaining-guest", "unknown-arrival").replace(
+            "Entertaining Guest", "Unknown Arrival")
+        self.assertEqual(parse_novel_buddy_candidates(
+            BeautifulSoup(previous, "html.parser"), self.source.url), [])
+        self.assertEqual(parse_novel_buddy_candidates(
+            BeautifulSoup(unknown, "html.parser"), self.source.url,
+            3190, "Freedom of Choice", None, None), [])
+        reports = parse_novel_buddy_candidates(
+            BeautifulSoup(previous, "html.parser"), self.source.url,
+            3190, "Freedom of Choice", 3189, "Entertaining Guest")
+        self.assertEqual([report.chapter for report in reports], [3189])
+        self.assertTrue(all(isinstance(report.chapter, int) for report in reports))
+
+    def test_title_only_target_uses_source_specific_page_confirmation(self) -> None:
+        listing = '''<section><h3><span>Newest</span></h3><ul>
+          <li><a href="/shadow-slave/chapter-freedom-of-choice">Chapter Freedom of Choice</a></li>
+          <li><a href="/shadow-slave/chapter-entertaining-guest">Chapter Entertaining Guest</a></li>
+          <li><a href="/shadow-slave/chapter-3188-lost-soul">Chapter 3188 Lost Soul</a></li>
+        </ul></section>'''
+        detail = '<h1>Shadow Slave - Chapter Freedom of Choice</h1><h2>Shadow Slave</h2>'
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, detail]):
+            report = check_public_site(
+                self.source, None, 3190, "Freedom of Choice", 3189, "Entertaining Guest")
+        self.assertEqual((report.chapter, report.title), (3190, "Freedom of Choice"))
+
+        invalid_details = (
+            '<h1>Shadow Slave - Chapter Wrong Title</h1>',
+            '<h1>Shadow Slave - Chapter 3189 Wrong</h1>',
+            '<h1>Freedom of Choice</h1>',
+            '<h2>Shadow Slave</h2>',
+            ('<h1>Shadow Slave - Chapter Freedom of Choice</h1>'
+             '<h1>Shadow Slave - Chapter Wrong Title</h1>'),
+        )
+        for invalid in invalid_details:
+            with self.subTest(detail=invalid), \
+                 patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, invalid]), \
+                 self.assertRaisesRegex(ParseError, "chapter_page_confirmation_failed"):
+                check_public_site(
+                    self.source, None, 3190, "Freedom of Choice", 3189, "Entertaining Guest")
 
 
 class NovelFireParserTests(unittest.TestCase):
@@ -1239,7 +1283,7 @@ class LightNovelUpParserTests(unittest.TestCase):
         with patch.object(parsers, "LIGHTNOVELUP_MAX_TRAVERSAL", 1), \
              patch("shadow_slave_monitor.parsers.fetch_html",
                    return_value=self.page(3173, "Life Goes On", self.chapter_3174)), \
-             self.assertRaisesRegex(ParseError, "traversal limit"):
+             self.assertRaisesRegex(ParseError, "traversal_limit"):
             check_lightnovelup(self.source)
 
     def test_canonical_url_examples_and_malformed_urls(self) -> None:
