@@ -1326,6 +1326,23 @@ class LightNovelUpParserTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=ambiguous), self.assertRaises(ParseError):
             check_lightnovelup(self.source)
 
+    def test_unrelated_next_control_does_not_poison_canonical_navigation(self) -> None:
+        html = self.page(3173, "Life Goes On", self.chapter_3174).replace(
+            "</body>", '<nav class="pagination"><a href="?page=2">Next</a></nav></body>')
+        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[
+            html,
+            self.page(3174, "Tatal’s Basilisk"),
+        ]):
+            report = check_lightnovelup(self.source)
+        self.assertEqual((report.chapter, report.url), (3174, self.chapter_3174))
+
+    def test_only_unrelated_next_control_fails_closed(self) -> None:
+        html = self.page(3173, "Life Goes On").replace(
+            "</body>", '<nav class="pagination"><a href="?page=2">Next</a></nav></body>')
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html), \
+             self.assertRaisesRegex(ParseError, "next_link_noncanonical"):
+            check_lightnovelup(self.source)
+
     def test_cycle_and_traversal_limit_fail_closed(self) -> None:
         from shadow_slave_monitor import parsers
         with patch.object(parsers, "LIGHTNOVELUP_MAX_TRAVERSAL", 1), \
