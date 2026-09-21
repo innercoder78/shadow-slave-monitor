@@ -955,9 +955,14 @@ def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport,
         destinations: dict[tuple[int, str], ChapterReport] = {}
         for marker in next_markers:
             validated = lightnovelup_candidate_from_href(marker.get("href"), candidate.url)
-            if not validated:
-                raise ParseError("next_link_noncanonical")
-            destinations[(validated.chapter, validated.url)] = validated
+            if validated:
+                destinations[(validated.chapter, validated.url)] = validated
+        # The page can contain unrelated pagination controls also labelled
+        # "Next".  They must not override an unambiguous, canonical chapter
+        # navigation link, but a page containing only such controls is still
+        # malformed rather than evidence that this is the latest chapter.
+        if not destinations:
+            raise ParseError("next_link_noncanonical")
         if len(destinations) != 1:
             raise ParseError("next_link_ambiguous")
         next_candidate = next(iter(destinations.values()))
