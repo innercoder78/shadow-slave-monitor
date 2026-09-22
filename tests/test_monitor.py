@@ -158,7 +158,7 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
         self.assertEqual(failures, {"Failed": 1})
         self.assertIn("Failed consecutive public-source failures for current watch cycle: 1/4", output)
 
-    def test_source_is_suppressed_after_four_monitor_runs_and_skip_is_not_degraded(self) -> None:
+    def test_source_is_suppressed_after_four_monitor_runs_and_skip_is_degraded(self) -> None:
         failed = SourceConfig("Failed", "https://failed.example", True, ("failed.example",))
         good = SourceConfig("Good", "https://good.example", True, ("good.example",))
         report = ChapterReport("Good", 10, None, "https://good.example/chapter-10")
@@ -183,8 +183,24 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
                 self.assertEqual(monitor.check_public_sites(result, failures), [report])
 
         self.assertEqual(calls, {"Failed": 4, "Good": 5})
-        self.assertFalse(result.degraded_reasons)
+        self.assertEqual(result.degraded_reasons, ["optional public sources temporarily suppressed: Failed"])
         self.assertIn("temporarily suppressed", "\n".join(logs.output))
+
+    def test_multiple_suppressed_sources_degrade_in_configured_order(self) -> None:
+        first = SourceConfig("First", "https://first.example", True, ("first.example",))
+        healthy = SourceConfig("Healthy", "https://healthy.example", True, ("healthy.example",))
+        second = SourceConfig("Second", "https://second.example", True, ("second.example",))
+        report = ChapterReport("Healthy", 10, None, "https://healthy.example/chapter-10")
+        failures = {"Second": 4, "First": 4}
+        result = monitor.RunResult()
+        with patch.object(monitor, "PUBLIC_SITES", (first, healthy, second)), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=False), \
+             patch.object(monitor, "check_public_site", return_value=report) as check:
+            self.assertEqual(monitor.check_public_sites(result, failures), [report])
+        check.assert_called_once_with(healthy)
+        self.assertEqual(result.degraded_reasons, [
+            "optional public sources temporarily suppressed: First, Second",
+        ])
 
     def test_success_resets_failures_and_next_failure_starts_at_one(self) -> None:
         source = SourceConfig("Source", "https://source.example", True, ("source.example",))

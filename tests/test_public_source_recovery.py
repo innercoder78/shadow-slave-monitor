@@ -275,6 +275,24 @@ class RecoveryProbeTests(unittest.TestCase):
             self.assertEqual(monitor.check_public_sites(RunResult(), failures), [])
         self.assertEqual(failures, {"Source": 4})
 
+    def test_failed_recovery_probe_degrades_once_and_remains_capped(self) -> None:
+        healthy = SourceConfig("Healthy", "https://healthy.example", True, ("healthy.example",))
+        report = ChapterReport("Healthy", 3189, None, "https://healthy.example/chapter-3189")
+        failures = {"Source": 4}
+
+        def check(site: SourceConfig) -> ChapterReport:
+            if site is self.source:
+                raise RuntimeError("blocked")
+            return report
+
+        result = RunResult()
+        with patch.object(monitor, "PUBLIC_SITES", (self.source, healthy)), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=True), \
+             patch.object(monitor, "check_public_site", side_effect=check):
+            self.assertEqual(monitor.check_public_sites(result, failures), [report])
+        self.assertEqual(failures, {"Source": 4})
+        self.assertEqual(result.degraded_reasons, ["optional public sources failed: Source"])
+
     def test_suppressed_skip_does_not_mutate_failures(self) -> None:
         failures = {"Source": 4}
         with patch.object(monitor, "PUBLIC_SITES", (self.source,)), \
