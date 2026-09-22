@@ -1340,8 +1340,33 @@ class LightNovelUpParserTests(unittest.TestCase):
         html = self.page(3173, "Life Goes On").replace(
             "</body>", '<nav class="pagination"><a href="?page=2">Next</a></nav></body>')
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html), \
-             self.assertRaisesRegex(ParseError, "next_link_noncanonical"):
+             self.assertRaisesRegex(
+                 ParseError,
+                 r"next_link_noncanonical\[categories=query_fragment_or_params=1;count=1\]",
+             ):
             check_lightnovelup(self.source)
+
+    def test_rejected_next_diagnostics_are_bounded_and_sanitized(self) -> None:
+        rejected = (
+            "http://lightnovelup.com/novel/shadow-slave/chapter-3174-title/",
+            "https://user:secret@lightnovelup.com/novel/shadow-slave/chapter-3174-title/",
+            "/novel/shadow-slave/chapter-3174/",
+            "/novel/shadow-slave/chapter-future-title/",
+            "/novel/shadow-slave/chapter-%33%31%37%34-secret/",
+        )
+        links = "".join(f'<a href="{href}">Next</a>' for href in rejected)
+        html = self.page(3173, "Life Goes On").replace("</body>", links + "</body>")
+        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html), \
+             self.assertRaises(ParseError) as raised:
+            check_lightnovelup(self.source)
+        reason = raised.exception.reason
+        self.assertEqual(
+            reason,
+            "next_link_noncanonical[categories=encoded_path=1,numeric_only_chapter_path=1,"
+            "title_only_chapter_path=1,unexpected_authority=1,unexpected_scheme=1;count=5]",
+        )
+        for unsafe in ("secret", "future-title", "%33", "user:", "http://"):
+            self.assertNotIn(unsafe, reason)
 
     def test_cycle_and_traversal_limit_fail_closed(self) -> None:
         from shadow_slave_monitor import parsers

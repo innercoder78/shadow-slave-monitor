@@ -85,9 +85,11 @@ def check_public_sites(
         if not site.enabled:
             logging.info("Skipping disabled public site: %s.", site.name)
     eligible = []
+    suppressed: list[str] = []
     recovery_window = public_source_recovery_window_open()
     for site in enabled:
         if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT and not recovery_window:
+            suppressed.append(site.name)
             logging.info(
                 "Skipping %s because it is temporarily suppressed after consecutive failures; periodic recovery probes remain enabled.",
                 site.name,
@@ -159,6 +161,8 @@ def check_public_sites(
                 )
     if failures and reports:
         result.degrade("optional public sources failed: " + ", ".join(sorted(failures)))
+    if suppressed and reports:
+        result.degrade("optional public sources temporarily suppressed: " + ", ".join(suppressed))
     if not reports:
         result.fail("every enabled public source failed or produced no trustworthy result")
     reports.sort(key=lambda r: PUBLIC_SITE_ORDER.get(r.source, 999))

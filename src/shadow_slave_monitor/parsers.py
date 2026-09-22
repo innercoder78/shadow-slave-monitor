@@ -928,6 +928,39 @@ def lightnovelup_candidate_from_href(href: Any, base_url: str) -> ChapterReport 
     )
 
 
+def _lightnovelup_rejected_href_category(href: Any, base_url: str) -> str:
+    """Describe a rejected navigation href using only bounded, safe categories."""
+    if not isinstance(href, str) or not href:
+        return "unsafe_or_malformed"
+    if "%" in href:
+        return "encoded_path"
+    try:
+        parsed = urlparse(urljoin(base_url, href))
+        hostname = (parsed.hostname or "").casefold()
+    except (TypeError, ValueError):
+        return "unsafe_or_malformed"
+    if parsed.scheme != "https":
+        return "unexpected_scheme"
+    if (hostname not in {"lightnovelup.com", "www.lightnovelup.com"}
+            or parsed.netloc.casefold() != hostname):
+        return "unexpected_authority"
+    if parsed.params or parsed.query or parsed.fragment:
+        return "query_fragment_or_params"
+
+    path = parsed.path.casefold()
+    prefix = "/novel/shadow-slave/"
+    if not path.startswith(prefix):
+        return "unrelated_path"
+    chapter_path = path[len(prefix):].strip("/")
+    if re.fullmatch(r"chapter-\d{1,5}", chapter_path):
+        return "numeric_only_chapter_path"
+    if re.fullmatch(r"chapter-[a-z0-9]+(?:-[a-z0-9]+)*", chapter_path):
+        return "title_only_chapter_path"
+    if chapter_path.startswith("chapter-"):
+        return "malformed_chapter_path"
+    return "recognized_series_nonchapter_path"
+
+
 def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport, ChapterReport | None]:
     """Validate one chapter page and its site-provided canonical Next link."""
     candidate = lightnovelup_candidate_from_href(url, url)
@@ -962,7 +995,12 @@ def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport,
         # navigation link, but a page containing only such controls is still
         # malformed rather than evidence that this is the latest chapter.
         if not destinations:
-            raise ParseError("next_link_noncanonical")
+            categories: dict[str, int] = {}
+            for marker in next_markers:
+                category = _lightnovelup_rejected_href_category(marker.get("href"), candidate.url)
+                categories[category] = categories.get(category, 0) + 1
+            summary = ",".join(f"{category}={categories[category]}" for category in sorted(categories))
+            raise ParseError(f"next_link_noncanonical[categories={summary};count={len(next_markers)}]")
         if len(destinations) != 1:
             raise ParseError("next_link_ambiguous")
         next_candidate = next(iter(destinations.values()))
