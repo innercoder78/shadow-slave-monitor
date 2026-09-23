@@ -10,13 +10,13 @@
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {
-    "Chikari": 2,
-    "LightNovelUp": 2,
-    "Novel Live": 2,
-    "Novel Phoenix": 2,
-    "NovelArrow": 2,
-    "NovelFire": 2,
-    "Readwn": 2
+    "Chikari": 3,
+    "LightNovelUp": 3,
+    "Novel Live": 3,
+    "Novel Phoenix": 3,
+    "NovelArrow": 3,
+    "NovelFire": 3,
+    "Readwn": 3
   },
   "public_source_failure_revision": 5,
   "source_positions": {
@@ -25,5 +25,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-23T16:10:19+00:00"
+  "updated_at": "2026-09-23T16:15:25+00:00"
 }
