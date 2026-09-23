@@ -2,12 +2,12 @@
   "latest_seen": 3193,
   "latest_title": "Regret Can",
   "latest_url": "https://telegra.ph/3193-Regret-Can-09-22",
-  "latest_webnovel": 3193,
-  "latest_webnovel_title": "Regret Can",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3194,
+  "latest_webnovel_title": "Fellow Wanderer",
+  "mode": "watch_free_sites",
+  "target_chapter": 3194,
+  "target_title": "Fellow Wanderer",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-22T17:00:29+00:00"
+  "updated_at": "2026-09-23T16:00:22+00:00"
 }
