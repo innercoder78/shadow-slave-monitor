@@ -2,12 +2,12 @@
   "latest_seen": 3194,
   "latest_title": "Fellow Wanderer",
   "latest_url": "https://telegra.ph/3194-Fellow-Wanderer-09-23",
-  "latest_webnovel": 3194,
-  "latest_webnovel_title": "Fellow Wanderer",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3195,
+  "latest_webnovel_title": "Young Hero",
+  "mode": "watch_free_sites",
+  "target_chapter": 3195,
+  "target_title": "Young Hero",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-23T16:30:27+00:00"
+  "updated_at": "2026-09-24T16:00:30+00:00"
 }
