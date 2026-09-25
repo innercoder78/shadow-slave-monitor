@@ -9,7 +9,15 @@
   "target_title": "Twisting Roads",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Chikari": 1,
+    "LightNovelUp": 1,
+    "Novel Live": 1,
+    "Novel Phoenix": 1,
+    "NovelArrow": 1,
+    "NovelFire": 1,
+    "Readwn": 1
+  },
   "public_source_failure_revision": 5,
   "source_positions": {
     "LightNovelUp": {
@@ -17,5 +25,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-25T16:00:23+00:00"
+  "updated_at": "2026-09-25T16:05:16+00:00"
 }
