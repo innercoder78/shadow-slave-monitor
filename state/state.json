@@ -1,23 +1,15 @@
 {
-  "latest_seen": 3195,
-  "latest_title": "Young Hero",
-  "latest_url": "https://telegra.ph/3195-Young-Hero-09-24",
+  "latest_seen": 3196,
+  "latest_title": "Twisting Roads",
+  "latest_url": "https://telegra.ph/3196-Twisting-Roads-09-25",
   "latest_webnovel": 3196,
   "latest_webnovel_title": "Twisting Roads",
-  "mode": "watch_free_sites",
-  "target_chapter": 3196,
-  "target_title": "Twisting Roads",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "LightNovelUp": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 5,
   "source_positions": {
     "LightNovelUp": {
@@ -25,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-25T16:20:20+00:00"
+  "updated_at": "2026-09-25T16:25:18+00:00"
 }
