@@ -1,23 +1,15 @@
 {
-  "latest_seen": 3197,
-  "latest_title": "Beauty of Life",
-  "latest_url": "https://telegra.ph/3197-Beauty-of-Life-09-26",
+  "latest_seen": 3198,
+  "latest_title": "Secret Technique",
+  "latest_url": "https://telegra.ph/3198-Secret-Technique-09-27",
   "latest_webnovel": 3198,
   "latest_webnovel_title": "Secret Technique",
-  "mode": "watch_free_sites",
-  "target_chapter": 3198,
-  "target_title": "Secret Technique",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "LightNovelUp": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 5,
   "source_positions": {
     "LightNovelUp": {
@@ -25,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-27T16:20:20+00:00"
+  "updated_at": "2026-09-27T16:55:19+00:00"
 }
