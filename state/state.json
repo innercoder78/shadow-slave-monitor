@@ -2,12 +2,12 @@
   "latest_seen": 3200,
   "latest_title": "Human City",
   "latest_url": "https://telegra.ph/3200-Human-City-09-29",
-  "latest_webnovel": 3200,
-  "latest_webnovel_title": "Human City",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3201,
+  "latest_webnovel_title": "A Land Without Monsters",
+  "mode": "watch_free_sites",
+  "target_chapter": 3201,
+  "target_title": "A Land Without Monsters",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-29T16:25:22+00:00"
+  "updated_at": "2026-09-30T14:40:23+00:00"
 }
