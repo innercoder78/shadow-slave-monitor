@@ -2,12 +2,12 @@
   "latest_seen": 3201,
   "latest_title": "A Land Without Monsters",
   "latest_url": "https://telegra.ph/3201-A-Land-Without-Monsters-09-30",
-  "latest_webnovel": 3201,
-  "latest_webnovel_title": "A Land Without Monsters",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3202,
+  "latest_webnovel_title": "Conflict of Interests",
+  "mode": "watch_free_sites",
+  "target_chapter": 3202,
+  "target_title": "Conflict of Interests",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-09-30T15:45:20+00:00"
+  "updated_at": "2026-10-01T16:00:24+00:00"
 }
