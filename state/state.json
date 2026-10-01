@@ -1,23 +1,15 @@
 {
-  "latest_seen": 3201,
-  "latest_title": "A Land Without Monsters",
-  "latest_url": "https://telegra.ph/3201-A-Land-Without-Monsters-09-30",
+  "latest_seen": 3202,
+  "latest_title": "Conflict of Interests",
+  "latest_url": "https://telegra.ph/3202-Conflict-of-Interests-10-01",
   "latest_webnovel": 3202,
   "latest_webnovel_title": "Conflict of Interests",
-  "mode": "watch_free_sites",
-  "target_chapter": 3202,
-  "target_title": "Conflict of Interests",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "LightNovelUp": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 5,
   "source_positions": {
     "LightNovelUp": {
@@ -25,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-01T16:20:20+00:00"
+  "updated_at": "2026-10-01T17:35:18+00:00"
 }
