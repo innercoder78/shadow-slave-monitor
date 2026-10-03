@@ -1,23 +1,15 @@
 {
-  "latest_seen": 3203,
-  "latest_title": "Ultima Ratio Regum",
-  "latest_url": "https://telegra.ph/3203-Ultima-Ratio-Regum-10-02",
+  "latest_seen": 3204,
+  "latest_title": "Hidden Menace",
+  "latest_url": "https://telegra.ph/3204-Hidden-Menace-10-03",
   "latest_webnovel": 3204,
   "latest_webnovel_title": "Hidden Menace",
-  "mode": "watch_free_sites",
-  "target_chapter": 3204,
-  "target_title": "Hidden Menace",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "LightNovelUp": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 5,
   "source_positions": {
     "LightNovelUp": {
@@ -25,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-03T16:20:18+00:00"
+  "updated_at": "2026-10-03T17:20:20+00:00"
 }
