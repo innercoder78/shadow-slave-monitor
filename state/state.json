@@ -2,12 +2,12 @@
   "latest_seen": 3203,
   "latest_title": "Ultima Ratio Regum",
   "latest_url": "https://telegra.ph/3203-Ultima-Ratio-Regum-10-02",
-  "latest_webnovel": 3203,
-  "latest_webnovel_title": "Ultima Ratio Regum",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3204,
+  "latest_webnovel_title": "Hidden Menace",
+  "mode": "watch_free_sites",
+  "target_chapter": 3204,
+  "target_title": "Hidden Menace",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-02T18:05:22+00:00"
+  "updated_at": "2026-10-03T16:00:24+00:00"
 }
