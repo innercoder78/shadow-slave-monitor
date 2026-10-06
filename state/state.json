@@ -1,23 +1,15 @@
 {
-  "latest_seen": 3206,
-  "latest_title": "Bad Weather",
-  "latest_url": "https://telegra.ph/3206-Bad-Weather-10-06",
+  "latest_seen": 3207,
+  "latest_title": "The Apocalypse Happened Yesterday",
+  "latest_url": "https://telegra.ph/3207-The-Apocalypse-Happened-Yesterday-10-06",
   "latest_webnovel": 3207,
   "latest_webnovel_title": "The Apocalypse Happened Yesterday",
-  "mode": "watch_free_sites",
-  "target_chapter": 3207,
-  "target_title": "The Apocalypse Happened Yesterday",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Chikari": 4,
-    "LightNovelUp": 4,
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 5,
   "source_positions": {
     "LightNovelUp": {
@@ -25,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-06T21:05:20+00:00"
+  "updated_at": "2026-10-06T21:25:21+00:00"
 }
