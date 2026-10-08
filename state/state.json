@@ -2,12 +2,12 @@
   "latest_seen": 3208,
   "latest_title": "Out of the Frying Pan",
   "latest_url": "https://telegra.ph/3208-Out-of-the-Frying-Pan-10-08",
-  "latest_webnovel": 3208,
-  "latest_webnovel_title": "Out of the Frying Pan",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3209,
+  "latest_webnovel_title": "Merry Men",
+  "mode": "watch_free_sites",
+  "target_chapter": 3209,
+  "target_title": "Merry Men",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-08T02:15:18+00:00"
+  "updated_at": "2026-10-08T21:00:26+00:00"
 }
