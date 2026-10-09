@@ -2113,6 +2113,80 @@ def _confirm_novelarrow_chapter_page(
     return expected_title
 
 
+def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
+    """Recheck chapter link syntax for logging without changing accepted reports."""
+    url = report.url
+    if (not isinstance(url, str) or len(url) > 2048
+            or not re.fullmatch(r"https://[a-zA-Z0-9.-]+/[a-zA-Z0-9/_.-]+", url)):
+        return None
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").casefold()
+    hosts = {item.casefold() for item in site.allowed_hosts}
+    if site.name == "Telegram":
+        hosts |= {"telegra.ph", "www.telegra.ph"}
+    if host not in hosts or parsed.netloc.casefold() != host:
+        return None
+    if site.name == "Chikari":
+        candidate = chikari_candidate_from_href(url, site.url)
+    elif site.name == "LightNovelUp":
+        candidate = lightnovelup_candidate_from_href(url, site.url)
+    elif site.name == "Telegram":
+        candidate = parse_telegram_telegra_link(url)
+    elif site.name == "NovelArrow":
+        path = novelarrow_chapter_path(url, site.url)
+        return url if path and path[0] == report.chapter else None
+    else:
+        soup = BeautifulSoup("", "html.parser")
+        anchor = soup.new_tag("a", href=url)
+        anchor.string = f"Chapter {report.chapter} {report.title or ''}"
+        validators = {
+            "Novel Buddy": novel_buddy_candidate_from_anchor,
+            "ShadowSlave.Space": shadowslave_space_candidate_from_anchor,
+            "FreeWebNovel": freewebnovel_candidate_from_anchor,
+            "Novel Phoenix": novel_phoenix_candidate_from_anchor,
+            "NovelFire": novelfire_candidate_from_anchor,
+            "NovelFull": novelfull_candidate_from_anchor,
+            "Novel Live": novel_live_candidate_from_anchor,
+            "Readwn": readwn_candidate_from_anchor,
+            "ReadNovelFull": readnovelfull_candidate_from_anchor,
+            "FreeWebNovel.net": freewebnovel_net_candidate_from_anchor,
+        }
+        if site.name == "ReChapters":
+            return rechapters_candidate_url(anchor, site.url)
+        validator = validators.get(site.name)
+        candidate = validator(anchor, site.url) if validator else None
+        if site.name == "NovelFire" and parse_chapter_from_href(url) != report.chapter:
+            return None
+        if candidate is None and site.name in {"NovelFull", "ReadNovelFull", "FreeWebNovel.net"}:
+            anchor.string = f"Chapter {report.title or ''}"
+            title_link = _title_slug_candidate(anchor, site.url, hosts)
+            return url if title_link else None
+        if candidate is None and site.name == "Novel Buddy":
+            anchor.string = f"Chapter {report.title or ''}"
+            title_link = _novel_buddy_title_candidate(anchor, site.url)
+            return url if title_link else None
+    return url if candidate and candidate.chapter == report.chapter else None
+
+
+def _log_public_success(site: SourceConfig, report: ChapterReport) -> None:
+    """Log only a bounded chapter title and independently checked canonical URL."""
+    title = report.title
+    if isinstance(title, str):
+        # Inspect both original and control-free text before truncation/redaction.
+        control_free = "".join(ch for ch in title if unicodedata.category(ch) not in {"Cc", "Cf"})
+        if re.search(r"https?://|www\.|\b(?:authorization|cookie|password|passwd|token|api[_ -]?key|secret)"
+                     r"\s*[:=]|\bbearer\s+\S+|[^\s@]+@[^\s@]+", title + " " + control_free, re.IGNORECASE):
+            title = "(title omitted)"
+        else:
+            title = clean_title("".join(" " if unicodedata.category(ch) in {"Cc", "Cf"} else ch
+                                       for ch in title))
+    else:
+        title = None
+    url = _safe_success_url(site, report)
+    logging.info("%s reports chapter %s: %s (%s)", site.name, report.chapter,
+                 title or "(no title)", url or "URL omitted")
+
+
 @_with_response_diagnostics
 def check_public_site(
     site: SourceConfig, source_position: dict[str, Any] | None = None,
@@ -2122,7 +2196,7 @@ def check_public_site(
     logging.info("Checking %s.", site.name)
     if site.name == "LightNovelUp":
         report = check_lightnovelup(site, source_position)
-        logging.info("%s reports chapter %s.", report.source, report.chapter)
+        _log_public_success(site, report)
         return report
     soup = BeautifulSoup(_fetch_source_html(site), "html.parser")
     raw_candidates = iter_public_candidates(soup, site.url, site.name, expected_chapter, expected_title,
@@ -2190,7 +2264,5 @@ def check_public_site(
                 safe_exception_category(exc),
                 type(exc).__name__,
             )
-    logging.info(
-        "%s reports chapter %s.", report.source, report.chapter,
-    )
+    _log_public_success(site, report)
     return report

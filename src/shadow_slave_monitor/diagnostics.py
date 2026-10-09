@@ -113,7 +113,11 @@ def parser_code(reason: str) -> str:
 
 def diagnostic_summary(source: SourceConfig, exc: BaseException) -> str:
     """Render allowlisted fields only; exception text and page attributes stay private."""
-    reason, stage, code = "unclassified_failure", "parse", "PARSE_OTHER"
+    # Resolve exception classes at call time to avoid the parser/HTTP import cycle.
+    from shadow_slave_monitor.http_client import HttpFetchError
+    from shadow_slave_monitor.parsers import ParseError
+
+    reason, stage, code = "unexpected_internal_error", "internal", "CHECK_INTERNAL_ERROR"
     status = None
     if isinstance(exc, requests.Timeout):
         code, stage, reason = "NETWORK_TIMEOUT", "network", "timeout"
@@ -126,11 +130,12 @@ def diagnostic_summary(source: SourceConfig, exc: BaseException) -> str:
         stage, reason = "http", "http_access_denied" if status == 403 else "http_status_failure"
     elif isinstance(exc, requests.RequestException):
         code, stage, reason = "NETWORK_REQUEST_ERROR", "network", "request_error"
-    elif isinstance(getattr(exc, "reason", None), str) and exc.reason in HTTP_POLICY_CODES:
-        reason = exc.reason
-        code, stage = HTTP_POLICY_CODES[reason], "response"
-    else:
-        raw_reason = getattr(exc, "reason", "")
+    elif isinstance(exc, HttpFetchError):
+        reason = exc.reason if exc.reason in HTTP_POLICY_CODES else "http_policy_error"
+        code, stage = HTTP_POLICY_CODES.get(reason, "HTTP_POLICY_ERROR"), "response"
+    elif isinstance(exc, ParseError):
+        reason, stage = "unclassified_failure", "parse"
+        raw_reason = exc.reason
         if isinstance(raw_reason, str):
             code = parser_code(raw_reason)
             if raw_reason in PARSE_CODES:

@@ -163,6 +163,38 @@ class DiagnosticCodeTests(unittest.TestCase):
             self.assertIn('code=PARSE_OTHER', summary)
             self.assert_safe(summary)
 
+    def test_unexpected_exception_types_are_internal_without_leaking_text(self):
+        for error_type in (RuntimeError, AttributeError, KeyError, TypeError):
+            error = error_type('private body secret https://example.com/?token=secret\ntraceback')
+            with self.subTest(error_type=error_type):
+                summary = diagnostic_summary(self.source, error)
+                self.assertIn('code=CHECK_INTERNAL_ERROR stage=internal', summary)
+                self.assertNotIn('PARSE_OTHER', summary)
+                self.assertNotIn('traceback', summary)
+                self.assert_safe(summary)
+
+    def test_reason_attributes_cannot_disguise_an_internal_error(self):
+        for reason in ('chapter_heading_conflict', 'unexpected_content_type',
+                       'next_link_noncanonical[categories=private secret]',
+                       'Could not find any chapter links on private secret.'):
+            error = RuntimeError('private secret')
+            error.reason = reason
+            error.challenge = True
+            error.code = 'PAGE_CHALLENGE_SUSPECTED'
+            with self.subTest(reason=reason):
+                summary = diagnostic_summary(self.source, error)
+                self.assertIn('code=CHECK_INTERNAL_ERROR stage=internal', summary)
+                self.assertNotIn('CHALLENGE', summary)
+                self.assert_safe(summary)
+
+    def test_unknown_parse_error_stays_parse_other_with_response_metadata(self):
+        error = ParseError('unknown private secret parser reason')
+        error.status, error.host, error.attempts = 200, 'example.com', 1
+        summary = diagnostic_summary(self.source, error)
+        self.assertIn('code=PARSE_OTHER stage=parse status=200 host=example.com attempts=1', summary)
+        self.assertNotIn('CHECK_INTERNAL_ERROR', summary)
+        self.assert_safe(summary)
+
     def test_allowlisted_and_bounded_fields(self):
         error = ParseError('unknown private exception', counters={
             'links_inspected': 10**10, 'next_links': -10, 'private_token_secret': 9000,
@@ -353,6 +385,31 @@ class ParserDiagnosticTests(unittest.TestCase):
         self.assertEqual(error.counters['series_path_links'], 9999)
         self.assertLess(len(diagnostic_summary(self.source, error)), 600)
 
+    def test_internal_source_error_is_contained_with_accurate_metadata(self):
+        good = SourceConfig('Good', 'https://good.example', True, ('good.example',))
+        good_report = ChapterReport('Good', 3173, None, 'https://good.example/chapter-3173')
+        real_check = check_public_site
+        def check(site):
+            return real_check(site) if site.name == self.source.name else good_report
+        def candidates(*args):
+            raise AttributeError('private body secret https://example.com/?token=secret')
+        failures = {}
+        result = RunResult()
+        with patch.object(monitor, 'PUBLIC_SITES', (self.source, good)), \
+             patch.object(monitor, 'check_public_site', side_effect=check), \
+             patch.object(monitor, 'public_source_recovery_window_open', return_value=False), \
+             patch.object(parsers, 'fetch_html', return_value=HtmlDocument('<p>private body</p>',
+                               ResponseMetadata(200, 'chikari.moe', 1))), \
+             patch.object(parsers, 'iter_public_candidates', side_effect=candidates), self.assertLogs(level='WARNING') as captured:
+            self.assertEqual(monitor.check_public_sites(result, failures), [good_report])
+        self.assertEqual(result.status, Health.DEGRADED)
+        self.assertEqual(failures, {'Chikari': 1})
+        output = '\n'.join(captured.output)
+        self.assertIn('code=CHECK_INTERNAL_ERROR stage=internal status=200 host=chikari.moe attempts=1', output)
+        self.assertEqual(output.count('Source check failed:'), 1)
+        for forbidden in ('private', 'secret', 'token=', 'https://'):
+            self.assertNotIn(forbidden, output)
+
     def test_one_failure_summary_does_not_stop_usable_sources(self):
         good = SourceConfig('Good', 'https://good.example', True, ('good.example',))
         result = RunResult()
@@ -412,9 +469,9 @@ class ManualDiagnosticTests(unittest.TestCase):
         self.assertNotIn('secret', output)
         self.assertNotIn('private', output)
 
-    def test_manual_full_success_does_not_leak_untrusted_report_fields(self):
+    def test_manual_full_success_logs_only_safe_chapter_fields(self):
         html = ('<section><h2>Latest chapters</h2>'
-                '<a href="/shadow-slave/chapter-3174.html">Chapter 3174: private title secret</a></section>')
+                '<a href="/shadow-slave/chapter-3174.html">Chapter 3174: New Horizon</a></section><p>private body token=secret</p>')
         result = response(200, html, url='https://novelfull.com/shadow-slave.html')
         with patch('requests.Session.get', return_value=result), \
              patch('shadow_slave_monitor.notifications.send_new_chapter') as notify, \
@@ -425,7 +482,9 @@ class ManualDiagnosticTests(unittest.TestCase):
         self.assert_unchanged()
         summary = '\n'.join(captured.output)
         self.assertIn('code=SOURCE_OK', summary)
-        for forbidden in ('private', 'secret', 'https://', '/shadow-slave/'):
+        self.assertIn('New Horizon', summary)
+        self.assertIn('https://novelfull.com/shadow-slave/chapter-3174.html', summary)
+        for forbidden in ('private', 'secret', 'token='):
             self.assertNotIn(forbidden, summary)
 
     def test_manual_real_parser_with_mocked_network_never_writes_or_notifies(self):
@@ -442,13 +501,31 @@ class ManualDiagnosticTests(unittest.TestCase):
         self.assertIn('code=PAGE_CHALLENGE_SUSPECTED', '\n'.join(captured.output))
 
     def test_expected_source_failures_are_successful_workflow_outcomes(self):
-        for error in (ParseError('chapter_heading_conflict'), HttpFetchError('redirect_limit'),
+        for error in (ParseError('chapter_heading_conflict'), ParseError('unknown private secret reason'),
+                      HttpFetchError('redirect_limit'),
                       requests.Timeout('private secret'), requests.HTTPError('private secret')):
             with self.subTest(error=type(error).__name__), patch.object(diagnose_source, 'check_public_site', side_effect=error), \
                  self.assertLogs(level='WARNING') as captured:
                 self.assertEqual(diagnose_source.diagnose_source('Chikari', state_path=self.path), 0)
             self.assertNotIn('secret', '\n'.join(captured.output))
             self.assert_unchanged()
+
+    def test_manual_internal_errors_fail_without_notifications_or_state_changes(self):
+        for error_type in (RuntimeError, AttributeError, KeyError, TypeError):
+            with self.subTest(error_type=error_type), \
+                 patch.object(diagnose_source, 'check_public_site', side_effect=error_type('private secret traceback')), \
+                 patch('shadow_slave_monitor.notifications.send_new_chapter') as notify, \
+                 patch.object(state_manager, 'save_state') as save, \
+                 patch.object(state_manager, 'atomic_write_json') as write, self.assertLogs(level='ERROR') as captured:
+                self.assertEqual(diagnose_source.diagnose_source('Chikari', state_path=self.path), 2)
+            notify.assert_not_called()
+            save.assert_not_called()
+            write.assert_not_called()
+            self.assert_unchanged()
+            output = '\n'.join(captured.output)
+            self.assertIn('code=DIAGNOSTIC_INTERNAL_ERROR stage=internal', output)
+            for forbidden in ('private', 'secret', 'traceback', 'PARSE_OTHER'):
+                self.assertNotIn(forbidden, output)
 
     def test_invalid_names_and_unsafe_input_never_check_network_or_echo_input(self):
         for name in ('', 'chikari', ' Chikari ', 'WebNovel', 'Chikari; touch secret',

@@ -80,12 +80,15 @@ Read the `Diagnostic outcome` line in the check step's logs:
 - `PARSE_NO_CHAPTER_LINKS`, `PARSE_NONCANONICAL_NEXT`, `PARSE_AMBIGUOUS_NEXT`,
   `PARSE_NONMONOTONIC_NEXT`, `PARSE_CHAPTER_MISMATCH`, and `PARSE_CHAPTER_INVALID`
   describe missing trustworthy links, rejected navigation, or chapter validation failures.
-  `PARSE_OTHER` covers other parser failures. A parser error alone does not establish a
-  site redesign or blocking.
+  `PARSE_OTHER` covers unknown reasons from an expected parser failure;
+  `CHECK_INTERNAL_ERROR` identifies an unexpected internal exception. A parser error
+  alone does not establish a site redesign or blocking.
 
 Failure summaries include the stage, actual HTTP status, configured hostname, attempt
 count, and bounded parser counters where available. Counter values saturate at 9999.
-Response bodies, untrusted URLs, page titles, and arbitrary exception text are omitted.
+Failure summaries omit response bodies, untrusted URLs, page titles, and arbitrary
+exception text. Successful source checks include a bounded chapter title and a safe
+canonical chapter URL when one can be independently validated for logging.
 Expected source failures are diagnostic outcomes and leave the workflow successful;
 invalid source names, invalid state, dependency/setup failures, or internal errors fail
 it. This workflow is independent of the scheduled monitor and watchdog.

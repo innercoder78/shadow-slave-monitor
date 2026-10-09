@@ -9,6 +9,7 @@ from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.parsers import (
     ParseError,
+    _log_public_success,
     check_public_site,
     parse_chikari_candidates,
     parse_chikari_chapter_title,
@@ -1097,32 +1098,129 @@ class NovelFullParserTests(unittest.TestCase):
 
 
 class PublicSourceLoggingTests(unittest.TestCase):
-    def test_novelfull_success_log_omits_page_text_and_url(self) -> None:
-        source = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
-        candidate = ChapterReport("", 3144, "The Gathering of Demigods", "https://novelfull.com/shadow-slave/chapter-3144.html")
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
-                patch("shadow_slave_monitor.parsers.iter_public_candidates", return_value=[candidate]), \
-                self.assertLogs(level="INFO") as logs:
-            check_public_site(source)
-        self.assertIn(
-            "NovelFull reports chapter 3144.",
-            "\n".join(logs.output),
-        )
-        self.assertNotIn(candidate.url, "\n".join(logs.output))
-        self.assertNotIn(candidate.title, "\n".join(logs.output))
+    source = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
+    url = "https://novelfull.com/shadow-slave/chapter-3144.html"
 
-    def test_success_log_omits_url_when_title_is_missing(self) -> None:
-        source = SourceConfig("Other Public Source", "https://example.com", True, ("example.com",))
-        candidate = ChapterReport("", 3144, None, "https://example.com/chapter/3144")
+    def checked_log(self, source, candidate):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
-                patch("shadow_slave_monitor.parsers.iter_public_candidates", return_value=[candidate]), \
-                self.assertLogs(level="INFO") as logs:
-            check_public_site(source)
+             patch("shadow_slave_monitor.parsers.iter_public_candidates", return_value=[candidate]), \
+             self.assertLogs(level="INFO") as logs:
+            report = check_public_site(source)
+        self.assertEqual((report.chapter, report.title, report.url),
+                         (candidate.chapter, candidate.title, candidate.url))
+        return "\n".join(logs.output)
+
+    def test_novelfull_success_log_includes_title_and_canonical_url(self) -> None:
+        candidate = ChapterReport("", 3144, "The Gathering of Demigods", self.url)
+        output = self.checked_log(self.source, candidate)
         self.assertIn(
-            "Other Public Source reports chapter 3144.",
-            "\n".join(logs.output),
+            f"NovelFull reports chapter 3144: The Gathering of Demigods ({self.url})", output)
+
+    def test_success_log_includes_canonical_url_when_title_is_missing(self) -> None:
+        candidate = ChapterReport("", 3144, None, self.url)
+        self.assertIn(f"NovelFull reports chapter 3144: (no title) ({self.url})",
+                      self.checked_log(self.source, candidate))
+
+    def test_navigation_success_log_includes_title_and_canonical_url(self) -> None:
+        source = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
+        url = "https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/"
+        report = ChapterReport(source.name, 3173, "Life Goes On", url)
+        with patch("shadow_slave_monitor.parsers.check_lightnovelup", return_value=report), \
+             self.assertLogs(level="INFO") as logs:
+            self.assertEqual(check_public_site(source), report)
+        self.assertIn(f"LightNovelUp reports chapter 3173: Life Goes On ({url})", "\n".join(logs.output))
+
+    def test_success_log_omits_unsafe_urls_without_changing_reports(self) -> None:
+        unsafe = (
+            self.url + "?token=private_secret",
+            self.url + "#private_secret", self.url + ";password=private_secret",
+            self.url.replace("https://", "http://"),
+            self.url.replace("novelfull.com", "user:private_secret@novelfull.com"),
+            self.url.replace("novelfull.com", "novelfull.com:443"),
+            self.url.replace("novelfull.com", "untrusted.example"),
+            self.url.replace("chapter-3144", "chapter-%33%31%34%34"),
+            self.url + "\n::warning::private_secret",
+            self.url + "\tprivate_secret", self.url + "\u202eprivate_secret",
+            "https://novelfull.com/private_secret/chapter-3144.html",
+            "https://novelfull.com/shadow-slave/chapter-3145.html",
+            "https://novelfull.com/shadow-slave/chapter-title-only.html",
+            "https://novelfull.com/" + "x" * 2100,
         )
-        self.assertNotIn(candidate.url, "\n".join(logs.output))
+        for url in unsafe:
+            with self.subTest(url=url):
+                output = self.checked_log(self.source, ChapterReport("", 3144, "A New Day", url))
+                self.assertIn("NovelFull reports chapter 3144: A New Day (URL omitted)", output)
+                self.assertNotIn("https://", output)
+                self.assertNotIn("private_secret", output)
+                self.assertNotIn("::warning::", output)
+
+    def test_success_title_is_bounded_and_control_characters_are_removed(self) -> None:
+        title = "A\nNew\tDay\x1b\u202e " + "x" * 1000
+        output = self.checked_log(self.source, ChapterReport("", 3144, title, self.url))
+        self.assertIn("A New Day", output)
+        self.assertIn(self.url, output)
+        self.assertNotIn("\x1b", output)
+        self.assertNotIn("\u202e", output)
+        success = next(line for line in output.splitlines() if "reports chapter" in line)
+        displayed_title = success.split("3144: ", 1)[1].split(" (https://", 1)[0]
+        self.assertLessEqual(len(displayed_title), 180)
+
+    def test_success_title_omits_urls_and_credentials(self) -> None:
+        titles = (
+            "Authorization: Bearer private_secret", "Cookie=private_secret", "token=private_secret",
+            "password: private_secret", "api_key=private_secret", "secret=private_secret",
+            "Bearer private_secret", "Title https://example.com/?token=private_secret",
+            "user:private_secret@example.com", "Title www.example.com/private_secret",
+            "tok\u202een=private_secret", "pass\x00word: private_secret",
+        )
+        for title in titles:
+            with self.subTest(title=title):
+                output = self.checked_log(self.source, ChapterReport("", 3144, title, self.url))
+                self.assertIn(f"NovelFull reports chapter 3144: (title omitted) ({self.url})", output)
+                self.assertNotIn("private_secret", output)
+                self.assertNotIn("example.com", output)
+
+    def test_safe_title_only_url_is_logged_after_existing_validation(self) -> None:
+        url = "https://novelfull.com/shadow-slave/chapter-a-new-day.html"
+        output = self.checked_log(self.source, ChapterReport("", 3144, "A New Day", url))
+        self.assertIn(f"NovelFull reports chapter 3144: A New Day ({url})", output)
+
+    def test_numbered_url_uses_existing_source_validators(self) -> None:
+        cases = (
+            ("Chikari", "https://chikari.moe/novels/shadow-slave/3144"),
+            ("Telegram", "https://telegra.ph/3144-A-New-Day-01-01"),
+            ("Novel Buddy", "https://novelbuddy.me/shadow-slave/chapter-3144-a-new-day/"),
+            ("ShadowSlave.Space", "https://shadowslave.space/chapters/3144"),
+            ("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave/chapter-3144/"),
+            ("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapter-3144/"),
+            ("NovelArrow", "https://novelarrow.com/chapter/shadow-slave/chapter-3144-a-new-day/"),
+            ("NovelFire", "https://novelfire.net/book/shadow-slave/chapter-3144/"),
+            ("Novel Live", "https://novellive.com/book/shadow-slave/chapter-3144-a-new-day"),
+            ("Readwn", "https://readwn.org/book/shadow-slave/chapter-3144-a-new-day/"),
+            ("ReadNovelFull", "https://readnovelfull.com/shadow-slave/chapter-3144-a-new-day.html"),
+            ("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave/chapter-3144-a-new-day.html"),
+            ("ReChapters", "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4/chapterid1"),
+        )
+        for name, url in cases:
+            source = next(site for site in PUBLIC_SITES if site.name == name)
+            report = ChapterReport(source.name, 3144, "A New Day", url)
+            with self.subTest(name=name), self.assertLogs(level="INFO") as logs:
+                _log_public_success(source, report)
+            self.assertIn(url, "\n".join(logs.output))
+
+    def test_success_catalog_and_unknown_source_urls_are_omitted(self) -> None:
+        cases = (
+            (next(site for site in PUBLIC_SITES if site.name == "NovelFire"),
+             "https://novelfire.net/book/shadow-slave/chapters"),
+            (next(site for site in PUBLIC_SITES if site.name == "SSNovel"), "https://ssnovel.app/private_secret"),
+            (SourceConfig("Other Public Source", "https://example.com", True, ("example.com",)),
+             "https://example.com/chapter/3144"),
+        )
+        for source, url in cases:
+            with self.subTest(name=source.name):
+                output = self.checked_log(source, ChapterReport("", 3144, "A New Day", url))
+                self.assertIn("3144: A New Day (URL omitted)", output)
+                self.assertNotIn(url, output)
 
 
 class TelegramParserTests(unittest.TestCase):
