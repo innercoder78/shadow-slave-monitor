@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from contextvars import ContextVar
 from functools import wraps
 import re
@@ -12,7 +13,7 @@ from urllib.parse import unquote, urljoin, urlparse
 from bs4 import BeautifulSoup
 
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
-from shadow_slave_monitor.http_client import fetch_html, safe_exception_category
+from shadow_slave_monitor.http_client import fetch_html, fetch_json, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, parser_code
 
@@ -402,6 +403,78 @@ def parse_chikari_candidates(soup: BeautifulSoup, base_url: str) -> list[Chapter
                 seen.add(key)
                 candidates.append(candidate)
 
+    return candidates
+
+
+def _chikari_application_shell(soup: BeautifulSoup) -> bool:
+    """Recognize the observed unloaded app, without treating it as chapter evidence."""
+    return bool(
+        soup.select_one("body[data-sveltekit-preload-data]")
+        and any(re.search(r"/_app/immutable/entry/start\.[a-zA-Z0-9_-]+\.js", script.string or "")
+                for script in soup.find_all("script"))
+    )
+
+
+def _unique_json_fields(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def _chikari_json(site: SourceConfig, url: str) -> Any:
+    _response_metadata.set(None)
+    document = fetch_json(site, url)
+    if isinstance(document, HtmlDocument):
+        _response_metadata.set(document.metadata)
+    try:
+        return json.loads(document, object_pairs_hook=_unique_json_fields)
+    except (ValueError, TypeError):
+        raise ParseError("chapter_data_invalid") from None
+
+
+def _chikari_api_candidates(site: SourceConfig) -> list[ChapterReport]:
+    """Use only the public app's series identity and chapter-record endpoints."""
+    identity = _chikari_json(site, "https://chikari.moe/api/series/shadow-slave")
+    if (not isinstance(identity, dict) or identity.get("slug") != "shadow-slave"
+            or identity.get("title") != "Shadow Slave" or identity.get("type") != "oel"):
+        raise ParseError("series_identity_mismatch")
+    data = _chikari_json(site, "https://chikari.moe/api/novels/shadow-slave/chapters")
+    if (not isinstance(data, dict) or not isinstance(data.get("items"), list)
+            or type(data.get("offset")) is not int or data["offset"] != 0
+            or type(data.get("limit")) is not int or data["limit"] != 100):
+        raise ParseError("chapter_data_invalid")
+    # The observed default response is one descending page of at most 100
+    # chapter records. Counts and pagination metadata never establish a chapter.
+    items = data["items"]
+    if not items:
+        raise ParseError("chapter_data_missing")
+    if len(items) > 100:
+        raise ParseError("chapter_data_invalid")
+    candidates: list[ChapterReport] = []
+    seen: set[int] = set()
+    for item in items:
+        if not isinstance(item, dict) or item.get("lang") != "en":
+            raise ParseError("chapter_data_invalid")
+        number = item.get("number")
+        # The API serializes chapter numbers as integral floats (e.g. 3210.0).
+        if type(number) is float and number.is_integer():
+            number = int(number)
+        if chapter_validity_category(number) is not None or number in seen:
+            raise ParseError("chapter_data_invalid")
+        title = item.get("title")
+        if title is not None and not isinstance(title, str):
+            raise ParseError("chapter_data_invalid")
+        candidate = chikari_candidate_from_href(f"/novels/shadow-slave/{number}", site.url)
+        if not candidate:
+            raise ParseError("chapter_data_invalid")
+        seen.add(number)
+        candidates.append(ChapterReport("", number, clean_title(title), candidate.url))
+    # Fail closed if the endpoint stops returning the observed descending order.
+    if [c.chapter for c in candidates] != sorted(seen, reverse=True):
+        raise ParseError("chapter_data_invalid")
     return candidates
 
 
@@ -1004,17 +1077,29 @@ def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport,
         raise ParseError("cursor_noncanonical")
     soup = BeautifulSoup(html, "html.parser")
     possible_titles: list[str] = []
+    heading_confirmed = False
     for heading in soup.find_all(["h1", "h2"]):
         text = re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).strip()
-        match = re.search(r"(?:Shadow\s+Slave\s*[-–—:]?\s*)?Chapter\s+(\d{1,5})\b(.*)", text, re.IGNORECASE)
+        match = re.fullmatch(r"(?:Shadow\s+Slave\s*[-–—:]?\s*)?Chapter\s+(\d{1,5})\b(.*)", text, re.IGNORECASE)
         if not match:
+            if parse_chapter_text(text):
+                raise ParseError("chapter_heading_conflict")
             continue
         if int(match.group(1)) != candidate.chapter:
             raise ParseError("chapter_heading_conflict")
+        heading_confirmed = True
         remainder = re.sub(r"^[\s:;,\.\-–—|]+", "", match.group(2))
         possible = clean_title(remainder)
         if possible and not is_non_chapter_title(possible):
             possible_titles.append(possible)
+    if not heading_confirmed:
+        raise ParseError("chapter_page_confirmation_failed")
+    if len({_normalized_title(title) for title in possible_titles}) > 1:
+        raise ParseError("chapter_heading_conflict")
+    for heading in soup.find_all("title"):
+        numbered = parse_chapter_text(heading.get_text(" ", strip=True))
+        if numbered and numbered[0] != candidate.chapter:
+            raise ParseError("chapter_heading_conflict")
     next_markers = [
         anchor for anchor in soup.find_all("a", href=True)
         if re.fullmatch(r"\s*Next(?:\s+Chapter)?\s*", anchor.get_text(" ", strip=True), re.IGNORECASE)
@@ -2201,6 +2286,9 @@ def check_public_site(
     soup = BeautifulSoup(_fetch_source_html(site), "html.parser")
     raw_candidates = iter_public_candidates(soup, site.url, site.name, expected_chapter, expected_title,
                                             previous_chapter, previous_title)
+    if (site.name == "Chikari" and not raw_candidates and _chikari_application_shell(soup)
+            and not challenge_suspected(soup)):
+        raw_candidates = _chikari_api_candidates(site)
     candidates = filter_public_candidates(raw_candidates, site.name)
 
     if not candidates:

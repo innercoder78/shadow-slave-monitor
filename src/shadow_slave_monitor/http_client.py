@@ -94,6 +94,17 @@ def safe_exception_details(exc: BaseException) -> str:
     return " ".join(fields)
 
 def fetch_html(source: SourceConfig, url: str | None = None) -> str:
+    return _fetch_document(source, url, HTML_TYPES)
+
+
+def fetch_json(source: SourceConfig, url: str) -> str:
+    """Read a fixed public API URL with the same bounds, rejecting all redirects."""
+    return _fetch_document(source, url, {"application/json"}, allow_redirects=False)
+
+
+def _fetch_document(
+    source: SourceConfig, url: str | None, content_types: set[str], *, allow_redirects: bool = True,
+) -> str:
     target = url or source.url
     try:
         _check_https_and_host(target, source)
@@ -117,6 +128,8 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                     stream=True,
                     allow_redirects=False,
                 )
+                if response.is_redirect and not allow_redirects:
+                    raise HttpFetchError("redirect_not_allowed", host=_host(current), attempts=attempt)
                 nxt = _next_url(response, source)
                 if nxt is not None:
                     response.close()
@@ -137,7 +150,8 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                 exc.attempts = attempt  # type: ignore[attr-defined]
                 raise
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().casefold()
-            if content_type and content_type not in HTML_TYPES:
+            if ((content_type and content_type not in content_types)
+                    or (not allow_redirects and not content_type)):
                 raise HttpFetchError("unexpected_content_type", host=_host(response.url), attempts=attempt)
             chunks: list[bytes] = []
             total = 0

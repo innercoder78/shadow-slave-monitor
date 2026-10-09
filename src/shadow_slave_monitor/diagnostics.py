@@ -15,10 +15,14 @@ HTTP_POLICY_CODES = {
     "redirect_host_not_allowed": "HTTP_UNSAFE_REDIRECT",
     "missing_redirect_location": "HTTP_UNSAFE_REDIRECT",
     "redirect_limit": "HTTP_UNSAFE_REDIRECT",
+    "redirect_not_allowed": "HTTP_UNSAFE_REDIRECT",
     "unexpected_content_type": "HTTP_UNSUPPORTED_CONTENT_TYPE",
     "response_too_large": "HTTP_RESPONSE_TOO_LARGE",
 }
 PARSE_CODES = {
+    "chapter_data_invalid": "PARSE_CHAPTER_INVALID",
+    "chapter_data_missing": "PARSE_NO_CHAPTER_LINKS",
+    "series_identity_mismatch": "PARSE_CHAPTER_MISMATCH",
     "cursor_noncanonical": "PARSE_NONCANONICAL_CURSOR",
     "next_link_noncanonical": "PARSE_NONCANONICAL_NEXT",
     "next_link_ambiguous": "PARSE_AMBIGUOUS_NEXT",
