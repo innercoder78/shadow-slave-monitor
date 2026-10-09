@@ -1,0 +1,38 @@
+name: Public source diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_name:
+        description: "Exact public source name from src/shadow_slave_monitor/config.py"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out selected repository revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+
+      - name: Install locked dependencies
+        run: python -m pip install --require-hashes -r dependencies/requirements.lock
+
+      - name: Check configured public source without side effects
+        env:
+          SOURCE_NAME: ${{ inputs.source_name }}
+          PYTHONPATH: ${{ github.workspace }}/src
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m shadow_slave_monitor.diagnose_source

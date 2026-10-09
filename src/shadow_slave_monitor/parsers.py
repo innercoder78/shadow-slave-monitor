@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
+from functools import wraps
 import re
 import unicodedata
 from typing import Any
@@ -12,13 +14,47 @@ from bs4 import BeautifulSoup
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
 from shadow_slave_monitor.http_client import fetch_html, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
+from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, parser_code
 
 class ParseError(RuntimeError):
     """A parser failure with a controlled, log-safe reason."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, *, counters: dict[str, int] | None = None):
         super().__init__(reason)
         self.reason = reason
+        self.code = parser_code(reason)
+        self.counters = bounded_counters(counters)
+
+
+# Each source check has its own context, including concurrent monitor workers.
+_response_metadata: ContextVar[ResponseMetadata | None] = ContextVar("response_metadata", default=None)
+
+
+def _fetch_source_html(site: SourceConfig, url: str | None = None) -> str:
+    # Clear the previous page before an attempted fetch to avoid stale statuses.
+    _response_metadata.set(None)
+    html = fetch_html(site) if url is None else fetch_html(site, url)
+    if isinstance(html, HtmlDocument):
+        _response_metadata.set(html.metadata)
+    return html
+
+
+def _with_response_diagnostics(check):
+    @wraps(check)
+    def wrapped(site, *args, **kwargs):
+        token = _response_metadata.set(None)
+        try:
+            return check(site, *args, **kwargs)
+        except Exception as exc:
+            metadata = _response_metadata.get()
+            if metadata is not None:
+                exc.status = metadata.status
+                exc.host = metadata.host
+                exc.attempts = metadata.attempts
+            raise
+        finally:
+            _response_metadata.reset(token)
+    return wrapped
 
 
 LIGHTNOVELUP_BOOTSTRAP_URL = "https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/"
@@ -986,30 +1022,39 @@ def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport,
     next_candidate = None
     if next_markers:
         destinations: dict[tuple[int, str], ChapterReport] = {}
+        categories: dict[str, int] = {}
+        canonical_count = 0
         for marker in next_markers:
             validated = lightnovelup_candidate_from_href(marker.get("href"), candidate.url)
             if validated:
                 destinations[(validated.chapter, validated.url)] = validated
+                canonical_count += 1
+            else:
+                category = _lightnovelup_rejected_href_category(marker.get("href"), candidate.url)
+                categories[category] = categories.get(category, 0) + 1
+        counters = {"next_links": len(next_markers), "canonical_candidates": canonical_count,
+                    "ambiguous": int(len(destinations) > 1),
+                    "nonmonotonic": int(any(item.chapter != candidate.chapter + 1 for item in destinations.values())),
+                    "challenge_indicators": int(challenge_suspected(soup)),
+                    **{"rejected_" + key: value for key, value in categories.items()}}
         # The page can contain unrelated pagination controls also labelled
         # "Next".  They must not override an unambiguous, canonical chapter
         # navigation link, but a page containing only such controls is still
         # malformed rather than evidence that this is the latest chapter.
         if not destinations:
-            categories: dict[str, int] = {}
-            for marker in next_markers:
-                category = _lightnovelup_rejected_href_category(marker.get("href"), candidate.url)
-                categories[category] = categories.get(category, 0) + 1
-            summary = ",".join(f"{category}={categories[category]}" for category in sorted(categories))
-            raise ParseError(f"next_link_noncanonical[categories={summary};count={len(next_markers)}]")
+            summary = ",".join(f"{category}={min(categories[category], 9999)}" for category in sorted(categories))
+            raise ParseError(f"next_link_noncanonical[categories={summary};count={min(len(next_markers), 9999)}]", counters=counters)
         if len(destinations) != 1:
-            raise ParseError("next_link_ambiguous")
+            raise ParseError("next_link_ambiguous", counters=counters)
         next_candidate = next(iter(destinations.values()))
         if next_candidate.chapter != candidate.chapter + 1:
-            raise ParseError("next_link_non_monotonic")
+            counters["nonmonotonic"] = 1
+            raise ParseError("next_link_non_monotonic", counters=counters)
     report = ChapterReport("", candidate.chapter, possible_titles[0] if possible_titles else None, candidate.url)
     return report, next_candidate
 
 
+@_with_response_diagnostics
 def check_lightnovelup(site: SourceConfig, position: dict[str, Any] | None = None) -> ChapterReport:
     """Walk bounded canonical Next links from a validated cursor or bootstrap anchor."""
     start_url = LIGHTNOVELUP_BOOTSTRAP_URL
@@ -1027,7 +1072,7 @@ def check_lightnovelup(site: SourceConfig, position: dict[str, Any] | None = Non
         if current_url in visited:
             raise ParseError("navigation_cycle")
         visited.add(current_url)
-        report, next_candidate = parse_lightnovelup_chapter_page(fetch_html(site, current_url), current_url)
+        report, next_candidate = parse_lightnovelup_chapter_page(_fetch_source_html(site, current_url), current_url)
         if next_candidate is None:
             return ChapterReport(
                 site.name, report.chapter, report.title, report.url,
@@ -2068,6 +2113,7 @@ def _confirm_novelarrow_chapter_page(
     return expected_title
 
 
+@_with_response_diagnostics
 def check_public_site(
     site: SourceConfig, source_position: dict[str, Any] | None = None,
     expected_chapter: int | None = None, expected_title: str | None = None,
@@ -2076,25 +2122,44 @@ def check_public_site(
     logging.info("Checking %s.", site.name)
     if site.name == "LightNovelUp":
         report = check_lightnovelup(site, source_position)
-        logging.info("%s reports chapter %s: %s (%s)", report.source, report.chapter,
-                     report.title or "(no title)", report.url)
+        logging.info("%s reports chapter %s.", report.source, report.chapter)
         return report
-    soup = BeautifulSoup(fetch_html(site), "html.parser")
-    candidates = filter_public_candidates(
-        iter_public_candidates(soup, site.url, site.name, expected_chapter, expected_title,
-                               previous_chapter, previous_title), site.name
-    )
+    soup = BeautifulSoup(_fetch_source_html(site), "html.parser")
+    raw_candidates = iter_public_candidates(soup, site.url, site.name, expected_chapter, expected_title,
+                                            previous_chapter, previous_title)
+    candidates = filter_public_candidates(raw_candidates, site.name)
 
     if not candidates:
-        raise ParseError(f"Could not find any chapter links on {site.name}.")
+        counters = {"challenge_indicators": int(challenge_suspected(soup)),
+                    "invalid_chapters": len(raw_candidates) - len(candidates)}
+        if site.name == "Chikari":
+            anchors = soup.find_all("a", href=True)
+            series_links = 0
+            for anchor in anchors:
+                try:
+                    path = urlparse(urljoin(site.url, anchor["href"])).path
+                    series_links += int(path.startswith("/novels/shadow-slave/"))
+                except (TypeError, ValueError):
+                    pass
+            canonical_links = sum(chikari_candidate_from_href(anchor["href"], site.url) is not None
+                                  for anchor in anchors)
+            counters.update(links_inspected=len(anchors), series_path_links=series_links,
+                            canonical_chapter_links=canonical_links)
+        error = ParseError(f"Could not find any chapter links on {site.name}.", counters=counters)
+        error.challenge = bool(counters["challenge_indicators"])
+        if raw_candidates:
+            error.code = "PARSE_CHAPTER_INVALID"
+        elif error.challenge:
+            error.code = "PAGE_CHALLENGE_SUSPECTED"
+        raise error
     best = max(candidates, key=lambda item: item.chapter)
     if site.name == "ReChapters":
-        best = parse_rechapters_chapter_page(fetch_html(site, best.url), best)
+        best = parse_rechapters_chapter_page(_fetch_source_html(site, best.url), best)
     elif (site.name in {"Novel Buddy", "NovelArrow", "NovelFull", "ReadNovelFull", "FreeWebNovel.net"}
           and expected_chapter is not None and best.chapter == expected_chapter
           and best.title and _normalized_title(best.title) == _normalized_title(expected_title)
           and parse_chapter_from_href(best.url) is None):
-        page_html = fetch_html(site, best.url)
+        page_html = _fetch_source_html(site, best.url)
         if site.name == "NovelArrow":
             page_title = _confirm_novelarrow_chapter_page(page_html, best.chapter, best.title)
         elif site.name == "Novel Buddy":
@@ -2105,7 +2170,7 @@ def check_public_site(
     report = ChapterReport(site.name, best.chapter, best.title, best.url, f"{site.name}:latest_candidate")
     if report.source == "ShadowSlave.Space" and report.title is None:
         try:
-            title = parse_shadowslave_space_chapter_title(fetch_html(site, report.url), report.chapter)
+            title = parse_shadowslave_space_chapter_title(_fetch_source_html(site, report.url), report.chapter)
             report = ChapterReport(report.source, report.chapter, title, report.url, report.strategy)
         except Exception as exc:
             logging.warning(
@@ -2115,7 +2180,7 @@ def check_public_site(
             )
     if report.source == "Chikari" and report.title is None:
         try:
-            title = parse_chikari_chapter_title(fetch_html(site, report.url), report.chapter)
+            title = parse_chikari_chapter_title(_fetch_source_html(site, report.url), report.chapter)
             report = ChapterReport(report.source, report.chapter, title, report.url, report.strategy)
             if title is None:
                 logging.warning("Chikari title enrichment found no trustworthy matching title.")
@@ -2126,10 +2191,6 @@ def check_public_site(
                 type(exc).__name__,
             )
     logging.info(
-        "%s reports chapter %s: %s (%s)",
-        report.source,
-        report.chapter,
-        report.title or "(no title)",
-        report.url,
+        "%s reports chapter %s.", report.source, report.chapter,
     )
     return report

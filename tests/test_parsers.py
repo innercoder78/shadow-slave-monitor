@@ -1097,7 +1097,7 @@ class NovelFullParserTests(unittest.TestCase):
 
 
 class PublicSourceLoggingTests(unittest.TestCase):
-    def test_novelfull_success_log_always_includes_detected_url(self) -> None:
+    def test_novelfull_success_log_omits_page_text_and_url(self) -> None:
         source = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
         candidate = ChapterReport("", 3144, "The Gathering of Demigods", "https://novelfull.com/shadow-slave/chapter-3144.html")
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
@@ -1105,11 +1105,13 @@ class PublicSourceLoggingTests(unittest.TestCase):
                 self.assertLogs(level="INFO") as logs:
             check_public_site(source)
         self.assertIn(
-            "NovelFull reports chapter 3144: The Gathering of Demigods (https://novelfull.com/shadow-slave/chapter-3144.html)",
+            "NovelFull reports chapter 3144.",
             "\n".join(logs.output),
         )
+        self.assertNotIn(candidate.url, "\n".join(logs.output))
+        self.assertNotIn(candidate.title, "\n".join(logs.output))
 
-    def test_success_log_includes_url_when_title_is_missing(self) -> None:
+    def test_success_log_omits_url_when_title_is_missing(self) -> None:
         source = SourceConfig("Other Public Source", "https://example.com", True, ("example.com",))
         candidate = ChapterReport("", 3144, None, "https://example.com/chapter/3144")
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
@@ -1117,9 +1119,10 @@ class PublicSourceLoggingTests(unittest.TestCase):
                 self.assertLogs(level="INFO") as logs:
             check_public_site(source)
         self.assertIn(
-            "Other Public Source reports chapter 3144: (no title) (https://example.com/chapter/3144)",
+            "Other Public Source reports chapter 3144.",
             "\n".join(logs.output),
         )
+        self.assertNotIn(candidate.url, "\n".join(logs.output))
 
 
 class TelegramParserTests(unittest.TestCase):

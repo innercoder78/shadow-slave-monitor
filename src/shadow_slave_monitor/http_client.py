@@ -8,21 +8,23 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
+from shadow_slave_monitor.diagnostics import HTTP_POLICY_CODES, HtmlDocument, ResponseMetadata, host_from_url, safe_host
 from shadow_slave_monitor.config import CONNECT_TIMEOUT_SECONDS, HEADERS, HTTP_BACKOFF_SECONDS, HTTP_RETRIES, MAX_HTML_BYTES, READ_TIMEOUT_SECONDS, SourceConfig
 
 TEMPORARY_STATUSES = {429, 500, 502, 503, 504}
 HTML_TYPES = {"text/html", "application/xhtml+xml", "application/xml", "text/xml"}
 
 class HttpFetchError(RuntimeError):
-    def __init__(self, reason: str, *, host: str | None = None, attempts: int | None = None) -> None:
+    def __init__(self, reason: str, *, host: str | None = None, attempts: int | None = None, status: int | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
         self.host = host
         self.attempts = attempts
+        self.status = status
 
 
 def _host(url: str) -> str | None:
-    return (urlparse(url).hostname or "").casefold() or None
+    return host_from_url(url)
 
 def _retry_after_seconds(value: str | None) -> float | None:
     if not value:
@@ -75,30 +77,39 @@ def safe_exception_details(exc: BaseException) -> str:
     """Return controlled diagnostics without including arbitrary exception text."""
     fields: list[str] = []
     if isinstance(exc, HttpFetchError):
-        fields.append(f"reason={exc.reason}")
+        fields.append(f"reason={exc.reason if exc.reason in HTTP_POLICY_CODES else 'http_policy_error'}")
     if isinstance(exc, requests.HTTPError) and exc.response is not None:
-        fields.append(f"status={exc.response.status_code}")
+        status = exc.response.status_code
+        if type(status) is int and 100 <= status <= 599:
+            fields.append(f"status={status}")
     host = getattr(exc, "host", None)
     if not host and isinstance(exc, requests.RequestException) and exc.request is not None:
         host = _host(exc.request.url or "")
+    host = safe_host(host)
     if host:
         fields.append(f"host={host}")
     attempts = getattr(exc, "attempts", None)
-    if attempts is not None:
+    if type(attempts) is int and 0 <= attempts <= 9999:
         fields.append(f"attempts={attempts}")
     return " ".join(fields)
 
 def fetch_html(source: SourceConfig, url: str | None = None) -> str:
     target = url or source.url
-    _check_https_and_host(target, source)
+    try:
+        _check_https_and_host(target, source)
+    except HttpFetchError as exc:
+        exc.attempts = 0
+        raise
     session = requests.Session()
     attempt = 0
     while True:
         attempt += 1
         current = target
         redirects = 0
+        response = None
         try:
             while True:
+                response = None
                 response = session.get(
                     current,
                     headers=HEADERS,
@@ -138,21 +149,36 @@ def fetch_html(source: SourceConfig, url: str | None = None) -> str:
                     raise HttpFetchError("response_too_large", host=_host(response.url), attempts=attempt)
                 chunks.append(chunk)
             response.encoding = response.encoding or "utf-8"
-            return b"".join(chunks).decode(response.encoding, errors="replace")
+            return HtmlDocument(
+                b"".join(chunks).decode(response.encoding, errors="replace"),
+                ResponseMetadata(response.status_code, _host(response.url), attempt),
+            )
         except (requests.Timeout, requests.ConnectionError) as exc:
             if attempt < HTTP_RETRIES:
                 delay = min(HTTP_BACKOFF_SECONDS * attempt, 20)
                 logging.info("Temporary %s fetching %s; retrying after %.1fs.", safe_exception_category(exc), source.name, delay)
                 time.sleep(delay); continue
+            if response is not None:
+                exc.status = response.status_code  # type: ignore[attr-defined]
+            exc.host = _host(current)  # type: ignore[attr-defined]
+            exc.attempts = attempt  # type: ignore[attr-defined]
+            raise
+        except requests.RequestException as exc:
+            if response is not None:
+                exc.status = response.status_code  # type: ignore[attr-defined]
             exc.host = _host(current)  # type: ignore[attr-defined]
             exc.attempts = attempt  # type: ignore[attr-defined]
             raise
         except HttpFetchError as exc:
+            if response is not None:
+                exc.status = response.status_code
             if exc.attempts is None:
                 exc.attempts = attempt
             raise
         finally:
             try:
+                if response is not None:
+                    response.close()
                 session.close()
             except Exception:
                 pass
