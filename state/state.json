@@ -2,12 +2,12 @@
   "latest_seen": 3209,
   "latest_title": "Merry Men",
   "latest_url": "https://telegra.ph/3209-Merry-Men-10-08",
-  "latest_webnovel": 3209,
-  "latest_webnovel_title": "Merry Men",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3210,
+  "latest_webnovel_title": "Fear of Hope",
+  "mode": "watch_free_sites",
+  "target_chapter": 3210,
+  "target_title": "Fear of Hope",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 5,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-08T22:10:19+00:00"
+  "updated_at": "2026-10-09T20:40:17+00:00"
 }
