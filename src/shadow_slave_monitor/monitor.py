@@ -11,10 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL, PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
-from shadow_slave_monitor.http_client import HttpFetchError, safe_exception_category, safe_exception_details
+from shadow_slave_monitor.http_client import safe_exception_category
+from shadow_slave_monitor.diagnostics import diagnostic_summary
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
-from shadow_slave_monitor.parsers import ParseError, check_public_site, check_webnovel
+from shadow_slave_monitor.parsers import check_public_site, check_webnovel
 from shadow_slave_monitor.state_manager import StateError, load_state, parse_int, save_state
 from shadow_slave_monitor.timeutil import utc_now
 
@@ -144,13 +145,7 @@ def check_public_sites(
             count = min(failure_counts.get(site.name, 0) + 1, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT)
             failure_counts[site.name] = count
             failures.append(site.name)
-            category = safe_exception_category(exc)
-            details = (f"reason={exc.reason}" if isinstance(exc, ParseError)
-                       else safe_exception_details(exc))
-            logging.warning(
-                "%s check failed safely: category=%s type=%s%s",
-                site.name, category, type(exc).__name__, f" {details}" if details else "",
-            )
+            logging.warning("%s", diagnostic_summary(site, exc))
             logging.warning(
                 "%s consecutive public-source failures for current watch cycle: %s/%s.",
                 site.name, count, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT,

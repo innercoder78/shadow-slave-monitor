@@ -151,7 +151,7 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
             reports = monitor.check_public_sites(result, failures)
         output = "\n".join(logs.output)
         self.assertEqual(reports, [report])
-        self.assertIn("category=http_error type=HTTPError status=403 host=example.com attempts=1", output)
+        self.assertIn("code=HTTP_403 stage=http status=403 host=example.com attempts=1", output)
         for unsafe in ("/private", "token", "response body", "cookie", "Authorization"):
             self.assertNotIn(unsafe, output)
         self.assertTrue(result.degraded_reasons)

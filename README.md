@@ -55,3 +55,40 @@ Keep the following in mind if you fork this repository:
 5. Do not create a second cron-job.org task for the watchdog.
 
    The **Shadow Slave monitor watchdog** workflow is scheduled through GitHub Actions.
+
+## PUBLIC SOURCE DIAGNOSTICS
+
+In **Actions**, select **Public source diagnostics**, click **Run workflow**, choose the
+repository branch to check, and enter the exact public source name from
+`src/shadow_slave_monitor/config.py` (including spaces and capitalization). The workflow
+uses that selected checkout and makes a real, read-only source check, even when normal
+monitor checks are suppressed. It reads the existing cursor and target context without
+saving state, updating failure counters, or sending ntfy notifications. No notification
+secrets or write permissions are required.
+
+Read the `Diagnostic outcome` line in the check step's logs:
+
+- `SOURCE_OK` means the existing parser produced a valid result.
+- `HTTP_403` confirms that the server returned HTTP access denial; it does not establish
+  why access was denied. `HTTP_429` means rate limiting. Other `HTTP_<status>` codes
+  identify the actual returned status, including server failures such as `HTTP_503`.
+- `NETWORK_TIMEOUT` and `NETWORK_CONNECTION_ERROR` identify transport failures.
+  A status is omitted when no HTTP response status is available.
+- `HTTP_UNSAFE_REDIRECT` and `HTTP_UNSUPPORTED_CONTENT_TYPE` identify HTTP policy failures.
+- `PAGE_CHALLENGE_SUSPECTED` means an unusable page contained specific challenge
+  indicators. This is evidence of a suspected challenge, not proof of bot blocking.
+- `PARSE_NO_CHAPTER_LINKS`, `PARSE_NONCANONICAL_NEXT`, `PARSE_AMBIGUOUS_NEXT`,
+  `PARSE_NONMONOTONIC_NEXT`, `PARSE_CHAPTER_MISMATCH`, and `PARSE_CHAPTER_INVALID`
+  describe missing trustworthy links, rejected navigation, or chapter validation failures.
+  `PARSE_OTHER` covers unknown reasons from an expected parser failure;
+  `CHECK_INTERNAL_ERROR` identifies an unexpected internal exception. A parser error
+  alone does not establish a site redesign or blocking.
+
+Failure summaries include the stage, actual HTTP status, configured hostname, attempt
+count, and bounded parser counters where available. Counter values saturate at 9999.
+Failure summaries omit response bodies, untrusted URLs, page titles, and arbitrary
+exception text. Successful source checks include a bounded chapter title and a safe
+canonical chapter URL when one can be independently validated for logging.
+Expected source failures are diagnostic outcomes and leave the workflow successful;
+invalid source names, invalid state, dependency/setup failures, or internal errors fail
+it. This workflow is independent of the scheduled monitor and watchdog.
