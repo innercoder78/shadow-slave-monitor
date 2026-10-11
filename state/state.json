@@ -2,12 +2,12 @@
   "latest_seen": 3211,
   "latest_title": "The Queens Riddle",
   "latest_url": "https://telegra.ph/3211-The-Queens-Riddle-10-10",
-  "latest_webnovel": 3211,
-  "latest_webnovel_title": "The Queen's Riddle",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3212,
+  "latest_webnovel_title": "A Girl Whom Nobody Loved",
+  "mode": "watch_free_sites",
+  "target_chapter": 3212,
+  "target_title": "A Girl Whom Nobody Loved",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 6,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"
     }
   },
-  "updated_at": "2026-10-11T00:00:42+00:00"
+  "updated_at": "2026-10-11T21:40:21+00:00"
 }
