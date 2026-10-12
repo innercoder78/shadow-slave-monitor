@@ -399,12 +399,14 @@ class VerifiedSourceIntegrationTests(unittest.TestCase):
         with patch.object(monitor, "PUBLIC_SITES", (NAVIGATION,)), \
              patch.object(monitor, "load_state", return_value=(state, False)), \
              patch.object(parsers, "fetch_html", return_value=nav_page()), \
-             patch.object(parsers, "fetch_json") as api, \
+             patch.object(parsers, "fetch_json", side_effect=[json.dumps(NAV_IDENTITY),
+                                                            json.dumps(nav_listing())]) as api, \
              patch.object(monitor, "save_state") as save, \
              patch.object(monitor, "write_result"), \
              patch.object(monitor, "send_new_chapter") as send:
             monitor.main()
-        api.assert_not_called()
+        self.assertEqual(api.call_args_list, [call(NAVIGATION, NAV_API),
+                                             call(NAVIGATION, NAV_API + "/chapters")])
         save.assert_not_called()
         send.assert_not_called()
         self.assertEqual(state, original)

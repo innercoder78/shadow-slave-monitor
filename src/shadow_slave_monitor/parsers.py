@@ -15,7 +15,7 @@ from bs4 import BeautifulSoup
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
 from shadow_slave_monitor.http_client import fetch_html, fetch_json, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
-from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, parser_code
+from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, diagnostic_summary, parser_code
 
 class ParseError(RuntimeError):
     """A parser failure with a controlled, log-safe reason."""
@@ -1177,7 +1177,9 @@ def _lightnovelup_page_report(soup: BeautifulSoup, candidate: ChapterReport) -> 
     return ChapterReport("", candidate.chapter, possible_titles[0] if possible_titles else None, candidate.url)
 
 
-def _check_lightnovelup_api(site: SourceConfig, expected_chapter: int | None) -> ChapterReport:
+def _check_lightnovelup_api(
+    site: SourceConfig, expected_chapter: int | None, *, newer_than: int | None = None,
+) -> ChapterReport | None:
     """Read one observed API page; chapter_index and counts are never number evidence."""
     api_url = "https://lightnovelup.com/api/v1/novels/1883008"
     data = _fetch_source_json(site, api_url)
@@ -1213,6 +1215,10 @@ def _check_lightnovelup_api(site: SourceConfig, expected_chapter: int | None) ->
     if expected_chapter is not None and chapter_validity_category(expected_chapter) is not None:
         raise ParseError("chapter_data_invalid")
     selected = candidates.get(expected_chapter) or candidates[max(candidates)]
+    # Optional catch-up needs no page request for an unchanged or older record.
+    # Validate the entire listing first, including duplicates and contradictions.
+    if newer_than is not None and selected.chapter <= newer_than:
+        return None
     soup = BeautifulSoup(_fetch_source_html(site, selected.url, allow_redirects=False), "html.parser")
     # The observed numbered reader page identifies the series in its H1 and
     # canonical link, and contains paragraph text within the reading container.
@@ -1259,6 +1265,18 @@ def check_lightnovelup(
                 raise
             return _check_lightnovelup_api(site, expected_chapter)
         if next_candidate is None:
+            if (chapter_validity_category(expected_chapter) is None
+                    and expected_chapter > report.chapter):
+                # Navigation already verified this position. A failed optional
+                # lookup must not discard it or suppress an otherwise healthy source.
+                try:
+                    recovered = _check_lightnovelup_api(site, expected_chapter, newer_than=report.chapter)
+                except Exception as exc:
+                    logging.warning("Optional public source catch-up retained verified position: %s",
+                                    diagnostic_summary(site, exc))
+                else:
+                    if recovered is not None:
+                        return recovered
             return ChapterReport(
                 site.name, report.chapter, report.title, report.url,
                 "LightNovelUp:canonical_navigation", report.chapter, report.url,
