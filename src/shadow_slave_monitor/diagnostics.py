@@ -22,6 +22,7 @@ HTTP_POLICY_CODES = {
 PARSE_CODES = {
     "chapter_data_invalid": "PARSE_CHAPTER_INVALID",
     "chapter_data_missing": "PARSE_NO_CHAPTER_LINKS",
+    "chapter_candidates_ambiguous": "PARSE_AMBIGUOUS_CHAPTER",
     "series_identity_mismatch": "PARSE_CHAPTER_MISMATCH",
     "cursor_noncanonical": "PARSE_NONCANONICAL_CURSOR",
     "next_link_noncanonical": "PARSE_NONCANONICAL_NEXT",
@@ -150,7 +151,7 @@ def diagnostic_summary(source: SourceConfig, exc: BaseException) -> str:
                 reason = "next_link_noncanonical"
         if code == "PARSE_NO_CHAPTER_LINKS" and getattr(exc, "code", None) == "PARSE_CHAPTER_INVALID":
             code, reason = "PARSE_CHAPTER_INVALID", "chapter_outside_trusted_range"
-        if code in {"PARSE_CHAPTER_MISMATCH", "PARSE_CHAPTER_INVALID"}:
+        if code in {"PARSE_CHAPTER_MISMATCH", "PARSE_CHAPTER_INVALID", "PARSE_AMBIGUOUS_CHAPTER"}:
             stage = "chapter_validation"
         elif code in {"PARSE_NONCANONICAL_CURSOR", "PARSE_NONCANONICAL_NEXT", "PARSE_AMBIGUOUS_NEXT",
                       "PARSE_NONMONOTONIC_NEXT", "PARSE_NAVIGATION_CYCLE", "PARSE_TRAVERSAL_LIMIT"}:

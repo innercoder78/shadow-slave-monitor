@@ -109,9 +109,11 @@ def check_public_sites(
         futures = {}
         for site in eligible:
             if site.name == "LightNovelUp":
+                target_args = (expected_chapter, expected_title) if expected_chapter is not None else ()
                 future = executor.submit(
                     check_public_site, site,
                     dict(source_positions[site.name]) if site.name in source_positions else None,
+                    *target_args,
                 )
             elif site.name in TARGET_AWARE_PUBLIC_SOURCES and expected_chapter is not None:
                 future = executor.submit(

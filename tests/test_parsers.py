@@ -16,6 +16,7 @@ from shadow_slave_monitor.parsers import (
     parse_freewebnovel_candidates,
     check_lightnovelup,
     lightnovelup_candidate_from_href,
+    parse_lightnovelup_chapter_page,
     parse_novel_phoenix_candidates,
     parse_novel_buddy_candidates,
     parse_novelarrow_candidates,
@@ -1457,9 +1458,8 @@ class LightNovelUpParserTests(unittest.TestCase):
         )
         links = "".join(f'<a href="{href}">Next</a>' for href in rejected)
         html = self.page(3173, "Life Goes On").replace("</body>", links + "</body>")
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html), \
-             self.assertRaises(ParseError) as raised:
-            check_lightnovelup(self.source)
+        with self.assertRaises(ParseError) as raised:
+            parse_lightnovelup_chapter_page(html, self.chapter_3173)
         reason = raised.exception.reason
         self.assertEqual(
             reason,
