@@ -93,8 +93,8 @@ def safe_exception_details(exc: BaseException) -> str:
         fields.append(f"attempts={attempts}")
     return " ".join(fields)
 
-def fetch_html(source: SourceConfig, url: str | None = None) -> str:
-    return _fetch_document(source, url, HTML_TYPES)
+def fetch_html(source: SourceConfig, url: str | None = None, *, allow_redirects: bool = True) -> str:
+    return _fetch_document(source, url, HTML_TYPES, allow_redirects=allow_redirects)
 
 
 def fetch_json(source: SourceConfig, url: str) -> str:

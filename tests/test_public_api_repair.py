@@ -42,6 +42,12 @@ def chapter_page(number=3210, title="Fear of Hope"):
             "total": 9999, "offset": 0, "limit": 100}
 
 
+def reader_detail(number=3210, title="Fear of Hope"):
+    return {"number": float(number), "title": title, "novel_title": "Shadow Slave",
+            "novel_slug": "shadow-slave", "lang": "en", "locked": False,
+            "body": "Synthetic reader paragraph.\nAnother paragraph."}
+
+
 def waiting_state():
     return {"latest_seen": 3209, "latest_title": "Previous", "latest_url": SOURCE.url,
             "latest_webnovel": 3210, "latest_webnovel_title": "Fear of Hope",
@@ -55,12 +61,14 @@ def waiting_state():
 class PublicAPIParserTests(unittest.TestCase):
     def check(self, data=None, identity=None):
         documents = [json.dumps(IDENTITY if identity is None else identity),
-                     json.dumps(chapter_page() if data is None else data)]
+                     json.dumps(chapter_page() if data is None else data),
+                     json.dumps(reader_detail())]
         with patch.object(parsers, "fetch_html", return_value=SHELL) as html, \
              patch.object(parsers, "fetch_json", side_effect=documents) as api:
             report = parsers.check_public_site(SOURCE)
         html.assert_called_once_with(SOURCE)
-        self.assertEqual(api.call_args_list, [call(SOURCE, IDENTITY_URL), call(SOURCE, CHAPTERS_URL)])
+        self.assertEqual(api.call_args_list, [call(SOURCE, IDENTITY_URL), call(SOURCE, CHAPTERS_URL),
+                                             call(SOURCE, CHAPTERS_URL + "/3210/read")])
         return report
 
     def test_shell_recovers_using_identity_and_numeric_chapter_record(self):
@@ -98,8 +106,8 @@ class PublicAPIParserTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaisesRegex(parsers.ParseError, "chapter_data_invalid"):
                 self.check(data)
 
-    def test_missing_wrong_language_and_malformed_title_fail_closed(self):
-        for field, value in [("number", None), ("lang", None), ("lang", "ru"), ("title", {"chapter": 9999})]:
+    def test_missing_number_and_wrong_language_fail_closed(self):
+        for field, value in [("number", None), ("lang", None), ("lang", "ru")]:
             data = chapter_page()
             data["items"][0][field] = value
             with self.subTest(field=field), self.assertRaises(parsers.ParseError):
@@ -223,10 +231,10 @@ class NavigationVerificationTests(unittest.TestCase):
         html = '<h1 id="chapter-heading">Shadow Slave - Chapter 3188 Lost Soul</h1>' + self.links
         original = dict(self.cursor)
         with patch.object(parsers, "fetch_html", return_value=html) as fetch, \
+             patch.object(parsers, "fetch_json", return_value="{}"), \
              self.assertRaises(parsers.ParseError) as caught:
             parsers.check_public_site(NAVIGATION, self.cursor, 3210, "Fear of Hope", 3209, "Previous")
-        self.assertEqual(caught.exception.code, "PARSE_NONCANONICAL_NEXT")
-        self.assertEqual(caught.exception.counters["rejected_title_only_chapter_path"], 3)
+        self.assertEqual(caught.exception.code, "PARSE_CHAPTER_MISMATCH")
         self.assertEqual(self.cursor, original)
         fetch.assert_called_once_with(NAVIGATION, self.cursor["url"])
 
@@ -248,7 +256,8 @@ class PublicAPIIntegrationTests(unittest.TestCase):
         original = copy.deepcopy(state)
         with patch.object(monitor, "PUBLIC_SITES", (SOURCE,)), \
              patch.object(parsers, "fetch_html", return_value=SHELL), \
-             patch.object(parsers, "fetch_json", side_effect=[json.dumps(IDENTITY), json.dumps(chapter_page(3208))]), \
+             patch.object(parsers, "fetch_json", side_effect=[json.dumps(IDENTITY), json.dumps(chapter_page(3208)),
+                                                            json.dumps(reader_detail(3208))]), \
              patch.object(monitor, "send_new_chapter") as send:
             monitor.run_watch_free_sites(state, RunResult())
         send.assert_not_called()
@@ -259,7 +268,8 @@ class PublicAPIIntegrationTests(unittest.TestCase):
         official = ChapterReport("WebNovel", 3210, "Fear of Hope", state["target_url"])
         with patch.object(monitor, "PUBLIC_SITES", (SOURCE,)), \
              patch.object(parsers, "fetch_html", return_value=SHELL), \
-             patch.object(parsers, "fetch_json", side_effect=[json.dumps(IDENTITY), json.dumps(chapter_page(3211))]), \
+             patch.object(parsers, "fetch_json", side_effect=[json.dumps(IDENTITY), json.dumps(chapter_page(3211)),
+                                                            json.dumps(reader_detail(3211))]), \
              patch.object(monitor, "check_webnovel", return_value=official) as check, \
              patch.object(monitor, "send_new_chapter") as send:
             monitor.run_watch_free_sites(state, RunResult())
@@ -273,10 +283,15 @@ class PublicAPIIntegrationTests(unittest.TestCase):
         result = RunResult()
         def html(site, url=None):
             return SHELL if site == SOURCE else '<h1>Chapter 3188 Lost Soul</h1>' + NavigationVerificationTests.links
+        def api(site, url):
+            if site == NAVIGATION:
+                return "{}"
+            return json.dumps({IDENTITY_URL: IDENTITY, CHAPTERS_URL: chapter_page(),
+                               CHAPTERS_URL + "/3210/read": reader_detail()}[url])
         with patch.object(monitor, "PUBLIC_SITES", (SOURCE, NAVIGATION)), \
              patch.object(monitor, "public_source_recovery_window_open", return_value=True), \
              patch.object(parsers, "fetch_html", side_effect=html), \
-             patch.object(parsers, "fetch_json", side_effect=[json.dumps(IDENTITY), json.dumps(chapter_page())]):
+             patch.object(parsers, "fetch_json", side_effect=api):
             reports = monitor.check_public_sites(result, failures, positions)
         self.assertEqual([r.source for r in reports], ["Chikari"])
         self.assertEqual(failures, {"LightNovelUp": 4})
