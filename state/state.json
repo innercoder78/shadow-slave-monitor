@@ -1,22 +1,15 @@
 {
-  "latest_seen": 3211,
-  "latest_title": "The Queens Riddle",
-  "latest_url": "https://telegra.ph/3211-The-Queens-Riddle-10-10",
+  "latest_seen": 3212,
+  "latest_title": "A Girl Whom Nobody Loved",
+  "latest_url": "https://chikari.moe/novels/shadow-slave/3212",
   "latest_webnovel": 3212,
   "latest_webnovel_title": "A Girl Whom Nobody Loved",
-  "mode": "watch_free_sites",
-  "target_chapter": 3212,
-  "target_title": "A Girl Whom Nobody Loved",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "ReChapters": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 7,
   "source_positions": {
     "LightNovelUp": {
@@ -24,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3193-regret-can/"
     }
   },
-  "updated_at": "2026-10-12T05:50:41+00:00"
+  "updated_at": "2026-10-12T07:50:17+00:00"
 }
