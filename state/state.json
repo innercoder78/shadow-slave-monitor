@@ -2,12 +2,12 @@
   "latest_seen": 3215,
   "latest_title": "Pandoras Box",
   "latest_url": "https://telegra.ph/3215-Pandoras-Box-10-15",
-  "latest_webnovel": 3215,
-  "latest_webnovel_title": "Pandora's Box",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3216,
+  "latest_webnovel_title": "Divine Choice",
+  "mode": "watch_free_sites",
+  "target_chapter": 3216,
+  "target_title": "Divine Choice",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 7,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3193-regret-can/"
     }
   },
-  "updated_at": "2026-10-15T00:30:43+00:00"
+  "updated_at": "2026-10-15T23:20:19+00:00"
 }
