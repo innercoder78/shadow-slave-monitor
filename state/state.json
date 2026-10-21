@@ -1,22 +1,15 @@
 {
-  "latest_seen": 3220,
-  "latest_title": "Darker Hues",
-  "latest_url": "https://telegra.ph/3220-Darker-Hues-10-19",
+  "latest_seen": 3221,
+  "latest_title": "Cruelty of Truth",
+  "latest_url": "https://telegra.ph/3221-Cruelty-of-Truth-10-21",
   "latest_webnovel": 3221,
   "latest_webnovel_title": "Cruelty of Truth",
-  "mode": "watch_free_sites",
-  "target_chapter": 3221,
-  "target_title": "Cruelty of Truth",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "ReChapters": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 7,
   "source_positions": {
     "LightNovelUp": {
@@ -24,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3193-regret-can/"
     }
   },
-  "updated_at": "2026-10-21T00:20:28+00:00"
+  "updated_at": "2026-10-21T00:40:21+00:00"
 }
