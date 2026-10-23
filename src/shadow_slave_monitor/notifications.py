@@ -40,6 +40,7 @@ def retry_after_seconds(value: str | None) -> int | None:
     return max(0, min(delay, PENDING_RETRY_MAX_DELAY_SECONDS))
 
 NEW_CHAPTER_NOTIFICATION_TITLE = "Shadow Slave Chapter Monitor"
+_SOURCE_DISPLAY_NAMES = {"ShadowSlave.Space": "ShadowSlave Space"}
 
 
 def new_chapter_count(previous_seen: int | None, latest_chapter: int) -> int:
@@ -66,7 +67,8 @@ def source_lines(source: str, fallback_url: str = "", *, include_urls: bool = Tr
         url = configured_urls.get(name)
         if url is None and len(names) == 1:
             url = fallback_url or None
-        lines.append(f"{name} [{url}]" if include_urls and url else name)
+        label = _SOURCE_DISPLAY_NAMES.get(name, name)
+        lines.append(f"{label} [{url}]" if include_urls and url else label)
     return lines
 
 
@@ -98,7 +100,7 @@ def notification_body(previous_seen: int | None, latest: ChapterReport) -> str:
     # Keep the chapter number and as many complete source names as possible.  Never
     # truncate a URL or split a Unicode character while applying this rare fallback.
     kept: list[str] = []
-    for name in names:
+    for name in source_lines(latest.source, latest.url, include_urls=False):
         candidate = build([*kept, name], f"Latest Chapter: {latest.chapter}")
         if not _fits_ntfy_body(candidate):
             break

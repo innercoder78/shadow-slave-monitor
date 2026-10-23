@@ -13,6 +13,7 @@ from shadow_slave_monitor.notifications import (
     report_from_pending,
     send_new_chapter,
     send_watchdog,
+    source_names,
 )
 from shadow_slave_monitor.state_manager import validate_pending
 
@@ -58,7 +59,10 @@ class NewChapterNotificationTests(unittest.TestCase):
     def test_known_sources_receive_their_own_general_urls(self) -> None:
         report = self.report(", ".join(site.name for site in reversed(PUBLIC_SITES)))
         body = notification_body(3116, report)
-        expected_lines = [f"{site.name} [{site.url}]" for site in PUBLIC_SITES]
+        expected_lines = [
+            f"{'ShadowSlave Space' if site.name == 'ShadowSlave.Space' else site.name} [{site.url}]"
+            for site in PUBLIC_SITES
+        ]
         self.assertEqual(body.splitlines()[4:], expected_lines)
         self.assertIn("\n\nSOURCES:\n", body)
         self.assertNotIn("\nChapters ", body)
@@ -75,9 +79,34 @@ class NewChapterNotificationTests(unittest.TestCase):
     def test_shadowslave_space_uses_its_general_source_url(self) -> None:
         body = notification_body(3116, self.report("ShadowSlave.Space"))
         self.assertIn(
-            "SOURCE:\nShadowSlave.Space [https://shadowslave.space]",
+            "SOURCE:\nShadowSlave Space [https://shadowslave.space]",
             body,
         )
+
+    def test_display_label_preserves_canonical_order_and_deduplication(self) -> None:
+        source = "Mystery Site, FreeWebNovel.net, ShadowSlave.Space, Telegram, ShadowSlave.Space"
+        report = self.report(source)
+        self.assertEqual(source_names(source), [
+            "Telegram", "ShadowSlave.Space", "FreeWebNovel.net", "Mystery Site",
+        ])
+        body = notification_body(3116, report)
+        self.assertEqual(body.splitlines()[4:], [
+            "Telegram [https://t.me/s/shadow_slave_fastes]",
+            "ShadowSlave Space [https://shadowslave.space]",
+            "FreeWebNovel.net [https://freewebnovel.net/shadow-slave.html]",
+            "Mystery Site",
+        ])
+        self.assertEqual(report.source, source)
+
+    def test_display_label_is_still_an_unknown_source_identifier(self) -> None:
+        self.assertEqual(source_names("ShadowSlave Space, ShadowSlave.Space, ShadowSlave Space"),
+                         ["ShadowSlave.Space", "ShadowSlave Space"])
+        body = notification_body(3116, self.report("ShadowSlave Space", url="https://unknown.example"))
+        self.assertEqual(body.splitlines()[4:], ["ShadowSlave Space [https://unknown.example]"])
+        body = notification_body(3116, self.report("ShadowSlave Space, Telegram"))
+        self.assertEqual(body.splitlines()[4:], [
+            "Telegram [https://t.me/s/shadow_slave_fastes]", "ShadowSlave Space",
+        ])
 
     def test_freewebnovel_uses_its_general_source_url(self) -> None:
         body = notification_body(
@@ -127,6 +156,24 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertLessEqual(len(body.encode("utf-8")), NTFY_BODY_MAX_BYTES)
         self.assertIn("Latest Chapter: 3117", body)
 
+    def test_all_body_size_fallbacks_use_display_label(self) -> None:
+        availability = "There is 1 new chapter available on the free sites.\n"
+        cases = [
+            ("without_urls", self.report("ShadowSlave.Space, Mystery Site"),
+             availability + "Latest Chapter: 3117 — Old Bones\n\nSOURCES:\nShadowSlave Space\nMystery Site"),
+            ("without_title", self.report("ShadowSlave.Space", title="界" * 2000),
+             availability + "Latest Chapter: 3117\n\nSOURCE:\nShadowSlave Space"),
+            ("limited_sources", self.report("ShadowSlave.Space, " + "界" * 2000),
+             availability + "Latest Chapter: 3117\n\nSOURCES:\nShadowSlave Space"),
+        ]
+        for name, report, expected in cases:
+            with self.subTest(fallback=name):
+                limit = len(expected.encode("utf-8"))
+                with patch("shadow_slave_monitor.notifications.NTFY_BODY_MAX_BYTES", limit):
+                    body = notification_body(3116, report)
+                self.assertEqual(body, expected)
+                self.assertLessEqual(len(body.encode("utf-8")), limit)
+
 
 class PendingNotificationTests(unittest.TestCase):
     def report(self, source: str, chapter: int, title: str, url: str) -> ChapterReport:
@@ -137,6 +184,26 @@ class PendingNotificationTests(unittest.TestCase):
         previous, reconstructed = report_from_pending(pending)
         self.assertEqual(previous, 3115)
         self.assertEqual(notification_body(previous, reconstructed), notification_body(3115, self.report("Chikari, Telegram", 3117, "Old Bones", "https://chapter.example")))
+
+    def test_pending_retries_display_label_without_changing_source_identity(self) -> None:
+        for source, expected_sources, expected_lines in [
+            ("ShadowSlave.Space", ["ShadowSlave.Space"],
+             ["ShadowSlave Space [https://shadowslave.space]"]),
+            ("ShadowSlave.Space, Telegram, ShadowSlave.Space", ["Telegram", "ShadowSlave.Space"],
+             ["Telegram [https://t.me/s/shadow_slave_fastes]", "ShadowSlave Space [https://shadowslave.space]"]),
+        ]:
+            with self.subTest(source=source):
+                pending = pending_from_report(3115, self.report(source, 3117, "Old Bones", "https://chapter.example"))
+                self.assertEqual(pending["sources"], expected_sources)
+                restored = validate_pending(pending, 3115)
+                self.assertEqual(restored["sources"], expected_sources)
+                previous, report = report_from_pending(restored)
+                self.assertEqual(report.source, ", ".join(expected_sources))
+                with patch("shadow_slave_monitor.notifications._post_ntfy") as post:
+                    send_new_chapter("topic", previous, report)
+                post.assert_called_once_with("topic", NEW_CHAPTER_NOTIFICATION_TITLE, notification_body(previous, report))
+                self.assertEqual(post.call_args.args[2].splitlines()[4:], expected_lines)
+                self.assertEqual(pending["sources"], expected_sources)
 
     def test_pending_merges_same_chapter_but_replaces_sources_for_newer_chapter(self) -> None:
         pending = pending_from_report(3115, self.report("Chikari", 3116, "Older", "https://old.example"))
