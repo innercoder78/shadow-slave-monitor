@@ -295,6 +295,8 @@ class WebNovelCadenceTests(unittest.TestCase):
     def test_watch_webnovel_inside_window_same_chapter_does_not_save(self) -> None:
         state = base_state()
         inside_window = datetime(2026, 6, 11, 12, 2, tzinfo=timezone.utc)
+        # Repeating an already persisted successful cycle is operationally quiet.
+        state["webnovel_success_cycle"] = int(inside_window.timestamp() // 1200)
         report = ChapterReport("WebNovel", 10, "Chapter Ten", "https://webnovel.example/10", "catalog")
 
         with patch.dict("os.environ", {"SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK": "false"}, clear=False), \

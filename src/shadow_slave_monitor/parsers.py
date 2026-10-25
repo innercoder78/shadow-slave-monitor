@@ -16,6 +16,7 @@ import requests
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
 from shadow_slave_monitor.http_client import fetch_html, fetch_json, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
+from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, diagnostic_summary, parser_code
 
 class ParseError(RuntimeError):
@@ -93,7 +94,8 @@ def filter_public_candidates(candidates: list[ChapterReport], source: str) -> li
     return valid
 
 def require_valid_webnovel_report(report: ChapterReport) -> ChapterReport:
-    if valid_parsed_chapter(report.chapter, "WebNovel") is None:
+    if (not isinstance(report, ChapterReport) or report.source != "WebNovel"
+            or valid_parsed_chapter(report.chapter, "WebNovel") is None):
         raise ParseError("WebNovel parsed chapter is outside the trusted range")
     return report
 
@@ -2006,6 +2008,104 @@ def telegram_doc_candidates_from_node(node: Any, base_url: str) -> list[ChapterR
         seen_chapters.add(chapter)
 
     return candidates
+
+
+@_with_response_diagnostics
+def check_telegram_emergency(site: SourceConfig, baseline: int) -> ChapterReport:
+    """Discover independently numbered evidence without authoritative title context.
+
+    This intentionally does not call the ordinary, target-aware parser: its
+    document-text and title-context fallbacks are unsuitable as an authority.
+    No chapter content or external document link is fetched.
+    """
+    from shadow_slave_monitor.config import SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT
+
+    if site.name != "Telegram" or not site.enabled or chapter_validity_category(baseline) is not None:
+        raise ParseError("chapter_data_invalid")
+    soup = BeautifulSoup(_fetch_source_html(site), "html.parser")
+    if challenge_suspected(soup):
+        raise ParseError("chapter_data_missing")
+    channel = urlparse(site.url).path.removeprefix("/s/").strip("/")
+    reports: dict[int, ChapterReport] = {}
+    for node in soup.select(".tgme_widget_message"):
+        if not re.fullmatch(rf"{re.escape(channel)}/[1-9][0-9]*", node.get("data-post", "")):
+            continue
+        evidence: list[ChapterReport] = []
+        documents: list[tuple[int, str, str | None]] = []
+        title_documents: list[tuple[str, str | None]] = []
+        for title_node in node.select(".tgme_widget_message_document_title"):
+            text = re.sub(r"\s+", " ", title_node.get_text(" ", strip=True)).strip()
+            if not re.fullmatch(r"[1-9][0-9]{2,4}\s+.+\.docx", text, re.IGNORECASE):
+                title_only = re.fullmatch(r"(.+?)\.docx", text, re.IGNORECASE)
+                if title_only and not re.search(r"\b[0-9]+\b", title_only[1]):
+                    title = clean_title(title_only[1])
+                    if title:
+                        title_documents.append((title, closest_href(title_node, site.url)))
+                continue
+            parsed = parse_telegram_doc_title(text)
+            if parsed is None or chapter_validity_category(parsed[0]) is not None:
+                raise ParseError("chapter_data_invalid")
+            chapter, title = parsed
+            href = closest_href(title_node, site.url)
+            if href and not telegram_emergency_evidence_url(href, chapter, site.url):
+                raise ParseError("chapter_data_invalid")
+            documents.append((chapter, title, href))
+        for anchor in node.find_all("a", href=True):
+            href = urljoin(site.url, anchor["href"])
+            # Only numbered chapter-shaped links are evidence; title-only links
+            # and arbitrary numbers in the surrounding message cannot authorize.
+            # Document filenames are validated separately. Their title may
+            # itself contain "Chapter N" without being a chapter-link label.
+            document_anchor = anchor.select_one(".tgme_widget_message_document_title") is not None
+            label = None if document_anchor else parse_chapter_text(anchor.get_text(" ", strip=True))
+            # Decode only to recognize and reject encoded chapter-shaped URLs;
+            # accepted evidence must still pass the original canonical URL.
+            if not re.search(r"/[0-9]+-", unquote(href)) and label is None:
+                continue
+            report = parse_telegram_telegra_link(href)
+            if report is None or not telegram_emergency_evidence_url(href, report.chapter, site.url):
+                raise ParseError("chapter_data_invalid")
+            if label and (label[0] != report.chapter or
+                          (label[1] and _normalized_title(label[1]) != _normalized_title(report.title))):
+                raise ParseError("chapter_candidates_ambiguous")
+            evidence.append(report)
+        for chapter, title, href in documents:
+            corroboration = [r for r in evidence if r.chapter == chapter]
+            if not href and not corroboration:
+                raise ParseError("chapter_candidates_ambiguous")
+            # A title repeated by a document and link must not quietly move to
+            # another number. Properly paired chapters may share a title.
+            doc_numbers = {number for number, doc_title, _ in documents
+                           if _normalized_title(doc_title) == _normalized_title(title)}
+            link_numbers = {r.chapter for r in evidence
+                            if _normalized_title(r.title) == _normalized_title(title)}
+            if link_numbers and doc_numbers != link_numbers:
+                raise ParseError("chapter_candidates_ambiguous")
+        # Build evidence by chapter, not by message: a single post may release
+        # several independently numbered documents and matching chapter links.
+        for chapter, title, href in documents:
+            corroboration = [r for r in evidence if r.chapter == chapter]
+            evidence.append(ChapterReport("", chapter, title, href or corroboration[0].url))
+        for title, href in title_documents:
+            matches = {r.chapter for r in evidence if _normalized_title(r.title) == _normalized_title(title)}
+            if evidence and (len(matches) != 1 or
+                             (href and not telegram_emergency_evidence_url(href, next(iter(matches)), site.url))):
+                raise ParseError("chapter_candidates_ambiguous")
+        for report in evidence:
+            previous = reports.get(report.chapter)
+            if previous and _normalized_title(previous.title) != _normalized_title(report.title):
+                raise ParseError("chapter_candidates_ambiguous")
+            if previous is None:
+                reports[report.chapter] = report
+    if not reports:
+        raise ParseError("chapter_data_missing")
+    highest = max(reports)
+    if (highest - baseline > SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT
+            and not set(range(baseline + 1, highest + 1)).issubset(reports)):
+        raise ParseError("chapter_candidates_ambiguous")
+    report = reports[highest]
+    return ChapterReport("Telegram", report.chapter, report.title, report.url,
+                         "Telegram:emergency_numbered_evidence")
 
 
 def parse_telegram_candidates(

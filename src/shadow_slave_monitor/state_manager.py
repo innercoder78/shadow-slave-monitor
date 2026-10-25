@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SOURCE_PARSER_REVISION, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, MAX_WEBNOVEL_CYCLE, WEBNOVEL_EMERGENCY_FAILURE_LIMIT, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SOURCE_PARSER_REVISION, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
+from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
 LEGACY_TIMING_FIELDS = {"last_webnovel_check", "webnovel_skip_count"}
@@ -31,6 +32,11 @@ MONITOR_STATE_FIELDS = {
     "public_source_failures",
     "public_source_failure_revision",
     "source_positions",
+    "webnovel_failures",
+    "webnovel_failure_cycle",
+    "webnovel_success_cycle",
+    "emergency_last_check_ok",
+    "emergency_provenance",
     "updated_at",
 }
 
@@ -131,6 +137,11 @@ def initial_state() -> dict[str, Any]:
         "public_source_failures": {},
         "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
         "source_positions": {},
+        "webnovel_failures": 0,
+        "webnovel_failure_cycle": None,
+        "webnovel_success_cycle": None,
+        "emergency_last_check_ok": None,
+        "emergency_provenance": None,
         "updated_at": None,
     }
 
@@ -193,6 +204,57 @@ def validate_pending(pending: Any, latest_seen: int | None) -> dict[str, Any] | 
         raise StateError("pending sources must contain at least one source")
     return migrated
 
+def validate_emergency_state(state: dict[str, Any]) -> None:
+    """Validate active status separately from retained notification provenance."""
+    failures = state["webnovel_failures"]
+    cycle = state["webnovel_failure_cycle"]
+    success_cycle = state["webnovel_success_cycle"]
+    checked = state["emergency_last_check_ok"]
+    if type(failures) is not int or not 0 <= failures <= WEBNOVEL_EMERGENCY_FAILURE_LIMIT:
+        raise StateError("webnovel_failures must be an integer between zero and four")
+    for name, value in (("webnovel_failure_cycle", cycle), ("webnovel_success_cycle", success_cycle)):
+        if value is not None and (type(value) is not int or not 0 <= value <= MAX_WEBNOVEL_CYCLE):
+            raise StateError(f"{name} must be a bounded cycle integer or null")
+    if failures and (cycle is None or state["mode"] != "watch_webnovel"
+                     or state["latest_seen"] is None or state["latest_webnovel"] is None):
+        raise StateError("WebNovel failure history requires an initialized authoritative monitoring phase")
+    if failures and success_cycle is not None and success_cycle >= cycle:
+        raise StateError("a successful cycle cannot retain consecutive failure history from that cycle or earlier")
+    if success_cycle is not None and state["latest_webnovel"] is None:
+        raise StateError("successful cycle requires an authoritative chapter confirmation")
+    if failures == WEBNOVEL_EMERGENCY_FAILURE_LIMIT:
+        if type(checked) is not bool:
+            raise StateError("active emergency requires an explicit check outcome")
+    elif checked is not None:
+        raise StateError("inactive emergency cannot have an active check outcome")
+    provenance = state["emergency_provenance"]
+    telegram = next(site for site in PUBLIC_SITES if site.name == "Telegram")
+    if provenance is not None:
+        if (not isinstance(provenance, dict)
+                or set(provenance) != {"source", "chapter", "evidence_url"}
+                or provenance["source"] != "Telegram"
+                or type(provenance["chapter"]) is not int
+                or not telegram_emergency_evidence_url(provenance["evidence_url"], provenance["chapter"], telegram.url)):
+            raise StateError("emergency_provenance must contain canonical numbered evidence from the configured source")
+        if state["latest_seen"] is None or state["latest_webnovel"] is None:
+            raise StateError("emergency provenance requires initialized chapter history")
+        pending = state["pending_notification"]
+        known = max(state["latest_seen"], pending["latest_pending_chapter"] if pending else 0)
+        if provenance["chapter"] > known:
+            raise StateError("emergency provenance cannot exceed delivered or pending chapter history")
+    seen, official = state["latest_seen"], state["latest_webnovel"]
+    if seen is not None and official is None:
+        raise StateError("notified chapter history requires a confirmed authoritative baseline")
+    if seen is not None and official is not None and seen > official:
+        if not provenance or seen > provenance["chapter"] or state["latest_url"] != telegram.url:
+            raise StateError("latest_seen beyond authority requires emergency notification provenance")
+    pending = state["pending_notification"]
+    if pending and official is not None and pending["latest_pending_chapter"] > official:
+        if (not provenance or pending["latest_pending_chapter"] != provenance["chapter"]
+                or pending["sources"] != ["Telegram"] or pending["url"] != telegram.url):
+            raise StateError("pending chapter beyond authority requires emergency notification provenance")
+
+
 def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     validate_source_config()
     unknown = set(data) - MONITOR_STATE_FIELDS - LEGACY_TIMING_FIELDS
@@ -210,8 +272,6 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
         raise StateError("mode must be watch_webnovel or watch_free_sites")
     if mode == "watch_free_sites" and target is None:
         raise StateError("target_chapter is required in watch_free_sites mode")
-    if latest_seen is not None and latest_webnovel is not None and latest_seen > latest_webnovel:
-        raise StateError("latest_seen cannot be greater than latest_webnovel")
     if target is not None and latest_webnovel is not None and target > latest_webnovel:
         raise StateError("target_chapter cannot be greater than latest_webnovel")
     for key in ("latest_title", "latest_url", "latest_webnovel_title", "target_title", "target_url"):
@@ -222,6 +282,7 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     state["latest_webnovel"] = latest_webnovel
     state["target_chapter"] = target
     state["pending_notification"] = validate_pending(state.get("pending_notification"), latest_seen)
+    validate_emergency_state(state)
     # Absence denotes the legacy schema; do not let initial_state's current
     # default hide that one-time migration signal.
     has_revision = "public_source_failure_revision" in data
@@ -292,7 +353,9 @@ def load_state(path: Path = STATE_PATH) -> tuple[dict[str, Any], bool]:
     if not isinstance(loaded, dict):
         raise StateError("state.json must contain a JSON object")
     state = validate_state(loaded)
-    first_setup = state["latest_seen"] is None and state["latest_webnovel"] is None
+    # A previous setup may have reached the authority but failed all public
+    # checks. Resume initialization without notifying historical chapters.
+    first_setup = state["latest_seen"] is None and state["pending_notification"] is None
     return state, first_setup
 
 def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
@@ -314,6 +377,11 @@ def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
 
 def save_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
     clean = validate_state(state)
+    if path.exists():
+        existing, _ = load_state(path)
+        if all(clean[key] == existing[key] for key in clean if key != "updated_at"):
+            logging.info("No operational state changes to persist.")
+            return
     clean["updated_at"] = iso_now()
     atomic_write_json(path, clean)
     logging.info("Saved state.json atomically.")
