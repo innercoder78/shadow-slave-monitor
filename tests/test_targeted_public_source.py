@@ -416,7 +416,8 @@ class TargetMonitorTests(unittest.TestCase):
         self.assertEqual(aggregate.source, f"{OTHER.name}, Rentry")
         body = notification_body(3223, aggregate)
         self.assertIn("SOURCES:", body)
-        self.assertTrue(body.endswith("Rentry [https://rentry.co/]"))
+        self.assertEqual(aggregate.url, other.url)
+        self.assertTrue(body.endswith("Rentry [https://rentry.co/3224ss]"))
         self.assertIn(f"{OTHER.name} [{OTHER.url}]", body)
         self.assertEqual(state["latest_seen"], 3224)
         self.assertEqual(state["mode"], "watch_webnovel")
@@ -472,6 +473,51 @@ class TargetMonitorTests(unittest.TestCase):
         fetch.assert_not_called()
         self.assertIsNone(state["pending_notification"])
         self.assertEqual(state["latest_seen"], 3224)
+
+    def test_failed_notification_reconstructs_chapter_links_without_new_state_fields(self):
+        pending_fields = {
+            "previous_seen", "first_pending_chapter", "latest_pending_chapter", "title", "sources", "url",
+            "created_at", "first_failure_at", "last_attempt_at", "next_retry_at", "attempt_count",
+            "last_error_category", "last_http_status",
+        }
+        for sources, expected_lines, url in (
+            ("Rentry", ["Rentry [https://rentry.co/3225ss]"], "https://rentry.co/"),
+            (f"Rentry, {OTHER.name}, Rentry",
+             [f"{OTHER.name} [{OTHER.url}]", "Rentry [https://rentry.co/3225ss]"], OTHER.url),
+        ):
+            with self.subTest(sources=sources), patch.dict(monitor.os.environ, {"NTFY_NEWCHAPTER": "topic"}):
+                state = watching_state()
+                state.update(latest_seen=3224, latest_webnovel=3225, target_chapter=3225,
+                             target_title="Chapter Title")
+                report = ChapterReport(sources, 3225, "Chapter Title", url)
+                with patch("shadow_slave_monitor.notifications._post_ntfy",
+                           side_effect=NotificationDeliveryError("http_error", 503)) as failed_post:
+                    monitor.queue_or_send(state, report, RunResult())
+                failed_post.assert_called_once()
+                self.assertEqual(state["latest_seen"], 3224)
+                pending = state["pending_notification"]
+                self.assertEqual(set(pending), pending_fields)
+                self.assertEqual(pending["url"], url)
+                self.assertEqual(pending["attempt_count"], 1)
+                self.assertEqual(set(state), set(initial_state()))
+                # Simulate the existing JSON persistence and validation boundary.
+                state = validate_state(json.loads(json.dumps(state)))
+                with patch.object(monitor, "pending_due", return_value=False), \
+                     patch("shadow_slave_monitor.notifications._post_ntfy") as post:
+                    monitor.try_deliver_pending(state, RunResult())
+                post.assert_not_called()
+                self.assertEqual(state["pending_notification"], pending)
+                with patch.object(monitor, "pending_due", return_value=True), \
+                     patch("shadow_slave_monitor.notifications._post_ntfy") as post, \
+                     patch.object(monitor, "check_public_sites") as check:
+                    monitor.run_watch_free_sites(state, RunResult())
+                    monitor.try_deliver_pending(state, RunResult())
+                post.assert_called_once_with(*failed_post.call_args.args)
+                self.assertEqual(post.call_args.args[2].splitlines()[4:], expected_lines)
+                check.assert_not_called()
+                self.assertIsNone(state["pending_notification"])
+                self.assertEqual((state["latest_seen"], state["latest_url"], state["mode"]),
+                                 (3225, url, "watch_webnovel"))
 
     def test_diagnostic_clean_unavailable_and_missing_context(self):
         for state, expected_code in ((watching_state(), "TARGET_NOT_AVAILABLE"), (initial_state(), "TARGET_CONTEXT_MISSING")):

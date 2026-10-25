@@ -11,6 +11,7 @@ import requests
 from shadow_slave_monitor.config import NTFY_BASE_URL, NTFY_BODY_MAX_BYTES, NTFY_CONNECT_TIMEOUT_SECONDS, NTFY_READ_TIMEOUT_SECONDS, PENDING_RETRY_DELAYS_SECONDS, PENDING_RETRY_MAX_DELAY_SECONDS, PUBLIC_SITES
 from shadow_slave_monitor.http_client import safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
+from shadow_slave_monitor.parsers import rentry_chapter_url
 from shadow_slave_monitor.state_manager import parse_int
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime, utc_now
 
@@ -59,12 +60,16 @@ def source_names(source: str) -> list[str]:
     return [*known, *(name for name in unique if name not in configured)]
 
 
-def source_lines(source: str, fallback_url: str = "", *, include_urls: bool = True) -> list[str]:
+def source_lines(source: str, fallback_url: str = "", *, chapter: int, include_urls: bool = True) -> list[str]:
     names = source_names(source)
     configured_urls = {site.name: site.url for site in PUBLIC_SITES}
     lines = []
     for name in names:
         url = configured_urls.get(name)
+        if name == "Rentry" and include_urls:
+            # No chapter index: derive this link from the verified number, since
+            # the aggregate report URL may belong to a different source.
+            url = rentry_chapter_url(chapter)
         if url is None and len(names) == 1:
             url = fallback_url or None
         label = _SOURCE_DISPLAY_NAMES.get(name, name)
@@ -88,19 +93,19 @@ def notification_body(previous_seen: int | None, latest: ChapterReport) -> str:
     def build(lines: list[str], chapter_line: str = latest_line) -> str:
         return "\n".join([availability, chapter_line, "", heading, *lines])
 
-    body = build(source_lines(latest.source, latest.url))
+    body = build(source_lines(latest.source, latest.url, chapter=latest.chapter))
     if _fits_ntfy_body(body):
         return body
 
     # URLs are the least important and largest optional part of an overlong body.
-    body = build(source_lines(latest.source, latest.url, include_urls=False))
+    body = build(source_lines(latest.source, latest.url, chapter=latest.chapter, include_urls=False))
     if _fits_ntfy_body(body):
         return body
 
     # Keep the chapter number and as many complete source names as possible.  Never
     # truncate a URL or split a Unicode character while applying this rare fallback.
     kept: list[str] = []
-    for name in source_lines(latest.source, latest.url, include_urls=False):
+    for name in source_lines(latest.source, latest.url, chapter=latest.chapter, include_urls=False):
         candidate = build([*kept, name], f"Latest Chapter: {latest.chapter}")
         if not _fits_ntfy_body(candidate):
             break
