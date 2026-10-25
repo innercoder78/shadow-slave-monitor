@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlparse
@@ -9,7 +10,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 
 from shadow_slave_monitor.diagnostics import HTTP_POLICY_CODES, HtmlDocument, ResponseMetadata, host_from_url, safe_host
-from shadow_slave_monitor.config import CONNECT_TIMEOUT_SECONDS, HEADERS, HTTP_BACKOFF_SECONDS, HTTP_RETRIES, MAX_HTML_BYTES, READ_TIMEOUT_SECONDS, SourceConfig
+from shadow_slave_monitor.config import CONNECT_TIMEOUT_SECONDS, HEADERS, HTTP_BACKOFF_SECONDS, HTTP_RETRIES, MAX_HTML_BYTES, MIN_CHAPTER, MAX_CHAPTER, READ_TIMEOUT_SECONDS, SourceConfig
 
 TEMPORARY_STATUSES = {429, 500, 502, 503, 504}
 HTML_TYPES = {"text/html", "application/xhtml+xml", "application/xml", "text/xml"}
@@ -42,6 +43,10 @@ def _retry_after_seconds(value: str | None) -> float | None:
     return max(0.0, min(delay, 120.0))
 
 def _check_https_and_host(url: str, source: SourceConfig) -> None:
+    if source.name == "Rentry":
+        match = re.fullmatch(r"https://rentry\.co/([1-9][0-9]{0,4})ss", url)
+        if not match or not MIN_CHAPTER <= int(match.group(1)) <= MAX_CHAPTER:
+            raise HttpFetchError("noncanonical_chapter_url", host="rentry.co")
     parsed = urlparse(url)
     host = (parsed.hostname or "").casefold()
     if parsed.scheme.lower() != "https":
@@ -94,6 +99,8 @@ def safe_exception_details(exc: BaseException) -> str:
     return " ".join(fields)
 
 def fetch_html(source: SourceConfig, url: str | None = None, *, allow_redirects: bool = True) -> str:
+    if source.name == "Rentry":
+        return _fetch_document(source, url, {"text/html", "application/xhtml+xml"}, allow_redirects=False)
     return _fetch_document(source, url, HTML_TYPES, allow_redirects=allow_redirects)
 
 
@@ -139,6 +146,8 @@ def _fetch_document(
                     current = nxt
                     continue
                 break
+            if source.name == "Rentry" and response.url != target:
+                raise HttpFetchError("noncanonical_chapter_url", host=_host(response.url), attempts=attempt)
             if response.status_code in TEMPORARY_STATUSES and attempt < HTTP_RETRIES:
                 delay = _retry_after_seconds(response.headers.get("Retry-After")) or min(HTTP_BACKOFF_SECONDS * attempt, 20)
                 logging.info("Temporary HTTP status %s from %s; retrying after %.1fs.", response.status_code, source.name, delay)
