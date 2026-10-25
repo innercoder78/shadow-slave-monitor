@@ -1,14 +1,16 @@
 """Target-only source tests. All chapter prose below is synthetic.
 
-The wrapper, canonical link and bare numbered h2 reflect the two live examples
-inspected on 2026-10-25. Those pages have NO novel label. Positive cases add an
-explicit synthetic label to exercise the stricter, currently disabled contract.
+The wrapper, canonical link and titled numbered h2 reflect the two live examples
+inspected on 2026-10-25. Those pages have NO novel label. The placeholder has a
+bare h1 between adjacent chapter links. All body prose below is invented.
 No fixture is a capture of a real chapter.
 """
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import replace
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -20,7 +22,7 @@ from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SITE_ORDER
 from shadow_slave_monitor.http_client import HttpFetchError, fetch_html
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationDeliveryError, notification_body
-from shadow_slave_monitor.state_manager import initial_state, validate_source_config
+from shadow_slave_monitor.state_manager import initial_state, validate_source_config, validate_state
 
 
 CONFIG = PUBLIC_SITES[-1]
@@ -42,13 +44,25 @@ PARAGRAPHS = (
 )
 
 
-def page(chapter=3224, title="First Thunder", identity="Shadow Slave", *, extra="", body=True):
+def page(chapter=3224, title="First Thunder", identity=None, *, extra="", body=True):
     label = f"<p>Novel: {identity}</p>" if identity else ""
     prose = "".join(f"<p>{text}</p>" for text in PARAGRAPHS) if body else "<p>Coming soon</p>"
-    return (f'<html><head><title>Rentry</title><link rel="canonical" href="https://rentry.co/{chapter}ss" />'
+    return (f'<html><head><title>{chapter}{" " + title if title else ""}</title><link rel="canonical" href="https://rentry.co/{chapter}ss" />'
             f'</head><body><div class="entry-text"><section class="foreground-container"></section>'
-            f'<article><div>{label}<h2>{chapter}{" " + title if title else ""}</h2>{extra}{prose}'
+            f'<article><div><p><a href="https://rentry.co/{chapter - 1}ss">Previous chapter</a></p>'
+            f'{label}<h2>{chapter}{" " + title if title else ""}</h2>{extra}{prose}'
+            f'<p><a href="https://rentry.co/{chapter + 1}ss">Next chapter</a></p>'
             '</div></article></div><h1 class="h3">Warning</h1></body></html>')
+
+
+def placeholder(chapter=3500, message=""):
+    return (f'<html><head><title>{chapter}</title>'
+            f'<link rel="canonical" href="https://rentry.co/{chapter}ss"></head><body>'
+            '<div class="entry-text"><article><div>'
+            f'<p><a href="https://rentry.co/{chapter - 1}ss">{chapter - 1}ss</a></p>'
+            f'<h1 id="{chapter}">{chapter}<a href="#{chapter}"></a></h1>{message}'
+            f'<p><a href="https://rentry.co/{chapter + 1}ss">{chapter + 1}ss</a></p>'
+            '</div></article></div><h1>Warning</h1></body></html>')
 
 
 def response(status=200, html=None, url="https://rentry.co/3224ss", content_type="text/html"):
@@ -76,10 +90,10 @@ class TargetPageTests(unittest.TestCase):
         fetch.assert_called_once_with(ENABLED, f"https://rentry.co/{chapter}ss", allow_redirects=False)
         return report
 
-    def test_configuration_appends_disabled_source(self):
+    def test_configuration_appends_enabled_source(self):
         validate_source_config()
         self.assertEqual((CONFIG.name, CONFIG.url, CONFIG.enabled, CONFIG.allowed_hosts),
-                         ("Rentry", "https://rentry.co/", False, ("rentry.co",)))
+                         ("Rentry", "https://rentry.co/", True, ("rentry.co",)))
         self.assertEqual(PUBLIC_SITE_ORDER["Rentry"], 16)
         self.assertTrue(all(site.enabled for site in PUBLIC_SITES[:-1]))
 
@@ -109,10 +123,12 @@ class TargetPageTests(unittest.TestCase):
         self.assertEqual(parsers.rentry_chapter_url(1), "https://rentry.co/1ss")
         self.assertEqual(parsers.rentry_chapter_url(10000), "https://rentry.co/10000ss")
 
-    def test_live_layout_without_identity_fails_closed(self):
-        # This deliberately models the missing evidence in the real examples.
-        with self.assertRaisesRegex(parsers.ParseError, "series_identity_mismatch"):
-            self.check(page(identity=None))
+    def test_live_layout_without_label_requires_authoritative_title(self):
+        self.assertEqual(self.check(page(identity=None)).chapter, 3224)
+        for html, title in ((page(title=None), "First Thunder"),
+                            (page(), None), (page(), "Other Title")):
+            with self.subTest(title=title), self.assertRaises(parsers.ParseError):
+                self.check(html, title=title)
 
     def test_rejects_unrelated_empty_placeholder_wrong_series_and_challenge(self):
         cases = ("", "<p>Coming soon</p>", "<title>3224 Rentry</title><p>Chapter 3224</p>",
@@ -134,8 +150,8 @@ class TargetPageTests(unittest.TestCase):
         with self.assertRaises(parsers.ParseError):
             self.check(page(title="Another Story"))
         self.assertEqual(self.check(page(title="FIRST   THUNDER")).chapter, 3224)
-        self.assertIsNone(self.check(page(title=None)).title)
-        self.assertEqual(self.check(title=None).chapter, 3224)
+        self.assertIsNone(self.check(page(title=None, identity="Shadow Slave")).title)
+        self.assertEqual(self.check(page(identity="Shadow Slave"), title=None).chapter, 3224)
         with self.assertRaises(parsers.ParseError):
             self.check(page(title="X" * 200), title="X" * 180)
 
@@ -148,13 +164,87 @@ class TargetPageTests(unittest.TestCase):
                 self.check(html)
 
     def test_hidden_evidence_and_script_prose_do_not_count(self):
-        for html in (page().replace('<p>Novel:', '<p hidden>Novel:'),
+        for html in (page(title=None, identity="Shadow Slave").replace('<p>Novel:', '<p hidden>Novel:'),
                      page().replace('<h2>', '<h2 style="display:none">'),
                      page().replace('<h2>', '<h2 aria-hidden="true">'),
                      page(body=False).replace('Coming soon', '<script>' + ' '.join(PARAGRAPHS) + '</script>'),
                      page(body=False).replace('Coming soon', 'placeholder ' * 200)):
             with self.subTest(html=html[:60]), self.assertRaises(parsers.ParseError):
                 self.check(html)
+
+    def test_observed_placeholder_and_short_messages_are_unavailable(self):
+        for message in ("", "<p>Coming soon</p>", "<p>Work in progress.</p>",
+                        "<p>Coming soon</p>" * 400,
+                        "<p>" + "Coming soon. " * 400 + "</p>"):
+            with self.subTest(length=len(message)):
+                self.assertIsNone(self.check(placeholder(message=message), 3500, "Future Title"))
+        # A bare numbered h2 also occurs in the published article structure.
+        self.assertIsNone(self.check(placeholder().replace("h1", "h2"), 3500, "Future Title"))
+
+    def test_short_or_boilerplate_content_cannot_be_a_published_report(self):
+        for body in ("<p>Coming soon</p>" * 400,
+                     "<p>" + PARAGRAPHS[0] + "</p>",
+                     "".join(f"<p>{PARAGRAPHS[0]}</p>" for _ in range(100))):
+            html = page(body=False).replace("<p>Coming soon</p>", body)
+            with self.subTest(length=len(body)), self.assertRaises(parsers.ParseError):
+                self.check(html)
+
+    def test_contradictory_or_unfamiliar_templates_remain_errors(self):
+        cases = (
+            placeholder().replace('>3500<a', '>3501<a'),
+            placeholder(message='<p>Novel: Other Novel</p>'),
+            placeholder(message='<h3>Other Novel</h3>'),
+            placeholder(message=''.join(f'<p>{p}</p>' for p in PARAGRAPHS)),
+            placeholder(message='<p>' + PARAGRAPHS[0] * 8 + '</p>'),
+            placeholder(message='<div>Unexpected unwrapped text</div>'),
+            placeholder().replace('https://rentry.co/3501ss', 'https://evil.example/3501ss'),
+            placeholder().replace('<title>3500</title>', '<title>Other Novel</title>'),
+            placeholder().replace('rel="canonical"', 'rel="alternate"'),
+            placeholder().replace('<article>', '<article><form><input type="password"></form>'),
+        )
+        for index, html in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(parsers.ParseError):
+                self.check(html, 3500, "Future Title")
+
+    def test_document_title_conflicts_and_hidden_prose_fail_closed(self):
+        for html in (page().replace('<title>3224 First Thunder</title>', '<title>3225 Another</title>'),
+                     page().replace('<article>', '<article hidden>'),
+                     page().replace('<article>', '<article style="display:none">'),
+                     page().replace('<article>', '<article><form><input type="password"></form>'),
+                     page().replace('<h2>', '<h1>').replace('</h2>', '</h1>'),
+                     page(body=False).replace('Coming soon', '<span hidden>' + ' '.join(PARAGRAPHS) + '</span>'),
+                     page(body=False).replace('Coming soon', '<nav>' + ' '.join(PARAGRAPHS) + '</nav>')):
+            with self.subTest(length=len(html)), self.assertRaises(parsers.ParseError):
+                self.check(html)
+
+    def test_body_thresholds_and_prose_position_remain_strict(self):
+        bodies = (
+            ''.join(f'<p>{p}</p>' for p in PARAGRAPHS[:2]),
+            ''.join(f'<p>{"ordinary words " * 80}{i}</p>' for i in range(4)),
+            ''.join(f'<p>{p}{"!" * 500}</p>' for p in PARAGRAPHS),
+        )
+        for body in bodies:
+            with self.subTest(length=len(body)), self.assertRaises(parsers.ParseError):
+                self.check(page(body=False).replace('<p>Coming soon</p>', body))
+        prose = ''.join(f'<p>{p}</p>' for p in PARAGRAPHS)
+        html = page(body=False).replace('<h2>', prose + '<h2>')
+        with self.assertRaises(parsers.ParseError):
+            self.check(html)
+
+    def test_navigation_and_warning_text_cannot_supply_prose(self):
+        prose = ''.join(f'<p>{p}</p>' for p in PARAGRAPHS)
+        for html in (page(body=False) + prose,
+                     page(body=False).replace('<article>', '<article><nav>' + prose + '</nav>'),
+                     page(body=False).replace('<p>Coming soon</p>', '<aside>' + prose + '</aside>'),
+                     page(body=False).replace('Next chapter', ' '.join(PARAGRAPHS))):
+            with self.subTest(length=len(html)), self.assertRaises(parsers.ParseError):
+                self.check(html)
+
+    def test_current_production_state_validates_without_modification(self):
+        state_path = Path(__file__).resolve().parents[1] / "state" / "state.json"
+        before = state_path.read_bytes()
+        validate_state(json.loads(before))
+        self.assertEqual(state_path.read_bytes(), before)
 
 
 class TargetHttpTests(unittest.TestCase):
@@ -216,7 +306,7 @@ class TargetHttpTests(unittest.TestCase):
 
 class TargetMonitorTests(unittest.TestCase):
     def test_disabled_source_is_not_dispatched(self):
-        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), patch.object(monitor, "check_public_site") as check:
+        with patch.object(monitor, "PUBLIC_SITES", (replace(CONFIG, enabled=False),)), patch.object(monitor, "check_public_site") as check:
             monitor.check_public_sites(RunResult(), expected_chapter=3224, expected_title="First Thunder")
         check.assert_not_called()
 
@@ -244,6 +334,45 @@ class TargetMonitorTests(unittest.TestCase):
         with patch.object(monitor, "PUBLIC_SITES", (ENABLED,)), patch("requests.Session.get", return_value=response()):
             reports = monitor.check_public_sites(RunResult(), failures, positions, 3224, "First Thunder")
         self.assertEqual([r.chapter for r in reports], [3224])
+
+    def test_placeholders_keep_checking_then_publish_without_state_writes(self):
+        state = watching_state()
+        original = copy.deepcopy(state)
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=False), \
+             patch("requests.Session.get", return_value=response(html=placeholder(3224))) as get, \
+             patch.object(monitor, "load_state", return_value=(state, False)), \
+             patch.object(monitor, "save_state") as save, patch.object(monitor, "write_result"), \
+             patch.object(monitor, "send_new_chapter") as send:
+            for _ in range(8):
+                monitor.main()
+            self.assertEqual(get.call_count, 8)
+            save.assert_not_called()
+            send.assert_not_called()
+        self.assertEqual(state, original)
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch("requests.Session.get", return_value=response()), \
+             patch.object(monitor, "send_new_chapter") as send:
+            monitor.run_watch_free_sites(state, RunResult())
+        send.assert_called_once()
+        self.assertEqual(state["latest_seen"], 3224)
+        self.assertEqual(state["public_source_failures"], {})
+        self.assertEqual(state["source_positions"], {})
+
+    def test_placeholder_recovers_failure_count_and_diagnostic_is_unavailable(self):
+        failures = {"Rentry": 3}
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=True), \
+             patch("requests.Session.get", return_value=response(html=placeholder(3224))):
+            result = RunResult()
+            self.assertEqual(monitor.check_public_sites(result, failures, expected_chapter=3224), [])
+        self.assertEqual(failures, {})
+        self.assertEqual(result.status, Health.HEALTHY)
+        with patch.object(diagnose_source, "load_state", return_value=(watching_state(), False)), \
+             patch("requests.Session.get", return_value=response(html=placeholder(3224))), \
+             self.assertLogs(level="INFO") as logs:
+            self.assertEqual(diagnose_source.diagnose_source("Rentry"), 0)
+        self.assertIn("TARGET_NOT_AVAILABLE", "\n".join(logs.output))
 
     def test_clean_404_recovers_prior_failure_and_genuine_errors_are_isolated(self):
         other = ChapterReport(OTHER.name, 3224, "First Thunder", OTHER.url)
