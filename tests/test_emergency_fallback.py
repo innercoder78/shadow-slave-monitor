@@ -33,6 +33,13 @@ def message(chapter=3226, title="Synthetic Chapter", *, doc=True, link=True):
             + '</div>')
 
 
+def multi_message(*chapters, doc=True, link=True):
+    parts = [message(chapter, f"Synthetic Chapter {chapter}", doc=doc, link=link)
+             .partition(">")[2].removesuffix("</div>") for chapter in chapters]
+    return ('<div class="tgme_widget_message" data-post="shadow_slave_fastes/9000">'
+            + "".join(parts) + '</div>')
+
+
 def initialized():
     state = initial_state()
     state.update(latest_seen=3225, latest_webnovel=3225, latest_title="Baseline",
@@ -86,9 +93,9 @@ class EmergencyMonitorTests(unittest.TestCase):
                 skipped = self.tick(state, minute + delta)
                 self.assertEqual(state, before)
                 self.assertEqual(skipped.status, result.status)
-            self.assertEqual(self.official.call_count, index)
+            self.assertEqual(self.official.call_count, index * 2)
         self.assertEqual(self.tick(state, 80).status, Health.DEGRADED)
-        self.assertEqual(self.official.call_count, 5)
+        self.assertEqual(self.official.call_count, 9)
         self.assertEqual(self.fetch.call_count, 2)
         self.public.assert_not_called()
         self.send.assert_not_called()
@@ -147,13 +154,106 @@ class EmergencyMonitorTests(unittest.TestCase):
             self.assertEqual(saved.call_count, 1)
             self.assertEqual(load_state(path)[0]["webnovel_failures"], 1)
 
-    def test_healthy_checks_and_skips_do_not_write_operational_state(self):
+    def test_success_marker_changes_once_per_cycle_rechecks_and_skips_are_unchanged(self):
         state = initialized()
+        self.tick(state, 0, official=3225)
+        self.assertEqual(state["webnovel_success_cycle"], int(START.timestamp() // 1200))
         before = copy.deepcopy(state)
-        for minute in (0, 5, 10, 15, 20, 25):
+        for minute in (5, 10, 15):
             self.tick(state, minute, official=3225)
         self.assertEqual(state, before)
+        self.tick(state, 20, official=3225)
+        self.assertEqual(state["webnovel_success_cycle"], before["webnovel_success_cycle"] + 1)
+        before = copy.deepcopy(state)
+        self.tick(state, 25, official=3225)
+        self.assertEqual(state, before)
         self.fetch.assert_not_called()
+
+    def test_success_then_failure_in_same_cycle_cannot_extend_prior_failure_streak(self):
+        state = initialized()
+        state.update(webnovel_failures=3, webnovel_failure_cycle=int(START.timestamp() // 1200) - 1)
+        self.tick(state, 0, official=3225)
+        self.tick(state, 5)
+        self.assertEqual(state["webnovel_failures"], 0)
+        self.fetch.assert_not_called()
+        for index, minute in enumerate((20, 40, 60), 1):
+            self.tick(state, minute)
+            self.assertEqual(state["webnovel_failures"], index)
+            self.tick(state, minute + 5)
+            self.assertEqual(state["webnovel_failures"], index)
+            self.fetch.assert_not_called()
+        self.tick(state, 80)
+        self.assertEqual(self.fetch.call_count, 1)
+
+    def test_failure_then_success_resets_streak_and_later_cycles_start_from_one(self):
+        state = initialized()
+        self.tick(state, 0)
+        self.assertEqual(state["webnovel_failures"], 1)
+        self.tick(state, 5, official=3225)
+        self.assertEqual(state["webnovel_failures"], 0)
+        self.tick(state, 6, force=True)
+        self.assertEqual(state["webnovel_failures"], 0)
+        self.tick(state, 20)
+        self.assertEqual(state["webnovel_failures"], 1)
+        self.assertEqual(self.official.call_count, 4)
+        self.fetch.assert_not_called()
+
+    def test_ordinary_recheck_recovers_active_emergency_inside_failed_cycle(self):
+        state = active()
+        self.tick(state, 0, html=message())
+        self.assertEqual(self.send.call_count, 1)
+        provenance = copy.deepcopy(state["emergency_provenance"])
+        self.tick(state, 5, official=3225)
+        self.assertEqual(state["webnovel_failures"], 0)
+        self.assertEqual(state["latest_seen"], 3226)
+        self.assertEqual(state["emergency_provenance"], provenance)
+        self.tick(state, 6, force=True)
+        self.assertEqual(state["webnovel_failures"], 0)
+        self.assertEqual(self.fetch.call_count, 1)
+        self.assertEqual(self.send.call_count, 1)
+
+    def test_success_and_failure_cycle_semantics_survive_process_restarts_in_either_order(self):
+        for success_first in (True, False):
+            with self.subTest(success_first=success_first), TemporaryDirectory() as tmp:
+                path = Path(tmp) / "state.json"
+                state = initialized()
+                self.tick(state, 0, official=3225 if success_first else None)
+                save_state(state, path)
+                state, _ = load_state(path)
+                self.tick(state, 5, official=None if success_first else 3225)
+                save_state(state, path)
+                state, _ = load_state(path)
+                self.assertEqual(state["webnovel_failures"], 0)
+                self.assertEqual(state["webnovel_success_cycle"], int(START.timestamp() // 1200))
+                self.tick(state, 20)
+                self.assertEqual(state["webnovel_failures"], 1)
+        self.fetch.assert_not_called()
+
+    def test_success_marker_is_persisted_once_per_cycle_without_five_minute_writes(self):
+        self.official.side_effect = None
+        self.official.return_value = ChapterReport("WebNovel", 3225, "Baseline", "https://official.example/catalog")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            save_state(initialized(), path)
+            with patch.object(monitor, "STATE_PATH", path), \
+                 patch.object(monitor, "save_state", side_effect=lambda state: save_state(state, path)) as saved, \
+                 patch.object(monitor, "write_result"), \
+                 patch.dict(monitor.os.environ, {"SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK": "false"}):
+                for minute in (0, 5, 10, 15, 20, 25):
+                    with patch.object(monitor, "utc_now", return_value=START + timedelta(minutes=minute)):
+                        monitor.main()
+            self.assertEqual(saved.call_count, 2)
+            self.assertEqual(self.official.call_count, 4)
+
+    def test_end_of_eight_minute_window_can_recover_without_changing_window(self):
+        state = active()
+        self.tick(state, 0)
+        self.tick(state, 7.99, official=3225)
+        self.assertEqual(state["webnovel_failures"], 0)
+        before = copy.deepcopy(state)
+        self.tick(state, 8)
+        self.assertEqual(state, before)
+        self.assertEqual(self.official.call_count, 2)
 
     def test_force_off_window_fails_without_counting_and_can_recover(self):
         state = active()
@@ -216,6 +316,36 @@ class EmergencyMonitorTests(unittest.TestCase):
         self.assertEqual(state["latest_webnovel"], 3225)
         self.assertEqual(self.send.call_count, 101)
         self.assertEqual(self.official.call_count, 101)
+
+    def test_multi_chapter_releases_during_extended_outage_notify_only_new_ranges(self):
+        state = active()
+        for day in range(40):
+            first = 3226 + day * 2
+            # The post also repeats a previously notified chapter.
+            html = multi_message(first - 1, first, first + 1)
+            self.tick(state, day * 24 * 60, html=html)
+            self.assertEqual(state["latest_seen"], first + 1)
+            self.assertEqual(self.send.call_args.args[1], first - 1)
+            self.assertIn("2 new chapters", notification_body(*self.send.call_args.args[1:]))
+            self.tick(state, day * 24 * 60 + 5, html=html)
+            self.assertEqual(self.send.call_count, day + 1)
+            self.assertEqual(state["webnovel_failures"], 4)
+        self.assertEqual(state["latest_webnovel"], 3225)
+
+    def test_multiple_releases_merge_into_pending_range_without_retry_timer_reset(self):
+        state = active()
+        self.send.side_effect = NotificationDeliveryError("http_error", 503)
+        self.tick(state, 0, html=multi_message(3226, 3227))
+        pending = copy.deepcopy(state["pending_notification"])
+        with patch.object(monitor, "pending_due", return_value=False):
+            self.tick(state, 20, html=multi_message(3227, 3228, 3229))
+        self.assertEqual(self.send.call_count, 1)
+        self.assertEqual(state["pending_notification"]["latest_pending_chapter"], 3229)
+        self.assertEqual(state["pending_notification"]["next_retry_at"], pending["next_retry_at"])
+        self.send.side_effect = None
+        self.tick(state, 25)
+        self.assertEqual(self.send.call_count, 2)
+        self.assertEqual(state["latest_seen"], 3229)
 
     def test_new_then_equal_old_and_delayed_chapter_notifications_keep_source_and_gap(self):
         state = active()
@@ -361,6 +491,79 @@ class EmergencyParserTests(unittest.TestCase):
             with self.subTest(doc=doc, link=link):
                 self.assertEqual(self.check(message(doc=doc, link=link)).chapter, 3226)
 
+    def test_two_numbered_chapters_in_one_message_documents_links_and_both(self):
+        for doc, link in ((True, False), (False, True), (True, True)):
+            with self.subTest(doc=doc, link=link):
+                report = self.check(multi_message(3217, 3218, doc=doc, link=link), baseline=3216)
+                self.assertEqual(report.chapter, 3218)
+                self.assertEqual(report.title, "Synthetic Chapter 3218")
+
+    def test_multiple_posts_history_duplicates_and_newer_single_chapter_coexist(self):
+        history = "".join(message(chapter, f"Synthetic Chapter {chapter}")
+                          for chapter in (3220, 3223, 3224))
+        pair = multi_message(3226, 3227)
+        self.assertEqual(self.check(history + pair).chapter, 3227)
+        self.assertEqual(self.check(pair + history + pair + message(3228)).chapter, 3228)
+
+    def test_conflicting_signals_in_multi_chapter_message_reject_entire_response(self):
+        pair = multi_message(3226, 3227)
+        cases = [pair.replace("3227-Synthetic-Chapter-3227", "3228-Synthetic-Chapter-3227"),
+                 pair.replace("3227-Synthetic-Chapter-3227", "3227-Contradictory-Title"),
+                 pair + message(3227, "Conflicting Title"),
+                 pair.replace(">Read chapter<", ">Chapter 3229<", 1),
+                 pair.replace("https://t.me/shadow_slave_fastes/3227", "https://evil.example/file"),
+                 # Unlinked numbered document evidence cannot be silently lost
+                 # behind a valid different chapter.
+                 pair.replace('<a class="tgme_widget_message_document_wrap" href="https://t.me/shadow_slave_fastes/3227">', '<span>')
+                     .replace('</span></a><a href="https://telegra.ph/3227-Synthetic-Chapter-3227-10-25">Read chapter</a>', '</span></span>')]
+        for html in cases:
+            with self.subTest(html=html), self.assertRaises(parsers.ParseError):
+                self.check(html)
+
+    def test_invalid_link_for_one_chapter_cannot_hide_behind_valid_chapter(self):
+        for url in ("http://telegra.ph/3227-Synthetic-Chapter-3227", "https://evil.example/3227-Synthetic",
+                    "https://telegra.ph:443/3227-Synthetic", "https://u@telegra.ph/3227-Synthetic",
+                    "https://telegra.ph/3227-Synthetic?x=1", "https://telegra.ph/3227-Synthetic#x",
+                    "https://telegra.ph/3227-Synthetic%20Chapter", "https://telegra.ph/10001-Synthetic",
+                    "https://telegra.ph/%33%32%32%37-Synthetic"):
+            html = multi_message(3226, 3227).replace("https://telegra.ph/3227-Synthetic-Chapter-3227-10-25", url)
+            with self.subTest(url=url), self.assertRaises(parsers.ParseError):
+                self.check(html)
+        with self.assertRaises(parsers.ParseError):
+            self.check(multi_message(3226, 3227).replace(
+                'href="https://telegra.ph/3227-Synthetic-Chapter-3227-10-25">Read chapter',
+                'href="https://telegra.ph/Unnumbered">Chapter 3227'))
+
+    def test_multi_chapter_posts_ignore_noise_without_title_only_inference(self):
+        pair = multi_message(3226, 3227)
+        noise = '<p>9999 views 2026-10-25 rating 5 page 7777 Chapter 8888</p>'
+        self.assertEqual(self.check(pair.replace('</div>', noise + '</div>')).chapter, 3227)
+        title_only = message(3228).replace("3228 Synthetic Chapter.docx", "Synthetic Chapter.docx").replace(
+            "3228-Synthetic-Chapter-10-25", "Synthetic-Chapter-10-25")
+        self.assertEqual(self.check(pair + title_only).chapter, 3227)
+
+    def test_title_only_document_must_match_unique_independent_number_in_multi_post(self):
+        pair = multi_message(3226, 3227)
+        self.assertEqual(self.check(pair.replace("3227 Synthetic Chapter 3227.docx", "Synthetic Chapter 3227.docx")).chapter, 3227)
+        # Use a genuinely title-only filename with no embedded numeric token.
+        pair = pair.replace("Synthetic Chapter 3227", "Second Synthetic").replace("Synthetic-Chapter-3227", "Second-Synthetic")
+        self.assertEqual(self.check(pair.replace("3227 Second Synthetic.docx", "Second Synthetic.docx")).chapter, 3227)
+        with self.assertRaises(parsers.ParseError):
+            self.check(pair.replace("3227 Second Synthetic.docx", "Unmatched Title.docx"))
+
+    def test_multiple_correctly_paired_chapters_may_share_title(self):
+        pair = multi_message(3226, 3227)
+        for chapter in (3226, 3227):
+            pair = pair.replace(f"Synthetic Chapter {chapter}", "Shared Title").replace(f"Synthetic-Chapter-{chapter}", "Shared-Title")
+        self.assertEqual(self.check(pair).chapter, 3227)
+
+    def test_large_contiguous_advance_can_be_in_one_post_but_gaps_and_bounds_fail_closed(self):
+        self.assertEqual(self.check(multi_message(*range(3226, 3256))).chapter, 3255)
+        for chapters in ([3226, 9999], [*range(3226, 3240), *range(3241, 3256)], [3226, 10001]):
+            with self.subTest(chapters=chapters), self.assertRaises(parsers.ParseError):
+                self.check(multi_message(*chapters))
+        self.assertEqual(self.check(multi_message(9999, 10000), baseline=9998).chapter, 10000)
+
     def test_multiple_sequential_chapters_and_corroborated_large_gap(self):
         html = "".join(message(chapter) for chapter in range(3226, 3256))
         self.assertEqual(self.check(html).chapter, 3255)
@@ -411,10 +614,12 @@ class EmergencyStateTests(unittest.TestCase):
         self.assertEqual(clean["latest_webnovel"], raw["latest_webnovel"])
         self.assertEqual(clean["webnovel_failures"], 0)
         self.assertIsNone(clean["emergency_provenance"])
+        self.assertIsNone(clean["webnovel_success_cycle"])
 
     def test_invalid_fields_and_combinations_rejected(self):
         cases = [("webnovel_failures", v) for v in (True, False, -1, 5, "4", 4.0, None)]
         cases += [("webnovel_failure_cycle", v) for v in (True, -1, "1", 1.0, MAX_WEBNOVEL_CYCLE + 1)]
+        cases += [("webnovel_success_cycle", v) for v in (True, False, -1, "1", 1.0, MAX_WEBNOVEL_CYCLE + 1)]
         cases += [("emergency_last_check_ok", v) for v in (True, False, 1, "true")]
         cases += [("emergency_provenance", v) for v in ({}, [], True,
             {"source": "Other", "chapter": 3226, "evidence_url": "https://telegra.ph/3226-Synthetic"},
@@ -432,6 +637,16 @@ class EmergencyStateTests(unittest.TestCase):
             state.update(updates)
             with self.subTest(updates=updates), self.assertRaises(StateError):
                 validate_state(state)
+
+    def test_success_marker_cannot_coexist_with_failure_history_it_supersedes(self):
+        state = active()
+        for cycle in (state["webnovel_failure_cycle"], state["webnovel_failure_cycle"] + 1):
+            with self.subTest(cycle=cycle), self.assertRaises(StateError):
+                validate_state(dict(state, webnovel_success_cycle=cycle))
+        state["webnovel_success_cycle"] = state["webnovel_failure_cycle"] - 1
+        self.assertEqual(validate_state(state), state)
+        with self.assertRaises(StateError):
+            validate_state(dict(initial_state(), webnovel_success_cycle=1))
 
     def test_unchanged_save_preserves_bytes_and_does_not_write(self):
         with TemporaryDirectory() as tmp:
@@ -499,6 +714,23 @@ class EmergencyStateTests(unittest.TestCase):
             newer.update(updates)
             self.assertFalse(state_writer.monitor_artifact_superseded(newer, older))
             self.assertFalse(state_writer.monitor_artifact_superseded(older, newer))
+
+    def test_stale_success_marker_cannot_erase_recovery_or_reset_newer_failure_history(self):
+        failed = active()
+        recovered = dict(failed, webnovel_failures=0, emergency_last_check_ok=None,
+                         webnovel_success_cycle=failed["webnovel_failure_cycle"])
+        later_failure = dict(recovered, webnovel_failures=1,
+                             webnovel_failure_cycle=failed["webnovel_failure_cycle"] + 1)
+        healthy = initialized()
+        healthy["webnovel_success_cycle"] = 100
+        older_healthy = dict(healthy, webnovel_success_cycle=99)
+        for current, artifact in ((failed, recovered), (recovered, failed),
+                                  (later_failure, recovered), (recovered, later_failure),
+                                  (healthy, older_healthy), (older_healthy, healthy)):
+            self.assertEqual(validate_state(current), current)
+            self.assertEqual(validate_state(artifact), artifact)
+            self.assertFalse(state_writer.monitor_artifact_superseded(current, artifact))
+            self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, artifact))
 
     def test_watchdog_labels_degraded_and_failed_emergency_runs_distinctly(self):
         now = START.isoformat()

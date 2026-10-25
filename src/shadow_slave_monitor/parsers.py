@@ -2054,12 +2054,17 @@ def check_telegram_emergency(site: SourceConfig, baseline: int) -> ChapterReport
             href = urljoin(site.url, anchor["href"])
             # Only numbered chapter-shaped links are evidence; title-only links
             # and arbitrary numbers in the surrounding message cannot authorize.
-            if not re.search(r"/[0-9]+-", href):
+            # Document filenames are validated separately. Their title may
+            # itself contain "Chapter N" without being a chapter-link label.
+            document_anchor = anchor.select_one(".tgme_widget_message_document_title") is not None
+            label = None if document_anchor else parse_chapter_text(anchor.get_text(" ", strip=True))
+            # Decode only to recognize and reject encoded chapter-shaped URLs;
+            # accepted evidence must still pass the original canonical URL.
+            if not re.search(r"/[0-9]+-", unquote(href)) and label is None:
                 continue
             report = parse_telegram_telegra_link(href)
             if report is None or not telegram_emergency_evidence_url(href, report.chapter, site.url):
                 raise ParseError("chapter_data_invalid")
-            label = parse_chapter_text(anchor.get_text(" ", strip=True))
             if label and (label[0] != report.chapter or
                           (label[1] and _normalized_title(label[1]) != _normalized_title(report.title))):
                 raise ParseError("chapter_candidates_ambiguous")
@@ -2067,23 +2072,31 @@ def check_telegram_emergency(site: SourceConfig, baseline: int) -> ChapterReport
         for chapter, title, href in documents:
             corroboration = [r for r in evidence if r.chapter == chapter]
             if not href and not corroboration:
-                continue
+                raise ParseError("chapter_candidates_ambiguous")
+            # A title repeated by a document and link must not quietly move to
+            # another number. Properly paired chapters may share a title.
+            doc_numbers = {number for number, doc_title, _ in documents
+                           if _normalized_title(doc_title) == _normalized_title(title)}
+            link_numbers = {r.chapter for r in evidence
+                            if _normalized_title(r.title) == _normalized_title(title)}
+            if link_numbers and doc_numbers != link_numbers:
+                raise ParseError("chapter_candidates_ambiguous")
+        # Build evidence by chapter, not by message: a single post may release
+        # several independently numbered documents and matching chapter links.
+        for chapter, title, href in documents:
+            corroboration = [r for r in evidence if r.chapter == chapter]
             evidence.append(ChapterReport("", chapter, title, href or corroboration[0].url))
-        if len({r.chapter for r in evidence}) > 1:
-            raise ParseError("chapter_candidates_ambiguous")
-        # Even an unlinked numbered document contradicts a differently numbered
-        # link in the same message; do not discard the inconvenient signal.
-        if evidence and any(chapter != evidence[0].chapter for chapter, _, _ in documents):
-            raise ParseError("chapter_candidates_ambiguous")
         for title, href in title_documents:
-            if evidence and (any(_normalized_title(title) != _normalized_title(r.title) for r in evidence)
-                             or (href and not telegram_emergency_evidence_url(href, evidence[0].chapter, site.url))):
+            matches = {r.chapter for r in evidence if _normalized_title(r.title) == _normalized_title(title)}
+            if evidence and (len(matches) != 1 or
+                             (href and not telegram_emergency_evidence_url(href, next(iter(matches)), site.url))):
                 raise ParseError("chapter_candidates_ambiguous")
         for report in evidence:
             previous = reports.get(report.chapter)
             if previous and _normalized_title(previous.title) != _normalized_title(report.title):
                 raise ParseError("chapter_candidates_ambiguous")
-            reports[report.chapter] = report
+            if previous is None:
+                reports[report.chapter] = report
     if not reports:
         raise ParseError("chapter_data_missing")
     highest = max(reports)

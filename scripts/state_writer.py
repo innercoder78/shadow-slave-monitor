@@ -212,6 +212,7 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
     # instruction to merge/reset it. The existing base-hash lease applies fresh
     # transitions, including recovery at the same confirmed chapter.
     for key, default in (("webnovel_failures", 0), ("webnovel_failure_cycle", None),
+                         ("webnovel_success_cycle", None),
                          ("emergency_last_check_ok", None), ("emergency_provenance", None)):
         if current.get(key, default) != artifact.get(key, default):
             return False

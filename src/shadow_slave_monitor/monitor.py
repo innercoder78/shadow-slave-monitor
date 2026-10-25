@@ -355,11 +355,11 @@ def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
     cycle = int(utc_now().timestamp() // WEBNOVEL_CHECK_INTERVAL.total_seconds())
     scheduled = webnovel_check_window_open()
     new_cycle = scheduled and (state.get("webnovel_failure_cycle") is None
-                              or cycle > state["webnovel_failure_cycle"])
-    if scheduled and not new_cycle and not force_webnovel_check_enabled():
-        logging.info("Skipping already attempted failed WebNovel cycle.")
-        report_persisted_webnovel_outage(state, result)
-        return
+                              or cycle > state["webnovel_failure_cycle"]) and (
+                                  state.get("webnovel_success_cycle") is None
+                                  or cycle > state["webnovel_success_cycle"])
+    # Keep later eligible attempts: they may recover inside a previously failed
+    # cycle. Only failure counting and emergency dispatch are deduplicated.
     # Keep only authority-check failures local: a working emergency source can
     # degrade these, but must never conceal pending delivery or unrelated errors.
     official_result = RunResult()
@@ -382,6 +382,8 @@ def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
             for reason in official_result.reasons:
                 result.fail(reason)
         return
+    if scheduled:
+        state["webnovel_success_cycle"] = cycle
     if had_failures:
         logging.info("WebNovel recovered; emergency polling stopped; notification history and provenance retained.")
         state["webnovel_failures"] = 0

@@ -34,6 +34,7 @@ MONITOR_STATE_FIELDS = {
     "source_positions",
     "webnovel_failures",
     "webnovel_failure_cycle",
+    "webnovel_success_cycle",
     "emergency_last_check_ok",
     "emergency_provenance",
     "updated_at",
@@ -138,6 +139,7 @@ def initial_state() -> dict[str, Any]:
         "source_positions": {},
         "webnovel_failures": 0,
         "webnovel_failure_cycle": None,
+        "webnovel_success_cycle": None,
         "emergency_last_check_ok": None,
         "emergency_provenance": None,
         "updated_at": None,
@@ -206,14 +208,20 @@ def validate_emergency_state(state: dict[str, Any]) -> None:
     """Validate active status separately from retained notification provenance."""
     failures = state["webnovel_failures"]
     cycle = state["webnovel_failure_cycle"]
+    success_cycle = state["webnovel_success_cycle"]
     checked = state["emergency_last_check_ok"]
     if type(failures) is not int or not 0 <= failures <= WEBNOVEL_EMERGENCY_FAILURE_LIMIT:
         raise StateError("webnovel_failures must be an integer between zero and four")
-    if cycle is not None and (type(cycle) is not int or not 0 <= cycle <= MAX_WEBNOVEL_CYCLE):
-        raise StateError("webnovel_failure_cycle must be a bounded cycle integer or null")
+    for name, value in (("webnovel_failure_cycle", cycle), ("webnovel_success_cycle", success_cycle)):
+        if value is not None and (type(value) is not int or not 0 <= value <= MAX_WEBNOVEL_CYCLE):
+            raise StateError(f"{name} must be a bounded cycle integer or null")
     if failures and (cycle is None or state["mode"] != "watch_webnovel"
                      or state["latest_seen"] is None or state["latest_webnovel"] is None):
         raise StateError("WebNovel failure history requires an initialized authoritative monitoring phase")
+    if failures and success_cycle is not None and success_cycle >= cycle:
+        raise StateError("a successful cycle cannot retain consecutive failure history from that cycle or earlier")
+    if success_cycle is not None and state["latest_webnovel"] is None:
+        raise StateError("successful cycle requires an authoritative chapter confirmation")
     if failures == WEBNOVEL_EMERGENCY_FAILURE_LIMIT:
         if type(checked) is not bool:
             raise StateError("active emergency requires an explicit check outcome")
