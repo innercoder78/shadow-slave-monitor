@@ -11,6 +11,7 @@ from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
+import requests
 
 from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
 from shadow_slave_monitor.http_client import fetch_html, fetch_json, safe_exception_category
@@ -2161,6 +2162,9 @@ def iter_public_candidates(
     expected_chapter: int | None = None, expected_title: str | None = None,
     previous_chapter: int | None = None, previous_title: str | None = None,
 ) -> list[ChapterReport]:
+    if site_name == "Rentry":
+        # Target-only pages must never enter generic index discovery.
+        return []
     if site_name == "SSNovel":
         return parse_ssnovel_candidates(soup, base_url)
     if site_name == "Chikari":
@@ -2338,6 +2342,8 @@ def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
     elif site.name == "NovelArrow":
         path = novelarrow_chapter_path(url, site.url)
         return url if path and path[0] == report.chapter else None
+    elif site.name == "Rentry":
+        return url if chapter_validity_category(report.chapter) is None and url == rentry_chapter_url(report.chapter) else None
     else:
         soup = BeautifulSoup("", "html.parser")
         anchor = soup.new_tag("a", href=url)
@@ -2390,13 +2396,110 @@ def _log_public_success(site: SourceConfig, report: ChapterReport) -> None:
                  title or "(no title)", url or "URL omitted")
 
 
+def rentry_chapter_url(chapter: int) -> str:
+    """Construct one candidate from an authoritative number, never discover one."""
+    if chapter_validity_category(chapter) is not None:
+        raise ParseError("chapter_data_invalid")
+    return f"https://rentry.co/{chapter}ss"
+
+
+def parse_rentry_chapter_page(
+    html: str, url: str, expected_chapter: int, expected_title: str | None,
+) -> ChapterReport:
+    """Verify rendered content, independently of the predictable URL.
+
+    The observed examples use .entry-text article with a numbered h2 and
+    paragraphs, but lack explicit novel identity and therefore fail closed.
+    Neither URL suffixes, document titles nor story character names prove it.
+    """
+    if url != rentry_chapter_url(expected_chapter):
+        raise ParseError("chapter_page_confirmation_failed")
+    soup = BeautifulSoup(html, "html.parser")
+    if challenge_suspected(soup):
+        raise ParseError("chapter_page_confirmation_failed")
+    canonicals = soup.select('link[rel="canonical"]')
+    if len(canonicals) != 1 or canonicals[0].get("href") != url:
+        raise ParseError("chapter_page_confirmation_failed")
+    # Exclude content that cannot supply visible chapter evidence.
+    for node in list(soup.select("script, style, template, noscript, [hidden], [aria-hidden='true']")):
+        node.decompose()
+    for node in list(soup.select("[style]")):
+        if re.search(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)", node.get("style", ""), re.I):
+            node.decompose()
+    containers = soup.select(".entry-text")
+    articles = soup.select(".entry-text article")
+    if len(containers) != 1 or len(articles) != 1:
+        raise ParseError("chapter_data_missing")
+    article = articles[0]
+    identity = False
+    for label in article.find_all(["h1", "h2", "h3", "p"]):
+        text = re.sub(r"\s+", " ", label.get_text(" ", strip=True)).strip()
+        if re.fullmatch(r"(?:Novel\s*:\s*)?Shadow Slave", text, re.I):
+            identity = True
+        elif re.match(r"Novel\s*:", text, re.I):
+            raise ParseError("series_identity_mismatch")
+    if not identity:
+        raise ParseError("series_identity_mismatch")
+    headings = []
+    for heading in article.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
+        text = re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).strip()
+        if re.fullmatch(r"(?:Novel\s*:\s*)?Shadow Slave", text, re.I):
+            continue
+        match = re.fullmatch(r"(?:Chapter\s+)?([1-9][0-9]{0,4})(?:\s+(.+))?", text, re.I)
+        if not match or int(match.group(1)) != expected_chapter:
+            raise ParseError("chapter_heading_conflict")
+        raw_title = match.group(2)
+        if raw_title and _normalized_title(raw_title) is None:
+            raise ParseError("chapter_heading_conflict")
+        title = clean_title(raw_title)
+        if title and (re.search(r"\b[0-9]{1,5}\b", title) or is_non_chapter_title(title)):
+            raise ParseError("chapter_heading_conflict")
+        if title and expected_title and _normalized_title(title) != _normalized_title(expected_title):
+            raise ParseError("chapter_heading_conflict")
+        headings.append((heading, title))
+    if len(headings) != 1:
+        raise ParseError("chapter_candidates_ambiguous")
+    heading, title = headings[0]
+    paragraphs = [p.get_text(" ", strip=True) for p in heading.find_all_next("p")
+                  if article in p.parents and not p.find("a")]
+    body = " ".join(paragraphs)
+    words = re.findall(r"[^\W\d_]+", body, re.UNICODE)
+    if (len(paragraphs) < 3 or len(body) < 800 or len(words) < 150
+            or len({word.casefold() for word in words}) < 40
+            or sum(ch.isalpha() for ch in body) < len(body) * 0.65):
+        raise ParseError("chapter_data_missing")
+    return ChapterReport("Rentry", expected_chapter, title, url, "Rentry:verified_target")
+
+
+def check_rentry(
+    site: SourceConfig, expected_chapter: int | None, expected_title: str | None,
+) -> ChapterReport | None:
+    # No authoritative target is a clean skip, including first setup.
+    if expected_chapter is None:
+        return None
+    url = rentry_chapter_url(expected_chapter)
+    try:
+        html = _fetch_source_html(site, url, allow_redirects=False)
+    except requests.HTTPError as exc:
+        # Only an actual 404 at this exact candidate is normal publication lag.
+        if exc.response is not None and exc.response.status_code == 404 and exc.response.url == url:
+            return None
+        raise
+    return parse_rentry_chapter_page(html, url, expected_chapter, expected_title)
+
+
 @_with_response_diagnostics
 def check_public_site(
     site: SourceConfig, source_position: dict[str, Any] | None = None,
     expected_chapter: int | None = None, expected_title: str | None = None,
     previous_chapter: int | None = None, previous_title: str | None = None,
-) -> ChapterReport:
+) -> ChapterReport | None:
     logging.info("Checking %s.", site.name)
+    if site.name == "Rentry":
+        report = check_rentry(site, expected_chapter, expected_title)
+        if report is not None:
+            _log_public_success(site, report)
+        return report
     if site.name == "LightNovelUp":
         report = check_lightnovelup(site, source_position, expected_chapter)
         _log_public_success(site, report)

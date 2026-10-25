@@ -16,6 +16,7 @@ HTTP_POLICY_CODES = {
     "missing_redirect_location": "HTTP_UNSAFE_REDIRECT",
     "redirect_limit": "HTTP_UNSAFE_REDIRECT",
     "redirect_not_allowed": "HTTP_UNSAFE_REDIRECT",
+    "noncanonical_chapter_url": "HTTP_UNSAFE_REDIRECT",
     "unexpected_content_type": "HTTP_UNSUPPORTED_CONTENT_TYPE",
     "response_too_large": "HTTP_RESPONSE_TOO_LARGE",
 }

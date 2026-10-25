@@ -41,6 +41,10 @@ def diagnose_source(name: str, *, state_path: Path = STATE_PATH) -> int:
     except Exception:
         logging.error("Diagnostic infrastructure failure: code=DIAGNOSTIC_INTERNAL_ERROR stage=internal")
         return 2
+    if report is None and site.name == "Rentry":
+        code = "TARGET_NOT_AVAILABLE" if expected is not None else "TARGET_CONTEXT_MISSING"
+        logging.info("Diagnostic outcome: source=%r code=%s stage=complete", site.name, code)
+        return 0
     logging.info("Diagnostic outcome: source=%r code=SOURCE_OK stage=complete chapter=%s", site.name, report.chapter)
     return 0
 

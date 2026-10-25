@@ -28,6 +28,7 @@ class PendingDeliveryOutcome(StrEnum):
 TARGET_AWARE_PUBLIC_SOURCES = frozenset({
     "Telegram", "Novel Buddy", "FreeWebNovel", "NovelArrow", "NovelFull",
     "ReadNovelFull", "ReChapters", "FreeWebNovel.net",
+    "Rentry",
 })
 
 def configure_logging() -> None:
@@ -86,9 +87,14 @@ def check_public_sites(
         if not site.enabled:
             logging.info("Skipping disabled public site: %s.", site.name)
     eligible = []
+    waiting: set[str] = set()
     suppressed: list[str] = []
     recovery_window = public_source_recovery_window_open()
     for site in enabled:
+        if site.name == "Rentry" and expected_chapter is None:
+            logging.info("Skipping %s without a confirmed chapter target.", site.name)
+            waiting.add(site.name)
+            continue
         if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT and not recovery_window:
             suppressed.append(site.name)
             logging.info(
@@ -99,7 +105,7 @@ def check_public_sites(
             eligible.append(site)
             if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
                 logging.info("Retrying previously suppressed public source during recovery window: %s.", site.name)
-    if enabled and not eligible:
+    if suppressed and not eligible:
         result.fail("every enabled public source is temporarily suppressed outside the recovery window")
         return []
     reports_by_name: dict[str, ChapterReport] = {}
@@ -126,12 +132,20 @@ def check_public_sites(
         for future in as_completed(futures):
             site = futures[future]
             try:
-                reports_by_name[site.name] = future.result()
+                report = future.result()
+                if site.name == "Rentry" and report is None:
+                    waiting.add(site.name)
+                else:
+                    reports_by_name[site.name] = report
             except Exception as exc:
                 errors[site.name] = exc
     reports: list[ChapterReport] = []
     for site in eligible:
-        if site.name in reports_by_name:
+        if site.name in waiting:
+            # A genuine target-page 404 is a successful availability check.
+            # It must never accumulate failures or suppress later publication.
+            failure_counts.pop(site.name, None)
+        elif site.name in reports_by_name:
             report = reports_by_name[site.name]
             reports.append(report)
             if report.position_chapter is not None and report.position_url is not None:
@@ -160,7 +174,7 @@ def check_public_sites(
         result.degrade("optional public sources failed: " + ", ".join(sorted(failures)))
     if suppressed and reports:
         result.degrade("optional public sources temporarily suppressed: " + ", ".join(suppressed))
-    if not reports:
+    if not reports and (not waiting or failures or suppressed):
         result.fail("every enabled public source failed or produced no trustworthy result")
     reports.sort(key=lambda r: PUBLIC_SITE_ORDER.get(r.source, 999))
     return reports
