@@ -10,12 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL, PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_SOURCE
+from shadow_slave_monitor.config import MONITOR_RESULT_PATH, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SITE_ORDER, PUBLIC_SITE_WORKERS, PUBLIC_SITES, PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL, PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW, STATE_PATH, SUSPICIOUS_PUBLIC_CHAPTER_JUMP_LIMIT, WEBNOVEL_CHECK_INTERVAL, WEBNOVEL_CHECK_WINDOW, WEBNOVEL_EMERGENCY_FAILURE_LIMIT, WEBNOVEL_SOURCE
 from shadow_slave_monitor.http_client import safe_exception_category
 from shadow_slave_monitor.diagnostics import diagnostic_summary
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
+from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 from shadow_slave_monitor.notifications import NotificationConfigError, NotificationDeliveryError, merge_pending, pending_due, report_from_pending, send_new_chapter, update_pending_after_failure
-from shadow_slave_monitor.parsers import check_public_site, check_webnovel
+from shadow_slave_monitor.parsers import ParseError, check_public_site, check_webnovel, check_telegram_emergency, require_valid_webnovel_report
 from shadow_slave_monitor.state_manager import StateError, load_state, parse_int, save_state
 from shadow_slave_monitor.timeutil import utc_now
 
@@ -216,6 +217,7 @@ def webnovel_due() -> bool:
 def required_webnovel_check(state: dict[str, Any], result: RunResult) -> ChapterReport | None:
     try:
         report = check_webnovel(WEBNOVEL_SOURCE)
+        require_valid_webnovel_report(report)
     except Exception as exc:
         result.fail("WebNovel could not be requested or parsed while needed")
         logging.error("WebNovel check failed safely: category=%s type=%s", safe_exception_category(exc), type(exc).__name__)
@@ -297,16 +299,93 @@ def first_setup(state: dict[str, Any], result: RunResult) -> None:
     else:
         set_watch_webnovel(state)
 
+def emergency_active(state: dict[str, Any]) -> bool:
+    return state.get("webnovel_failures", 0) == WEBNOVEL_EMERGENCY_FAILURE_LIMIT
+
+
+def report_persisted_webnovel_outage(state: dict[str, Any], result: RunResult) -> None:
+    cycle = int(utc_now().timestamp() // WEBNOVEL_CHECK_INTERVAL.total_seconds())
+    if (emergency_active(state) and state.get("emergency_last_check_ok") is True
+            and state.get("webnovel_failure_cycle") == cycle):
+        result.degrade("WebNovel remains unavailable; emergency source checked successfully; awaiting next scheduled cycle")
+    elif state.get("webnovel_failures", 0):
+        result.fail("WebNovel remains unavailable without a functioning emergency check")
+
+
+def run_emergency_telegram(state: dict[str, Any], result: RunResult) -> None:
+    """The only emergency discovery dispatch; never fans out to public sources."""
+    site = next(site for site in PUBLIC_SITES if site.name == "Telegram")
+    pending = state.get("pending_notification")
+    baseline = max(state["latest_seen"], pending["latest_pending_chapter"] if pending else 0)
+    try:
+        evidence = check_telegram_emergency(site, baseline)
+        if (not isinstance(evidence, ChapterReport) or evidence.source != site.name
+                or not telegram_emergency_evidence_url(evidence.url, evidence.chapter, site.url)):
+            raise ParseError("chapter_data_invalid")
+    except Exception as exc:
+        state["emergency_last_check_ok"] = False
+        logging.warning("Emergency source check failed safely: %s", diagnostic_summary(site, exc))
+        result.fail("WebNovel and emergency source are both unavailable or untrustworthy")
+        return
+    state["emergency_last_check_ok"] = True
+    result.degrade("WebNovel unavailable; emergency source checked successfully")
+    logging.warning("Emergency chapter detection functioning; WebNovel remains unavailable.")
+    if evidence.chapter <= baseline:
+        return
+    state["emergency_provenance"] = {
+        "source": site.name, "chapter": evidence.chapter, "evidence_url": evidence.url,
+    }
+    report = ChapterReport(site.name, evidence.chapter, evidence.title, site.url, evidence.strategy)
+    if pending is None:
+        queue_or_send(state, report, result)
+    else:
+        state["pending_notification"] = merge_pending(pending, state["latest_seen"], report)
+
+
 def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
+    had_failures = bool(state.get("webnovel_failures", 0))
+    was_emergency = emergency_active(state)
     pending_outcome = try_deliver_pending(state, result)
-    if pending_outcome == PendingDeliveryOutcome.DELIVERED:
+    if pending_outcome == PendingDeliveryOutcome.DELIVERED and not had_failures:
         return
     if not webnovel_due():
         logging.info("Skipping WebNovel check because this run is outside the deterministic 20-minute UTC check window.")
+        report_persisted_webnovel_outage(state, result)
         return
-    official = required_webnovel_check(state, result)
+    cycle = int(utc_now().timestamp() // WEBNOVEL_CHECK_INTERVAL.total_seconds())
+    scheduled = webnovel_check_window_open()
+    new_cycle = scheduled and (state.get("webnovel_failure_cycle") is None
+                              or cycle > state["webnovel_failure_cycle"])
+    if scheduled and not new_cycle and not force_webnovel_check_enabled():
+        logging.info("Skipping already attempted failed WebNovel cycle.")
+        report_persisted_webnovel_outage(state, result)
+        return
+    # Keep only authority-check failures local: a working emergency source can
+    # degrade these, but must never conceal pending delivery or unrelated errors.
+    official_result = RunResult()
+    official = required_webnovel_check(state, official_result)
     if official is None:
+        if new_cycle:
+            state["webnovel_failure_cycle"] = cycle
+            state["webnovel_failures"] = min(state.get("webnovel_failures", 0) + 1,
+                                             WEBNOVEL_EMERGENCY_FAILURE_LIMIT)
+            logging.warning("WebNovel failed scheduled cycles: %s/%s.",
+                            state["webnovel_failures"], WEBNOVEL_EMERGENCY_FAILURE_LIMIT)
+            if state["webnovel_failures"] == WEBNOVEL_EMERGENCY_FAILURE_LIMIT:
+                if not was_emergency:
+                    logging.warning("Emergency chapter detection active; authority remains unavailable.")
+                run_emergency_telegram(state, result)
+                return
+        if emergency_active(state):
+            report_persisted_webnovel_outage(state, result)
+        else:
+            for reason in official_result.reasons:
+                result.fail(reason)
         return
+    if had_failures:
+        logging.info("WebNovel recovered; emergency polling stopped; notification history and provenance retained.")
+        state["webnovel_failures"] = 0
+        state["emergency_last_check_ok"] = None
     latest_seen = parse_int(state.get("latest_seen"))
     pending = state.get("pending_notification")
     pending_latest = parse_int(pending.get("latest_pending_chapter")) if isinstance(pending, dict) else None

@@ -305,6 +305,27 @@ class StateWriterPersistenceTests(unittest.TestCase):
             self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
             self.assertEqual(json.loads((repo / state_file).read_text(encoding="utf-8"))["updated_at"], "2026-06-11T12:00:00+00:00")
 
+    def test_emergency_activation_and_same_chapter_recovery_commit_through_base_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            self.initialize_repo(repo)
+            state_file = "state/state.json"
+            state_data = state_writer.validate_state(json.loads((repo / state_file).read_text(encoding="utf-8")))
+            state_data.update(webnovel_failures=4, webnovel_failure_cycle=100,
+                              emergency_last_check_ok=False)
+            artifact_dir = Path(tmp) / "artifact"
+            push_calls: list[list[str]] = []
+            for expected, updates in ((4, {}), (0, dict(webnovel_failures=0, emergency_last_check_ok=None))):
+                state_data.update(updates)
+                self.write_artifact(repo, artifact_dir, state_file, state_data, self.sha256(repo / state_file))
+                with chdir(repo):
+                    self.persist(artifact_dir, state_file, push_calls)
+                persisted = json.loads((repo / state_file).read_text(encoding="utf-8"))
+                self.assertEqual(persisted["webnovel_failures"], expected)
+                self.assertEqual(persisted["latest_webnovel"], state_data["latest_webnovel"])
+            self.assertEqual(len(push_calls), 2)
+
     def test_legacy_repository_accepts_migrated_monitor_artifact_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"

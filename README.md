@@ -14,6 +14,13 @@ Once the chapter is found, the monitor sends a notification through ntfy and ret
 
 If an ntfy notification fails, it is saved and retried later. The monitor continues checking for newer chapters in the meantime and can combine several pending chapters into one notification.
 
+After four distinct failed scheduled checks of the paid source, a persistent
+emergency fallback can detect independently verified chapters from the configured
+backup channel. It checks at most once per 20-minute cycle, remains active through
+extended outages, and stops automatically when the paid source recovers. See
+[emergency operation and recovery](docs/emergency-fallback.md) for the verification,
+state, and scheduling rules.
+
 A separate watchdog runs through GitHub Actions approximately every 90 minutes. It sends an error notification only if the main monitor has not completed successfully for at least five hours.
 
 ## PHONE APP

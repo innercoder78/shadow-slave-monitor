@@ -206,6 +206,15 @@ def timestamp_not_older(current: Any, artifact: Any) -> bool:
 def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any]) -> bool:
     if current == artifact:
         return True
+    # Counters can increase or reset without any chapter advancing. Chapter
+    # maxima and updated_at cannot establish causality for these transitions.
+    # A stale artifact with different authority history is a conflict, never an
+    # instruction to merge/reset it. The existing base-hash lease applies fresh
+    # transitions, including recovery at the same confirmed chapter.
+    for key, default in (("webnovel_failures", 0), ("webnovel_failure_cycle", None),
+                         ("emergency_last_check_ok", None), ("emergency_provenance", None)):
+        if current.get(key, default) != artifact.get(key, default):
+            return False
     cur_seen = current.get("latest_seen") or 0
     art_seen = artifact.get("latest_seen") or 0
     cur_web = current.get("latest_webnovel") or 0
@@ -224,6 +233,9 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
     art_first, art_pending_latest = pending_range(artifact)
     cur_first, cur_pending_latest = pending_range(current)
     if art_pending_latest is not None:
+        if (cur_seen < art_pending_latest and cur_pending_latest == art_pending_latest
+                and current.get("pending_notification") != artifact.get("pending_notification")):
+            return False
         pending_covered = cur_seen >= art_pending_latest or (
             cur_pending_latest is not None
             and cur_pending_latest >= art_pending_latest
