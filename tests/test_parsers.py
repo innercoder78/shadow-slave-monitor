@@ -65,7 +65,7 @@ class ChikariParserTests(unittest.TestCase):
                 "ReadNovelFull": True,
                 "ReChapters": True,
                 "FreeWebNovel.net": True,
-                "Rentry": False,
+                "Rentry": True,
             },
         )
 

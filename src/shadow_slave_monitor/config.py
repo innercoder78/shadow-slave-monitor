@@ -101,9 +101,9 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
     SourceConfig("ReChapters", "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4", True, ("rechapters.com", "www.rechapters.com")),
     SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
-    # Live examples lack explicit novel identity. Keep disabled until rendered
-    # content can satisfy the independent chapter-verification requirements.
-    SourceConfig("Rentry", "https://rentry.co/", False, ("rentry.co",)),
+    # Target-only verification requires authoritative title corroboration when
+    # the rendered chapter has no explicit novel identity.
+    SourceConfig("Rentry", "https://rentry.co/", True, ("rentry.co",)),
 )
 
 PUBLIC_SITE_ORDER = {site.name: index for index, site in enumerate(PUBLIC_SITES)}

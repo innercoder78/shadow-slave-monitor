@@ -2405,12 +2405,12 @@ def rentry_chapter_url(chapter: int) -> str:
 
 def parse_rentry_chapter_page(
     html: str, url: str, expected_chapter: int, expected_title: str | None,
-) -> ChapterReport:
+) -> ChapterReport | None:
     """Verify rendered content, independently of the predictable URL.
 
-    The observed examples use .entry-text article with a numbered h2 and
-    paragraphs, but lack explicit novel identity and therefore fail closed.
-    Neither URL suffixes, document titles nor story character names prove it.
+    An absent series label requires exact authoritative title corroboration.
+    Only the observed bare-heading/navigation template can mean unpublished;
+    unfamiliar short pages and contradictory evidence remain errors.
     """
     if url != rentry_chapter_url(expected_chapter):
         raise ParseError("chapter_page_confirmation_failed")
@@ -2421,16 +2421,20 @@ def parse_rentry_chapter_page(
     if len(canonicals) != 1 or canonicals[0].get("href") != url:
         raise ParseError("chapter_page_confirmation_failed")
     # Exclude content that cannot supply visible chapter evidence.
-    for node in list(soup.select("script, style, template, noscript, [hidden], [aria-hidden='true']")):
-        node.decompose()
+    for node in list(soup.select("script, style, template, noscript, nav, footer, aside, [hidden], [aria-hidden='true']")):
+        if node.parent is not None:
+            node.decompose()
     for node in list(soup.select("[style]")):
-        if re.search(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)", node.get("style", ""), re.I):
+        if node.parent is not None and re.search(r"(?:display\s*:\s*none|visibility\s*:\s*hidden)", node.get("style", ""), re.I):
             node.decompose()
     containers = soup.select(".entry-text")
     articles = soup.select(".entry-text article")
     if len(containers) != 1 or len(articles) != 1:
         raise ParseError("chapter_data_missing")
     article = articles[0]
+    if (article.select("form, input, iframe, object, embed")
+            or soup.select("#challenge-form, #cf-challenge-running, input[type='password']")):
+        raise ParseError("chapter_page_confirmation_failed")
     identity = False
     for label in article.find_all(["h1", "h2", "h3", "p"]):
         text = re.sub(r"\s+", " ", label.get_text(" ", strip=True)).strip()
@@ -2438,8 +2442,6 @@ def parse_rentry_chapter_page(
             identity = True
         elif re.match(r"Novel\s*:", text, re.I):
             raise ParseError("series_identity_mismatch")
-    if not identity:
-        raise ParseError("series_identity_mismatch")
     headings = []
     for heading in article.find_all(["h1", "h2", "h3", "h4", "h5", "h6"]):
         text = re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).strip()
@@ -2460,14 +2462,75 @@ def parse_rentry_chapter_page(
     if len(headings) != 1:
         raise ParseError("chapter_candidates_ambiguous")
     heading, title = headings[0]
-    paragraphs = [p.get_text(" ", strip=True) for p in heading.find_all_next("p")
-                  if article in p.parents and not p.find("a")]
+    # The document title repeats the visible heading in genuine examples. It
+    # cannot establish identity, but contradictory metadata must fail closed.
+    document_titles = soup.find_all("title")
+    if len(document_titles) > 1:
+        raise ParseError("chapter_heading_conflict")
+    if document_titles:
+        document_title = document_titles[0].get_text(" ", strip=True)
+        if (document_title.casefold() != "rentry"
+                and _normalized_title(document_title) != _normalized_title(heading.get_text(" ", strip=True))):
+            raise ParseError("chapter_heading_conflict")
+
+    adjacent_urls = {f"https://rentry.co/{expected_chapter - 1}ss",
+                     f"https://rentry.co/{expected_chapter + 1}ss"}
+    navigation = set()
+    for link in article.find_all("a"):
+        href = link.get("href")
+        if link in heading.descendants and href == "#" + heading.get("id", ""):
+            continue
+        if href not in adjacent_urls:
+            raise ParseError("chapter_page_confirmation_failed")
+        navigation.add(href)
+    # Navigation is evidence of template shape only; these links are never
+    # requested. Remove it before counting meaningful, visible prose.
+    for link in list(article.find_all("a")):
+        link.decompose()
+    for label in list(article.find_all(["h1", "h2", "h3", "p"])):
+        if re.fullmatch(r"(?:Novel\s*:\s*)?Shadow Slave", label.get_text(" ", strip=True), re.I):
+            label.decompose()
+    placeholder_message = re.compile(
+        r"(?:coming soon|not yet published|chapter not yet available|stay tuned|placeholder)", re.I,
+    )
+    paragraphs = []
+    unknown_text = []
+    seen = set()
+    body_nodes = {id(p) for p in heading.find_all_next("p") if article in p.parents}
+    for p in article.find_all("p"):
+        text = re.sub(r"\s+", " ", p.get_text(" ", strip=True)).strip()
+        if not text:
+            continue
+        remainder = placeholder_message.sub("", text).strip(" .!:-–—")
+        if not remainder:
+            continue
+        unknown_text.append(text)
+        key = text.casefold()
+        if id(p) in body_nodes and key not in seen:
+            seen.add(key)
+            paragraphs.append(text)
+    # Unwrapped text or unfamiliar markup is not the observed empty template.
+    template_shape = (heading.parent.name == "div" and heading.parent.parent is article
+                      and len(article.find_all("div")) == 1
+                      and all(node.name in {"div", "p", "h1", "h2", "hr"}
+                              for node in article.find_all())
+                      and all(not str(text).strip() or text.find_parent(["p", "h1", "h2"])
+                              for text in article.find_all(string=True)))
     body = " ".join(paragraphs)
     words = re.findall(r"[^\W\d_]+", body, re.UNICODE)
     if (len(paragraphs) < 3 or len(body) < 800 or len(words) < 150
             or len({word.casefold() for word in words}) < 40
             or sum(ch.isalpha() for ch in body) < len(body) * 0.65):
+        if (not title and navigation == adjacent_urls and template_shape
+                and sum(map(len, unknown_text)) <= 200
+                and len(re.findall(r"[^\W\d_]+", " ".join(unknown_text))) <= 40):
+            return None
         raise ParseError("chapter_data_missing")
+    if not identity and (heading.name != "h2" or heading.parent.name != "div"
+                         or heading.parent.parent is not article
+                         or not title or not _normalized_title(expected_title)
+                         or _normalized_title(title) != _normalized_title(expected_title)):
+        raise ParseError("series_identity_mismatch")
     return ChapterReport("Rentry", expected_chapter, title, url, "Rentry:verified_target")
 
 

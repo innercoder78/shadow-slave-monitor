@@ -142,7 +142,7 @@ def check_public_sites(
     reports: list[ChapterReport] = []
     for site in eligible:
         if site.name in waiting:
-            # A genuine target-page 404 is a successful availability check.
+            # A genuine 404 or recognized empty template is an availability check.
             # It must never accumulate failures or suppress later publication.
             failure_counts.pop(site.name, None)
         elif site.name in reports_by_name:

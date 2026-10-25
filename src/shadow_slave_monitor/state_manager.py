@@ -68,7 +68,7 @@ def validate_source_config() -> None:
         "ReadNovelFull": True,
         "ReChapters": True,
         "FreeWebNovel.net": True,
-        "Rentry": False,
+        "Rentry": True,
     }
     actual = {site.name: site.enabled for site in PUBLIC_SITES}
     if actual != expected:
