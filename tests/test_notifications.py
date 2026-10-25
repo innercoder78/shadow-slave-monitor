@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from shadow_slave_monitor.config import NTFY_BODY_MAX_BYTES, PUBLIC_SITES
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, NTFY_BODY_MAX_BYTES, PUBLIC_SITES
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.notifications import (
     NEW_CHAPTER_NOTIFICATION_TITLE,
@@ -15,6 +15,7 @@ from shadow_slave_monitor.notifications import (
     send_watchdog,
     source_names,
 )
+from shadow_slave_monitor.parsers import ParseError
 from shadow_slave_monitor.state_manager import validate_pending
 
 
@@ -56,11 +57,12 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertEqual(notification_body(3000, self.report("Mystery Site, Telegram")), "There are 117 new chapters available on the free sites.\nLatest Chapter: 3117 — Old Bones\n\nSOURCES:\nTelegram [https://t.me/s/shadow_slave_fastes]\nMystery Site")
         self.assertEqual(notification_body(3116, self.report("Mystery Site", url="https://mystery.example")), "There is 1 new chapter available on the free sites.\nLatest Chapter: 3117 — Old Bones\n\nSOURCE:\nMystery Site [https://mystery.example]")
 
-    def test_known_sources_receive_their_own_general_urls(self) -> None:
+    def test_known_sources_receive_their_own_notification_urls(self) -> None:
         report = self.report(", ".join(site.name for site in reversed(PUBLIC_SITES)))
         body = notification_body(3116, report)
         expected_lines = [
-            f"{'ShadowSlave Space' if site.name == 'ShadowSlave.Space' else site.name} [{site.url}]"
+            f"{'ShadowSlave Space' if site.name == 'ShadowSlave.Space' else site.name} "
+            f"[{f'https://rentry.co/{report.chapter}ss' if site.name == 'Rentry' else site.url}]"
             for site in PUBLIC_SITES
         ]
         self.assertEqual(body.splitlines()[4:], expected_lines)
@@ -68,6 +70,49 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertNotIn("\nChapters ", body)
         self.assertNotIn("Source:", body)
         self.assertFalse(body.splitlines()[1].endswith("."))
+
+    def test_rentry_uses_verified_chapter_number_instead_of_report_url(self) -> None:
+        for chapter in (3224, 3225, 3226, MIN_CHAPTER, MAX_CHAPTER):
+            for url in ("https://rentry.co/", "https://rentry.co/9999ss", "https://untrusted.example/"):
+                with self.subTest(chapter=chapter, url=url):
+                    report = ChapterReport("Rentry", chapter, "Chapter Title", url)
+                    with patch("shadow_slave_monitor.notifications._post_ntfy") as post:
+                        send_new_chapter("topic", chapter - 1, report)
+                    post.assert_called_once_with(
+                        "topic", NEW_CHAPTER_NOTIFICATION_TITLE,
+                        "There is 1 new chapter available on the free sites.\n"
+                        f"Latest Chapter: {chapter} — Chapter Title\n\nSOURCE:\n"
+                        f"Rentry [https://rentry.co/{chapter}ss]",
+                    )
+
+    def test_rentry_stays_last_with_mixed_sources_ordering_and_deduplication(self) -> None:
+        self.assertEqual(PUBLIC_SITES[-1].name, "Rentry")
+        source = " Rentry, Mystery Site, ShadowSlave.Space, Chikari, Rentry, Chikari "
+        report = ChapterReport(source, 3225, "Chapter Title", "https://chikari.moe/novels/shadow-slave/3225")
+        self.assertEqual(notification_body(3223, report),
+                         "There are 2 new chapters available on the free sites.\n"
+                         "Latest Chapter: 3225 — Chapter Title\n\nSOURCES:\n"
+                         "Chikari [https://chikari.moe/novels/shadow-slave]\n"
+                         "ShadowSlave Space [https://shadowslave.space]\n"
+                         "Rentry [https://rentry.co/3225ss]\nMystery Site")
+        self.assertEqual(report.source, source)
+
+    def test_rentry_notification_rejects_invalid_chapter_numbers(self) -> None:
+        for chapter in (True, False, "3225", "3225/evil", 3225.0, None, MIN_CHAPTER - 1, MAX_CHAPTER + 1, -1):
+            with self.subTest(chapter=chapter), patch("shadow_slave_monitor.notifications._post_ntfy") as post:
+                with self.assertRaises(ParseError):
+                    send_new_chapter("topic", None, ChapterReport("Rentry", chapter, None, "https://untrusted.example"))
+                post.assert_not_called()
+
+    def test_rentry_override_requires_exact_canonical_identity(self) -> None:
+        for source in ("rentry", "RENTRY", "Rentry Mirror", "https://rentry.co/"):
+            with self.subTest(source=source):
+                report = ChapterReport(source, 3225, None, "https://unknown.example/")
+                self.assertEqual(notification_body(3224, report).splitlines()[4:],
+                                 [f"{source} [https://unknown.example/]"])
+                report = ChapterReport(f"{source}, Rentry", 3225, None, "https://untrusted.example/")
+                self.assertEqual(notification_body(3224, report).splitlines()[4:],
+                                 ["Rentry [https://rentry.co/3225ss]", source])
 
     def test_novelarrow_uses_its_general_source_url(self) -> None:
         body = notification_body(3116, self.report("NovelArrow"))
@@ -173,6 +218,27 @@ class NewChapterNotificationTests(unittest.TestCase):
                     body = notification_body(3116, report)
                 self.assertEqual(body, expected)
                 self.assertLessEqual(len(body.encode("utf-8")), limit)
+
+    def test_rentry_body_size_fallbacks_remove_urls_without_using_homepage(self) -> None:
+        availability = "There is 1 new chapter available on the free sites.\n"
+        cases = [
+            ("without_urls", "Rentry, ShadowSlave.Space", "Chapter Title",
+             "Latest Chapter: 3225 — Chapter Title\n\nSOURCES:\nShadowSlave Space\nRentry"),
+            ("without_title", "Rentry", "界" * 2000,
+             "Latest Chapter: 3225\n\nSOURCE:\nRentry"),
+            ("limited_sources", "Rentry, " + "界" * 2000, "Chapter Title",
+             "Latest Chapter: 3225\n\nSOURCES:\nRentry"),
+        ]
+        for name, source, title, lines in cases:
+            with self.subTest(fallback=name):
+                expected = availability + lines
+                report = ChapterReport(source, 3225, title, "https://rentry.co/")
+                limit = len(expected.encode("utf-8"))
+                with patch("shadow_slave_monitor.notifications.NTFY_BODY_MAX_BYTES", limit):
+                    body = notification_body(3224, report)
+                self.assertEqual(body, expected)
+                self.assertLessEqual(len(body.encode("utf-8")), limit)
+                self.assertNotIn("https://", body)
 
 
 class PendingNotificationTests(unittest.TestCase):
