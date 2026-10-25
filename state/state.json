@@ -2,12 +2,12 @@
   "latest_seen": 3224,
   "latest_title": "First Thunder",
   "latest_url": "https://telegra.ph/3224-First-Thunder-10-24",
-  "latest_webnovel": 3224,
-  "latest_webnovel_title": "First Thunder",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3225,
+  "latest_webnovel_title": "The Fourth Warrior",
+  "mode": "watch_free_sites",
+  "target_chapter": 3225,
+  "target_title": "The Fourth Warrior",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 7,
@@ -17,5 +17,5 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3193-regret-can/"
     }
   },
-  "updated_at": "2026-10-24T04:00:31+00:00"
+  "updated_at": "2026-10-25T01:40:19+00:00"
 }
