@@ -43,10 +43,10 @@ class StateWriterValidationTests(unittest.TestCase):
         }
         self.assertFalse(state_writer.monitor_artifact_superseded(current, artifact))
         self.assertTrue(state_writer.monitor_artifact_superseded(artifact, current))
-        current["public_source_failures"] = {"Readwn": 1}
+        current["public_source_failures"] = {"ReadNovelFull": 1}
         merged = state_writer.reconcile_monitor_cursor_advancement(current, artifact)
         self.assertEqual(merged["source_positions"], artifact["source_positions"])
-        self.assertEqual(merged["public_source_failures"], {"Readwn": 1})
+        self.assertEqual(merged["public_source_failures"], {"ReadNovelFull": 1})
 
     def test_cursor_reconciliation_rejects_regressions_and_other_conflicts(self) -> None:
         current = state_writer.validate_state(json.loads((ROOT / "state" / "state.json").read_text()))

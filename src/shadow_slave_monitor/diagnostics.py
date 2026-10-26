@@ -34,8 +34,6 @@ PARSE_CODES = {
     "chapter_heading_conflict": "PARSE_CHAPTER_MISMATCH",
     "chapter_page_confirmation_failed": "PARSE_CHAPTER_MISMATCH",
     "WebNovel parsed chapter is outside the trusted range": "PARSE_CHAPTER_INVALID",
-    "ReChapters chapter heading did not confirm listing": "PARSE_CHAPTER_MISMATCH",
-    "ReChapters chapter title contradicted listing": "PARSE_CHAPTER_MISMATCH",
     "chapter heading contained contradictory numeric evidence": "PARSE_CHAPTER_MISMATCH",
     "chapter heading did not confirm expected target title": "PARSE_CHAPTER_MISMATCH",
     "NovelArrow expected title is missing": "PARSE_CHAPTER_MISMATCH",

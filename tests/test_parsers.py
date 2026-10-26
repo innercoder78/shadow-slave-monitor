@@ -20,9 +20,9 @@ from shadow_slave_monitor.parsers import (
     parse_novel_phoenix_candidates,
     parse_novel_buddy_candidates,
     parse_novelarrow_candidates,
-    parse_novel_live_candidates,
+    parse_novelfire_candidates,
+    _confirm_novelarrow_chapter_page,
     parse_novelfull_candidates,
-    parse_readwn_candidates,
     parse_shadowslave_space_chapter_title,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
@@ -54,16 +54,13 @@ class ChikariParserTests(unittest.TestCase):
                 "Novel Buddy": True,
                 "ShadowSlave.Space": True,
                 "FreeWebNovel": True,
-                "Readwn": True,
                 "LightNovelUp": True,
-                "Novel Phoenix": True,
-                "NovelArrow": True,
-                "NovelFire": True,
+                "Novel Phoenix": False,
+                "NovelPing": False,
+                "NovelFire": False,
                 "SSNovel": True,
                 "NovelFull": True,
-                "Novel Live": True,
                 "ReadNovelFull": True,
-                "ReChapters": True,
                 "FreeWebNovel.net": True,
                 "Rentry": True,
             },
@@ -210,84 +207,6 @@ class ChikariParserTests(unittest.TestCase):
                          (3149, None, "https://chikari.moe/novels/shadow-slave/3149"))
 
 
-class NovelLiveParserTests(unittest.TestCase):
-    source = next(site for site in PUBLIC_SITES if site.name == "Novel Live")
-
-    @staticmethod
-    def latest(heading: str = "6 Latest Chapters", links: str = "") -> str:
-        return f"<main><h1>Shadow Slave</h1><section><h2>{heading}</h2><div>{links}</div></section></main>"
-
-    def parse(self, html: str):
-        return parse_novel_live_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
-
-    def test_enabled_configuration_has_only_com_hosts(self) -> None:
-        self.assertEqual(
-            self.source,
-            SourceConfig("Novel Live", "https://novellive.com/book/shadow-slave", True,
-                         ("novellive.com", "www.novellive.com")),
-        )
-        self.assertNotIn("novellive.app", repr(PUBLIC_SITES))
-
-    def test_semantic_latest_section_returns_highest_with_clean_title(self) -> None:
-        html = """
-          <p>9999 chapters · 88000 votes · rating 3189</p><nav>Page 9000</nav>
-          <aside><a href="/book/other/chapter-9998-noise">Other novel Chapter 9998</a></aside>
-          <section><h2>6 Latest Chapters</h2><div>
-            <a href="/book/shadow-slave/chapter-3182-plight-of-gods">Chapter 3182 Plight of Gods</a>
-            <a href="/book/shadow-slave/chapter-3181-bringer-of-light">Chapter 3181 Bringer of Light</a>
-          </div></section><p>Completed</p>
-        """
-        candidates = self.parse(html)
-        self.assertEqual([(c.chapter, c.title) for c in candidates],
-                         [(3182, "Plight of Gods"), (3181, "Bringer of Light")])
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html) as fetch:
-            report = check_public_site(self.source)
-        self.assertEqual((report.chapter, report.title, report.url),
-                         (3182, "Plight of Gods", "https://novellive.com/book/shadow-slave/chapter-3182-plight-of-gods"))
-        fetch.assert_called_once_with(self.source)
-
-    def test_dynamic_heading_count_is_supported(self) -> None:
-        html = self.latest("12 Latest Chapters", '<a href="/book/shadow-slave/chapter-3182-plight-of-gods">Chapter 3182 Plight of Gods</a>')
-        self.assertEqual([c.chapter for c in self.parse(html)], [3182])
-
-    def test_visible_number_or_title_disagreement_is_rejected(self) -> None:
-        links = (
-            '<a href="/book/shadow-slave/chapter-3181-plight-of-gods">Chapter 3182 Plight of Gods</a>'
-            '<a href="/book/shadow-slave/chapter-3182-another-title">Chapter 3182 Plight of Gods</a>'
-        )
-        self.assertEqual(self.parse(self.latest(links=links)), [])
-
-    def test_wrong_novel_and_untrusted_domain_are_rejected(self) -> None:
-        links = (
-            '<a href="/book/other/chapter-3182-plight-of-gods">Chapter 3182 Plight of Gods</a>'
-            '<a href="https://example.com/book/shadow-slave/chapter-3182-plight-of-gods">Chapter 3182 Plight of Gods</a>'
-        )
-        self.assertEqual(self.parse(self.latest(links=links)), [])
-
-    def test_missing_or_ambiguous_latest_section_fails_closed(self) -> None:
-        link = '<a href="/book/shadow-slave/chapter-3182-plight-of-gods">Chapter 3182 Plight of Gods</a>'
-        missing = f"<h2>All Chapters</h2>{link}<p>9999 votes</p>"
-        self.assertEqual(self.parse(missing), [])
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=missing):
-            with self.assertRaises(ParseError):
-                check_public_site(self.source)
-        self.assertEqual(self.parse(self.latest(links=link) + self.latest("7 Latest Chapters", link)), [])
-
-    def test_malformed_and_noncanonical_links_are_rejected(self) -> None:
-        invalid = (
-            "http://novellive.com/book/shadow-slave/chapter-3182-plight-of-gods",
-            "/book/shadow-slave/chapter-3182-plight-of-gods?ref=latest",
-            "/book/shadow-slave/chapter-3182-plight-of-gods#latest",
-            "/book/shadow-slave/chapter-3182-plight-of-gods/extra",
-            "/book/shadow-slave/not-chapter-3182-plight-of-gods",
-            "/book/shadow-slave/chapter-3182",
-            "/book/shadow-slave/chapter-3182-plight%2dof-gods",
-            "https://novellive.com:443/book/shadow-slave/chapter-3182-plight-of-gods",
-        )
-        links = "".join(f'<a href="{href}">Chapter 3182 Plight of Gods</a>' for href in invalid)
-        self.assertEqual(self.parse(self.latest(links=links)), [])
-
-
 class NovelBuddyParserTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "Novel Buddy")
 
@@ -369,12 +288,15 @@ class NovelFireParserTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "NovelFire")
 
     def check(self, html: str):
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
-            return check_public_site(self.source)
+        candidates = parse_novelfire_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+        if not candidates:
+            raise ParseError("no reference candidates")
+        best = max(candidates, key=lambda report: report.chapter)
+        return ChapterReport(self.source.name, best.chapter, best.title, best.url)
 
-    def test_enabled_configuration_and_main_latest_card(self) -> None:
+    def test_disabled_reference_configuration_and_main_latest_card(self) -> None:
         validate_source_config()
-        self.assertTrue(self.source.enabled)
+        self.assertFalse(self.source.enabled)
         html = '<p>3122Chapters</p><a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>'
         report = self.check(html)
         self.assertEqual((report.chapter, report.title, report.url),
@@ -408,20 +330,17 @@ class NovelArrowParserTests(unittest.TestCase):
     source = SourceConfig(
         "NovelArrow",
         "https://novelarrow.com/novel/shadow-slave",
-        True,
+        False,
         ("novelarrow.com", "www.novelarrow.com"),
     )
 
     def check(self, html: str):
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
-            return check_public_site(self.source)
+        candidates = parse_novelarrow_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+        if not candidates:
+            raise ParseError("no reference candidates")
+        best = max(candidates, key=lambda report: report.chapter)
+        return ChapterReport(self.source.name, best.chapter, best.title, best.url)
 
-    def test_source_is_enabled_in_exact_configuration(self) -> None:
-        validate_source_config()
-        sites = list(PUBLIC_SITES)
-        index = next(i for i, site in enumerate(sites) if site.name == "NovelArrow")
-        self.assertTrue(sites[index].enabled)
-        self.assertEqual(sites[index].allowed_hosts, ("novelarrow.com", "www.novelarrow.com"))
 
     def test_realistic_latest_chapter_section(self) -> None:
         html = """
@@ -495,9 +414,10 @@ class NovelArrowParserTests(unittest.TestCase):
         listing = ("<h2>Latest chapter</h2><div><a href='/chapter/shadow-slave/"
                    "chapter-entertaining-guest'>Chapter Entertaining Guest</a></div>")
         page = "<title>Shadow Slave / Chapter Entertaining Guest | Read on NovelArrow</title><h1>Reader</h1>"
-        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, page]):
-            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
-        self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
+        reports = parse_novelarrow_candidates(BeautifulSoup(listing, "html.parser"), self.source.url,
+                                               3189, "Entertaining Guest")
+        self.assertEqual([(r.chapter, r.title) for r in reports], [(3189, "Entertaining Guest")])
+        self.assertEqual(_confirm_novelarrow_chapter_page(page, 3189, "Entertaining Guest"), "Entertaining Guest")
 
     def test_title_only_target_page_confirmation_fails_closed(self) -> None:
         listing = ("<h2>Latest chapter</h2><div><a href='/chapter/shadow-slave/"
@@ -510,12 +430,10 @@ class NovelArrowParserTests(unittest.TestCase):
             "<title>Shadow Slave reader</title><h1>Reader</h1>",
         )
         for page in bad_pages:
-            with self.subTest(page=page), patch(
-                "shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, page]
-            ), self.assertRaises(ParseError):
-                check_public_site(self.source, None, 3189, "Entertaining Guest")
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=listing), self.assertRaises(ParseError):
-            check_public_site(self.source, None, 3189, "Wrong Title")
+            with self.subTest(page=page), self.assertRaises(ParseError):
+                _confirm_novelarrow_chapter_page(page, 3189, "Entertaining Guest")
+        self.assertEqual(parse_novelarrow_candidates(BeautifulSoup(listing, "html.parser"),
+                         self.source.url, 3189, "Wrong Title"), [])
 
 
 class ShadowSlaveSpaceParserTests(unittest.TestCase):
@@ -789,12 +707,13 @@ class NovelPhoenixParserTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == "Novel Phoenix")
 
     def check(self, html: str):
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html) as fetch:
-            report = check_public_site(self.source)
-        fetch.assert_called_once_with(self.source)
-        return report
+        candidates = parse_novel_phoenix_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
+        if not candidates:
+            raise ParseError("no reference candidates")
+        best = max(candidates, key=lambda report: report.chapter)
+        return ChapterReport(self.source.name, best.chapter, best.title, best.url)
 
-    def test_exact_enabled_configuration_immediately_after_freewebnovel(self) -> None:
+    def test_exact_disabled_configuration_immediately_after_freewebnovel(self) -> None:
         validate_source_config()
         sites = list(PUBLIC_SITES)
         index = sites.index(self.source)
@@ -804,7 +723,7 @@ class NovelPhoenixParserTests(unittest.TestCase):
             SourceConfig(
                 "Novel Phoenix",
                 "https://novelphoenix.com/novel/shadow-slave/chapters",
-                True,
+                False,
                 ("novelphoenix.com", "www.novelphoenix.com"),
             ),
         )
@@ -1107,7 +1026,12 @@ class PublicSourceLoggingTests(unittest.TestCase):
         with patch("shadow_slave_monitor.parsers.fetch_html", return_value="<html></html>"), \
              patch("shadow_slave_monitor.parsers.iter_public_candidates", return_value=[candidate]), \
              self.assertLogs(level="INFO") as logs:
-            report = check_public_site(source)
+            if source.enabled and any(site.name == source.name and site.enabled for site in PUBLIC_SITES):
+                report = check_public_site(source)
+            else:
+                # Dormant references and unknown identities cannot enter dispatch.
+                report = ChapterReport(source.name, candidate.chapter, candidate.title, candidate.url)
+                _log_public_success(source, report)
         self.assertEqual((report.chapter, report.title, report.url),
                          (candidate.chapter, candidate.title, candidate.url))
         return "\n".join(logs.output)
@@ -1195,13 +1119,9 @@ class PublicSourceLoggingTests(unittest.TestCase):
             ("ShadowSlave.Space", "https://shadowslave.space/chapters/3144"),
             ("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave/chapter-3144/"),
             ("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapter-3144/"),
-            ("NovelArrow", "https://novelarrow.com/chapter/shadow-slave/chapter-3144-a-new-day/"),
             ("NovelFire", "https://novelfire.net/book/shadow-slave/chapter-3144/"),
-            ("Novel Live", "https://novellive.com/book/shadow-slave/chapter-3144-a-new-day"),
-            ("Readwn", "https://readwn.org/book/shadow-slave/chapter-3144-a-new-day/"),
             ("ReadNovelFull", "https://readnovelfull.com/shadow-slave/chapter-3144-a-new-day.html"),
             ("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave/chapter-3144-a-new-day.html"),
-            ("ReChapters", "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4/chapterid1"),
         )
         for name, url in cases:
             source = next(site for site in PUBLIC_SITES if site.name == name)
@@ -1301,60 +1221,6 @@ class TelegramParserTests(unittest.TestCase):
             2986,
             "A Memory Most Dreadful",
         )
-
-
-class ReadwnParserTests(unittest.TestCase):
-    source = next(site for site in PUBLIC_SITES if site.name == "Readwn")
-
-    def check(self, html: str) -> ChapterReport:
-        with patch("shadow_slave_monitor.parsers.fetch_html", return_value=html):
-            return check_public_site(self.source)
-
-    def test_enabled_configuration_and_semantic_latest_section(self) -> None:
-        self.assertEqual(
-            self.source,
-            SourceConfig("Readwn", "https://readwn.org/book/shadow-slave", True,
-                         ("readwn.org", "www.readwn.org")),
-        )
-        html = '''
-          <a href="/book/shadow-slave/chapter-9999-noise">Chapter 9999 Noise</a>
-          <section><h2>6 Latest Chapters</h2><div>
-            <a href="/book/shadow-slave/chapter-3173-life-goes-on">Chapter 3173 Life Goes On</a>
-            <a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Chapter 3174 — Tatal's Basilisk</a>
-          </div></section>
-          <p>999999 views · 2026-09-05 · 4.9 rating · page 8888</p>
-        '''
-        report = self.check(html)
-        self.assertEqual((report.chapter, report.title, report.url),
-                         (3174, "Tatal's Basilisk",
-                          "https://readwn.org/book/shadow-slave/chapter-3174-tatals-basilisk"))
-
-    def test_relative_absolute_and_titleless_canonical_links(self) -> None:
-        html = '''<section><h3>Latest Release</h3><div>
-          <a href="https://www.readwn.org/book/shadow-slave/chapter-3173-life-goes-on">Latest chapter</a>
-          <a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Read now</a>
-        </div></section>'''
-        candidates = parse_readwn_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
-        self.assertEqual([item.chapter for item in candidates], [3173, 3174])
-        self.assertIsNone(candidates[1].title)
-
-    def test_untrusted_latest_information_fails_closed(self) -> None:
-        bad_links = (
-            '<a href="/book/shadow-slave/chapter-3173-life">Chapter 3174 Wrong</a>',
-            '<a href="https://evil.example/book/shadow-slave/chapter-3174-title">Chapter 3174 Title</a>',
-            '<a href="/book/shadow-slave/3174-title">Chapter 3174 Title</a>',
-            '<a href="http://readwn.org/book/shadow-slave/chapter-3174-title">Chapter 3174 Title</a>',
-            '<a href="/book/shadow-slave/chapter-3174-title?next=9999">Chapter 3174 Title</a>',
-        )
-        for link in bad_links:
-            html = f"<section><h2>Latest Chapters</h2><div>{link}</div></section><p>Chapter 9999 Noise</p>"
-            with self.subTest(link=link), self.assertRaises(ParseError):
-                self.check(html)
-
-    def test_missing_semantic_latest_area_does_not_scan_other_links(self) -> None:
-        html = '<a href="/book/shadow-slave/chapter-3174-tatals-basilisk">Chapter 3174 Tatal\'s Basilisk</a>'
-        with self.assertRaises(ParseError):
-            self.check(html)
 
 
 class LightNovelUpParserTests(unittest.TestCase):

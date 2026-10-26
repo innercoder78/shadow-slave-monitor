@@ -114,10 +114,10 @@ class NewChapterNotificationTests(unittest.TestCase):
                 self.assertEqual(notification_body(3224, report).splitlines()[4:],
                                  ["Rentry [https://rentry.co/3225ss]", source])
 
-    def test_novelarrow_uses_its_general_source_url(self) -> None:
-        body = notification_body(3116, self.report("NovelArrow"))
+    def test_novelping_uses_its_general_source_url(self) -> None:
+        body = notification_body(3116, self.report("NovelPing"))
         self.assertIn(
-            "SOURCE:\nNovelArrow [https://novelarrow.com/novel/shadow-slave]",
+            "SOURCE:\nNovelPing [https://novelping.com/book/shadow-slave]",
             body,
         )
 
@@ -184,10 +184,10 @@ class NewChapterNotificationTests(unittest.TestCase):
     def test_new_public_source_uses_its_general_book_url(self) -> None:
         body = notification_body(
             3181,
-            ChapterReport("Novel Live", 3182, "Plight of Gods",
-                          "https://novellive.com/book/shadow-slave/chapter-3182-plight-of-gods"),
+            ChapterReport("NovelFull", 3182, "Plight of Gods",
+                          "https://novelfull.com/shadow-slave/chapter-3182-plight-of-gods.html"),
         )
-        self.assertIn("Novel Live [https://novellive.com/book/shadow-slave]", body)
+        self.assertIn("NovelFull [https://novelfull.com/shadow-slave.html]", body)
         self.assertNotIn("chapter-3182", body)
 
     def test_updated_sources_use_their_general_source_urls(self) -> None:

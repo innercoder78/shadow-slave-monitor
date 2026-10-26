@@ -16,7 +16,6 @@ from shadow_slave_monitor.parsers import (
     parse_novelfull_candidates,
     parse_novelarrow_candidates,
     parse_readnovelfull_candidates,
-    parse_rechapters_candidates,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
 )
@@ -120,15 +119,6 @@ class PreviousContextParserTests(unittest.TestCase):
         self.assertEqual(waiting[0].chapter, 3189)
         self.assertEqual(released[0].chapter, 3190)
 
-    def test_opaque_sequential_list_uses_known_previous(self) -> None:
-        base = "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4"
-        heading = "<h2>Chapter list</h2><p>Newest first</p>"
-        previous = '<a href="/book/shadow-slave-r2k2ivbd6ez4/previous9x">Chapter Entertaining Guest</a>'
-        numbered = '<a href="/book/shadow-slave-r2k2ivbd6ez4/numbered8x">Ch 3188: Lost Soul</a>'
-        target = '<a href="/book/shadow-slave-r2k2ivbd6ez4/current0xx">Chapter Freedom of Choice</a>'
-        self.assert_transition(parse_rechapters_candidates, base,
-                               f"<section>{heading}{previous}{numbered}</section>",
-                               f"<section>{heading}{target}{previous}{numbered}</section>")
 
     def test_telegram_sequential_title_only_messages(self) -> None:
         def message(title: str, slug: str) -> str:
@@ -204,8 +194,6 @@ class PreviousContextParserTests(unittest.TestCase):
              '<section><h2>Latest chapters</h2><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a><a href="/shadow-slave/chapter-3188-lost-soul.html">Chapter 3188 Lost Soul</a></section>'),
             (parse_freewebnovel_net_candidates, "https://freewebnovel.net/shadow-slave.html",
              '<section><h2>6 Latest Chapters [ Updated now ]</h2><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a><a href="/shadow-slave/chapter-3188-lost-soul.html">Chapter 3188 Lost Soul</a></section>'),
-            (parse_rechapters_candidates, "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4",
-             '<section><h2>Chapter list</h2><p>Newest first</p><a href="/book/shadow-slave-r2k2ivbd6ez4/previous9x">Chapter Entertaining Guest</a><a href="/book/shadow-slave-r2k2ivbd6ez4/numbered8x">Ch 3188: Lost Soul</a></section>'),
         )
         for parser, base, html in cases:
             with self.subTest(parser=parser.__name__):

@@ -35,7 +35,8 @@ PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL = timedelta(minutes=30)
 PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW = timedelta(minutes=5)
 # Bump when materially changed public-source parsing should invalidate failure
 # suppression accumulated under an older parser implementation.
-PUBLIC_SOURCE_PARSER_REVISION = 7
+# Revision 8 retires source identities; parsing for remaining sources is unchanged.
+PUBLIC_SOURCE_PARSER_REVISION = 8
 MIN_CHAPTER = 1
 MAX_CHAPTER = 10000
 TITLE_MAX_LENGTH = 180
@@ -93,16 +94,14 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("Novel Buddy", "https://novelbuddy.me/shadow-slave", True, ("novelbuddy.me", "www.novelbuddy.me")),
     SourceConfig("ShadowSlave.Space", "https://shadowslave.space", True, ("shadowslave.space", "www.shadowslave.space")),
     SourceConfig("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave", True, ("freewebnovel.com", "www.freewebnovel.com")),
-    SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", True, ("novelphoenix.com", "www.novelphoenix.com")),
-    SourceConfig("NovelArrow", "https://novelarrow.com/novel/shadow-slave", True, ("novelarrow.com", "www.novelarrow.com")),
-    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net", "www.novelfire.net")),
+    # Disabled references only; the previous redirected site parser stays dormant.
+    SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", False, ("novelphoenix.com", "www.novelphoenix.com")),
+    SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False, ("novelping.com", "www.novelping.com")),
+    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False, ("novelfire.net", "www.novelfire.net")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),
-    SourceConfig("Novel Live", "https://novellive.com/book/shadow-slave", True, ("novellive.com", "www.novellive.com")),
-    SourceConfig("Readwn", "https://readwn.org/book/shadow-slave", True, ("readwn.org", "www.readwn.org")),
     SourceConfig("LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True, ("lightnovelup.com", "www.lightnovelup.com")),
     SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
-    SourceConfig("ReChapters", "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4", True, ("rechapters.com", "www.rechapters.com")),
     SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
     # Target-only verification requires authoritative title corroboration when
     # the rendered chapter has no explicit novel identity.

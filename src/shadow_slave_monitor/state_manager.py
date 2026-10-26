@@ -63,16 +63,13 @@ def validate_source_config() -> None:
         "Novel Buddy": True,
         "ShadowSlave.Space": True,
         "FreeWebNovel": True,
-        "Readwn": True,
         "LightNovelUp": True,
-        "Novel Phoenix": True,
-        "NovelArrow": True,
-        "NovelFire": True,
+        "Novel Phoenix": False,
+        "NovelPing": False,
+        "NovelFire": False,
         "SSNovel": True,
         "NovelFull": True,
-        "Novel Live": True,
         "ReadNovelFull": True,
-        "ReChapters": True,
         "FreeWebNovel.net": True,
         "Rentry": True,
     }
@@ -293,17 +290,25 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(failures, dict):
         raise StateError("public_source_failures must be an object")
     enabled_names = {site.name for site in PUBLIC_SITES if site.enabled}
+    # Only older inventories may contain these formerly enabled identities.
+    # Validate their counts before discarding them; unknown names stay invalid.
+    obsolete_names = {"Novel Phoenix", "NovelArrow", "NovelFire", "Novel Live", "Readwn", "ReChapters"}
+    migrating_inventory = revision is None or revision < 8
     clean_failures: dict[str, int] = {}
     for source, count in failures.items():
-        if not isinstance(source, str) or source not in enabled_names:
+        if (not isinstance(source, str)
+                or source not in enabled_names and not (migrating_inventory and source in obsolete_names)):
             raise StateError("public_source_failures contains an unknown or disabled source")
         if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
             raise StateError(
                 "public_source_failures counts must be integers between 1 and "
                 f"{PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT}"
             )
-        clean_failures[source] = count
-    if revision != PUBLIC_SOURCE_PARSER_REVISION:
+        if source in enabled_names:
+            clean_failures[source] = count
+    # Revision 7 already uses the current parsers for remaining sources. Preserve
+    # their suppression; earlier parser revisions retain the existing reset.
+    if revision not in (7, PUBLIC_SOURCE_PARSER_REVISION):
         clean_failures = {}
     state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
     state["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION

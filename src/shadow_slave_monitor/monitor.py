@@ -27,8 +27,8 @@ class PendingDeliveryOutcome(StrEnum):
     DELIVERED = "delivered"
 
 TARGET_AWARE_PUBLIC_SOURCES = frozenset({
-    "Telegram", "Novel Buddy", "FreeWebNovel", "NovelArrow", "NovelFull",
-    "ReadNovelFull", "ReChapters", "FreeWebNovel.net",
+    "Telegram", "Novel Buddy", "FreeWebNovel", "NovelFull",
+    "ReadNovelFull", "FreeWebNovel.net",
     "Rentry",
 })
 

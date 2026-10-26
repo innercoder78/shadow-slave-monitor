@@ -13,7 +13,7 @@ from urllib.parse import unquote, urljoin, urlparse
 from bs4 import BeautifulSoup
 import requests
 
-from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, SourceConfig
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENGTH, WEBNOVEL_CATALOG_URL, PUBLIC_SITES, SourceConfig
 from shadow_slave_monitor.http_client import fetch_html, fetch_json, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
@@ -608,7 +608,7 @@ def _novel_buddy_title_candidate(anchor: Any, base_url: str) -> tuple[str, str] 
         return None
     path = re.fullmatch(r"/shadow-slave/chapter-([a-z]+(?:-[a-z]+)*)/?", parsed.path, re.IGNORECASE)
     title = _title_only_label(anchor.get_text(" ", strip=True))
-    if not path or not title or _novel_live_title_slug(title) != path.group(1).casefold():
+    if not path or not title or _title_slug(title) != path.group(1).casefold():
         return None
     return title, url
 
@@ -880,50 +880,7 @@ def _canonical_slug_chapter_url(
     return ChapterReport("", chapter, None, url)
 
 
-def readwn_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    candidate = _canonical_slug_chapter_url(
-        anchor.get("href"),
-        base_url,
-        {"readwn.org", "www.readwn.org"},
-        r"/book/shadow-slave/chapter-(\d{1,5})-[a-z0-9]+(?:-[a-z0-9]+)*/?",
-    )
-    if not candidate:
-        return None
-    visible = parse_chapter_text(anchor.get_text(" ", strip=True))
-    if visible and visible[0] != candidate.chapter:
-        return None
-    title = visible[1] if visible else None
-    if title and is_non_chapter_title(title):
-        title = None
-    return ChapterReport("", candidate.chapter, title, candidate.url)
-
-
-def parse_readwn_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
-    """Read only canonical links in Readwn's semantic latest-release area."""
-    marker_pattern = r"^\s*(?:\d{1,3}\s+)?Latest\s+(?:Chapters?|Releases?)\s*:?\s*$"
-    for marker in soup.find_all(string=re.compile(marker_pattern, re.IGNORECASE)):
-        heading = marker.parent
-        if not heading:
-            continue
-        scopes = [heading, *heading.find_next_siblings(limit=1)]
-        parent = heading.parent
-        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
-            scopes.append(parent)
-        found: list[ChapterReport] = []
-        seen: set[tuple[int, str]] = set()
-        for scope in scopes:
-            anchors = [scope] if getattr(scope, "name", None) == "a" else scope.find_all("a", href=True)
-            for anchor in anchors:
-                candidate = readwn_candidate_from_anchor(anchor, base_url)
-                if candidate and (candidate.chapter, candidate.url) not in seen:
-                    seen.add((candidate.chapter, candidate.url))
-                    found.append(candidate)
-        if found:
-            return found
-    return []
-
-
-def _novel_live_title_slug(title: str) -> str:
+def _title_slug(title: str) -> str:
     """Produce the conservative ASCII slug used to corroborate a visible title."""
     normalized = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
     normalized = re.sub(r"['\N{RIGHT SINGLE QUOTATION MARK}]", "", normalized)
@@ -989,7 +946,7 @@ def _title_slug_candidate(anchor: Any, base_url: str, hosts: set[str]) -> tuple[
         return None
     path = re.fullmatch(r"/shadow-slave/chapter-([a-z0-9]+(?:-[a-z0-9]+)*)\.html", parsed.path)
     title = _title_only_label(anchor.get_text(" ", strip=True))
-    if not path or not title or _novel_live_title_slug(title) != path.group(1).casefold():
+    if not path or not title or _title_slug(title) != path.group(1).casefold():
         return None
     return title, url
 
@@ -1005,65 +962,6 @@ def _title_only_report(
     chapter = _trusted_title_chapter(title, expected_chapter, expected_title,
                                      previous_chapter, previous_title)
     return ChapterReport("", chapter, title, url) if chapter is not None else None
-
-
-def novel_live_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    """Trust a release only when its canonical URL and complete visible label agree."""
-    candidate = _canonical_slug_chapter_url(
-        anchor.get("href"),
-        base_url,
-        {"novellive.com", "www.novellive.com"},
-        r"/book/shadow-slave/chapter-(\d{1,5})-([a-z0-9]+(?:-[a-z0-9]+)*)",
-    )
-    if not candidate:
-        return None
-
-    visible_text = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).strip()
-    visible = re.fullmatch(r"Chapter\s+(\d{1,5})\s+(.+)", visible_text, re.IGNORECASE)
-    if not visible or int(visible.group(1)) != candidate.chapter:
-        return None
-    title = clean_title(visible.group(2))
-    if not title or is_non_chapter_title(title):
-        return None
-
-    path_match = re.fullmatch(
-        r"/book/shadow-slave/chapter-\d{1,5}-([a-z0-9]+(?:-[a-z0-9]+)*)",
-        urlparse(candidate.url).path,
-        re.IGNORECASE,
-    )
-    if not path_match or _novel_live_title_slug(title) != path_match.group(1).casefold():
-        return None
-    return ChapterReport("", candidate.chapter, title, candidate.url)
-
-
-def parse_novel_live_candidates(soup: BeautifulSoup, base_url: str) -> list[ChapterReport]:
-    """Read only one unambiguous semantic latest-chapters section, or fail closed."""
-    marker_pattern = r"^\s*\d{1,3}\s+Latest\s+Chapters?\s*$"
-    markers = soup.find_all(string=re.compile(marker_pattern, re.IGNORECASE))
-    if len(markers) != 1:
-        return []
-    for marker in markers:
-        heading = marker.parent
-        if not heading:
-            continue
-        scopes: list[Any] = [heading, *heading.find_next_siblings(limit=1)]
-        parent = heading.parent
-        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
-            scopes.append(parent)
-
-        found: list[ChapterReport] = []
-        seen: set[tuple[int, str]] = set()
-        for scope in scopes:
-            anchors = [scope] if getattr(scope, "name", None) == "a" else scope.find_all("a", href=True)
-            for anchor in anchors:
-                candidate = novel_live_candidate_from_anchor(anchor, base_url)
-                if candidate and (candidate.chapter, candidate.url) not in seen:
-                    seen.add((candidate.chapter, candidate.url))
-                    found.append(candidate)
-        if found:
-            return found
-
-    return []
 
 
 def lightnovelup_candidate_from_href(href: Any, base_url: str) -> ChapterReport | None:
@@ -1567,142 +1465,6 @@ def parse_freewebnovel_net_candidates(
     return [ChapterReport("", expected_chapter, first[0], first[1]), *found.values()]
 
 
-RECHAPTERS_NAMESPACE = "/book/shadow-slave-r2k2ivbd6ez4/"
-
-
-def rechapters_candidate_url(anchor: Any, base_url: str) -> str | None:
-    href = anchor.get("href")
-    if not isinstance(href, str) or not href or "%" in href:
-        return None
-    try:
-        url = urljoin(base_url, href)
-        parsed = urlparse(url)
-        host = (parsed.hostname or "").casefold()
-    except (TypeError, ValueError):
-        return None
-    if (parsed.scheme != "https" or host not in {"rechapters.com", "www.rechapters.com"}
-            or parsed.netloc.casefold() != host or parsed.params or parsed.query or parsed.fragment):
-        return None
-    if not re.fullmatch(RECHAPTERS_NAMESPACE + r"[a-z0-9]{6,32}", parsed.path):
-        return None
-    return url
-
-
-def rechapters_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    url = rechapters_candidate_url(anchor, base_url)
-    if not url:
-        return None
-    label = re.fullmatch(
-        r"\s*Ch\.?\s*(\d{1,5})\b\s*[:\-–—]?\s*(.*?)\s*",
-        anchor.get_text(" ", strip=True), re.IGNORECASE,
-    )
-    if not label:
-        return None
-    chapter = int(label.group(1))
-    if chapter_validity_category(chapter) is not None:
-        return None
-    title = clean_title(label.group(2))
-    if title and is_non_chapter_title(title):
-        title = None
-    return ChapterReport("", chapter, title, url)
-
-
-def _rechapters_chapter_list_anchors(soup: BeautifulSoup, base_url: str) -> list[Any]:
-    """Return ordered, labelled chapter links from one semantic newest-first list."""
-    order_markers = soup.find_all(string=re.compile(r"^\s*Newest\s+first\s*$", re.IGNORECASE))
-    if len(order_markers) != 1 or not order_markers[0].parent:
-        return []
-
-    container = order_markers[0].parent
-    while container and getattr(container, "name", None) not in {"body", "html", "[document]"}:
-        list_markers = container.find_all(
-            string=re.compile(r"^\s*Chapter\s+list\s*$", re.IGNORECASE)
-        )
-        canonical = [
-            anchor for anchor in container.find_all("a", href=True)
-            if rechapters_candidate_url(anchor, base_url)
-        ]
-        if len(list_markers) == 1 and canonical:
-            labelled = [
-                anchor for anchor in canonical
-                if (_title_only_label(anchor.get_text(" ", strip=True))
-                    or rechapters_candidate_from_anchor(anchor, base_url))
-            ]
-            return labelled
-        container = container.parent
-    return []
-
-
-def parse_rechapters_candidates(
-    soup: BeautifulSoup, base_url: str,
-    expected_chapter: int | None = None, expected_title: str | None = None,
-    previous_chapter: int | None = None, previous_title: str | None = None,
-) -> list[ChapterReport]:
-    found: dict[tuple[int, str], ChapterReport] = {}
-    for anchor in soup.find_all("a", href=True):
-        candidate = rechapters_candidate_from_anchor(anchor, base_url)
-        if candidate:
-            found[(candidate.chapter, candidate.url)] = candidate
-    numbered = list(found.values())
-    if not (_has_title_context(expected_chapter, expected_title)
-            or _has_title_context(previous_chapter, previous_title)):
-        return numbered
-    anchors = _rechapters_chapter_list_anchors(soup, base_url)
-    if len(anchors) < 2:
-        return numbered
-    first_url = rechapters_candidate_url(anchors[0], base_url)
-    first_title = _title_only_label(anchors[0].get_text(" ", strip=True))
-    if not first_url or not first_title:
-        return numbered
-    first_chapter = _trusted_title_chapter(first_title, expected_chapter, expected_title,
-                                           previous_chapter, previous_title)
-    if first_chapter is not None and first_chapter == previous_chapter:
-        return [ChapterReport("", first_chapter, first_title, first_url), *numbered]
-    predecessor = rechapters_candidate_from_anchor(anchors[1], base_url)
-    if not predecessor:
-        predecessor_url = rechapters_candidate_url(anchors[1], base_url)
-        predecessor_title = _title_only_label(anchors[1].get_text(" ", strip=True))
-        predecessor_chapter = _trusted_title_chapter(
-            predecessor_title, expected_chapter, expected_title, previous_chapter, previous_title)
-        if predecessor_url and predecessor_title and predecessor_chapter is not None:
-            predecessor = ChapterReport("", predecessor_chapter, predecessor_title, predecessor_url)
-    if (first_chapter != expected_chapter or not predecessor
-            or predecessor.chapter != expected_chapter - 1):
-        return numbered
-    return [ChapterReport("", expected_chapter, first_title, first_url), *numbered]
-
-
-def parse_rechapters_chapter_page(html: str, expected: ChapterReport) -> ChapterReport:
-    soup = BeautifulSoup(html, "html.parser")
-    matches: list[tuple[int, str | None]] = []
-    for heading in soup.find_all(["h1", "h2"]):
-        match = re.fullmatch(
-            r"\s*Ch\.?\s*(\d{1,5})\b\s*[:\-–—]?\s*(.*?)\s*",
-            heading.get_text(" ", strip=True), re.IGNORECASE,
-        )
-        if match:
-            matches.append((int(match.group(1)), clean_title(match.group(2))))
-    if matches:
-        unique = set(matches)
-        if len(unique) != 1 or matches[0][0] != expected.chapter:
-            raise ParseError("ReChapters chapter heading did not confirm listing")
-        page_title = matches[0][1]
-    else:
-        title_matches = [
-            _title_only_label(heading.get_text(" ", strip=True))
-            for heading in soup.find_all(["h1", "h2"])
-        ]
-        title_matches = [title for title in title_matches if title]
-        if len({_normalized_title(title) for title in title_matches}) != 1:
-            raise ParseError("ReChapters chapter heading did not confirm listing")
-        page_title = title_matches[0]
-    if expected.title and page_title:
-        normalize = lambda value: re.sub(r"\s+", " ", value).strip().casefold()
-        if normalize(expected.title) != normalize(page_title):
-            raise ParseError("ReChapters chapter title contradicted listing")
-    return ChapterReport("", expected.chapter, page_title or expected.title, expected.url)
-
-
 def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> str | None:
     """Extract a title only from a heading that identifies the selected chapter."""
     soup = BeautifulSoup(html, "html.parser")
@@ -1792,6 +1554,7 @@ def parse_novelfire_candidates(soup: BeautifulSoup, base_url: str) -> list[Chapt
     return candidates
 
 
+# Dormant reference for the previous website. Never dispatch this as NovelPing.
 def novelarrow_chapter_path(href: str, base_url: str) -> tuple[int, str, str] | None:
     """Return the chapter, title slug, and URL for a canonical NovelArrow link."""
     url = urljoin(base_url, href)
@@ -1905,7 +1668,7 @@ def parse_novelarrow_candidates(
                         parsed.path, re.IGNORECASE,
                     )
                     title = _title_only_label(anchor.get_text(" ", strip=True))
-                    if (path and title and _novel_live_title_slug(title) == path.group(1).casefold()
+                    if (path and title and _title_slug(title) == path.group(1).casefold()
                             and not parse_chapter_text(anchor.get_text(" ", strip=True))):
                         title_only[url] = (title, url)
             if len(title_only) == 1:
@@ -2262,6 +2025,8 @@ def iter_public_candidates(
     expected_chapter: int | None = None, expected_title: str | None = None,
     previous_chapter: int | None = None, previous_title: str | None = None,
 ) -> list[ChapterReport]:
+    if site_name and not any(site.name == site_name and site.enabled for site in PUBLIC_SITES):
+        return []
     if site_name == "Rentry":
         # Target-only pages must never enter generic index discovery.
         return []
@@ -2278,24 +2043,12 @@ def iter_public_candidates(
         return parse_shadowslave_space_candidates(soup, base_url)
     if site_name == "FreeWebNovel":
         return parse_freewebnovel_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
-    if site_name == "Readwn":
-        return parse_readwn_candidates(soup, base_url)
-    if site_name == "Novel Live":
-        return parse_novel_live_candidates(soup, base_url)
     if site_name == "LightNovelUp":
         return []
-    if site_name == "Novel Phoenix":
-        return parse_novel_phoenix_candidates(soup, base_url)
-    if site_name == "NovelArrow":
-        return parse_novelarrow_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
-    if site_name == "NovelFire":
-        return parse_novelfire_candidates(soup, base_url)
     if site_name == "NovelFull":
         return parse_novelfull_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
     if site_name == "ReadNovelFull":
         return parse_readnovelfull_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
-    if site_name == "ReChapters":
-        return parse_rechapters_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
     if site_name == "FreeWebNovel.net":
         return parse_freewebnovel_net_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
 
@@ -2455,13 +2208,9 @@ def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
             "Novel Phoenix": novel_phoenix_candidate_from_anchor,
             "NovelFire": novelfire_candidate_from_anchor,
             "NovelFull": novelfull_candidate_from_anchor,
-            "Novel Live": novel_live_candidate_from_anchor,
-            "Readwn": readwn_candidate_from_anchor,
             "ReadNovelFull": readnovelfull_candidate_from_anchor,
             "FreeWebNovel.net": freewebnovel_net_candidate_from_anchor,
         }
-        if site.name == "ReChapters":
-            return rechapters_candidate_url(anchor, site.url)
         validator = validators.get(site.name)
         candidate = validator(anchor, site.url) if validator else None
         if site.name == "NovelFire" and parse_chapter_from_href(url) != report.chapter:
@@ -2657,6 +2406,8 @@ def check_public_site(
     expected_chapter: int | None = None, expected_title: str | None = None,
     previous_chapter: int | None = None, previous_title: str | None = None,
 ) -> ChapterReport | None:
+    if not site.enabled or not any(source.name == site.name and source.enabled for source in PUBLIC_SITES):
+        raise ParseError("public source is disabled or unconfigured")
     logging.info("Checking %s.", site.name)
     if site.name == "Rentry":
         report = check_rentry(site, expected_chapter, expected_title)
@@ -2702,16 +2453,12 @@ def check_public_site(
     best = max(candidates, key=lambda item: item.chapter)
     if chikari_api:
         best = _verify_chikari_api_chapter(site, best)
-    elif site.name == "ReChapters":
-        best = parse_rechapters_chapter_page(_fetch_source_html(site, best.url), best)
-    elif (site.name in {"Novel Buddy", "NovelArrow", "NovelFull", "ReadNovelFull", "FreeWebNovel.net"}
+    elif (site.name in {"Novel Buddy", "NovelFull", "ReadNovelFull", "FreeWebNovel.net"}
           and expected_chapter is not None and best.chapter == expected_chapter
           and best.title and _normalized_title(best.title) == _normalized_title(expected_title)
           and parse_chapter_from_href(best.url) is None):
         page_html = _fetch_source_html(site, best.url)
-        if site.name == "NovelArrow":
-            page_title = _confirm_novelarrow_chapter_page(page_html, best.chapter, best.title)
-        elif site.name == "Novel Buddy":
+        if site.name == "Novel Buddy":
             page_title = _confirm_novel_buddy_chapter_page(page_html, best.chapter, best.title)
         else:
             page_title = _confirm_title_only_chapter_page(page_html, best.title)

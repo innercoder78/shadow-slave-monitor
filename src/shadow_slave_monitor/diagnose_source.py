@@ -17,9 +17,9 @@ from shadow_slave_monitor.state_manager import StateError, load_state, parse_int
 
 def diagnose_source(name: str, *, state_path: Path = STATE_PATH) -> int:
     site = next((source for source in PUBLIC_SITES if source.name == name), None)
-    if site is None:
+    if site is None or not site.enabled:
         # Do not echo the untrusted workflow input, even on invalid requests.
-        logging.error("Invalid source name; enter an exact public source name from config.py.")
+        logging.error("Invalid source name; enter an exact enabled public source name from config.py.")
         return 2
     try:
         state, _ = load_state(state_path)

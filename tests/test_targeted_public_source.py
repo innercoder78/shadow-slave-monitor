@@ -94,8 +94,8 @@ class TargetPageTests(unittest.TestCase):
         validate_source_config()
         self.assertEqual((CONFIG.name, CONFIG.url, CONFIG.enabled, CONFIG.allowed_hosts),
                          ("Rentry", "https://rentry.co/", True, ("rentry.co",)))
-        self.assertEqual(PUBLIC_SITE_ORDER["Rentry"], 16)
-        self.assertTrue(all(site.enabled for site in PUBLIC_SITES[:-1]))
+        self.assertEqual(PUBLIC_SITE_ORDER["Rentry"], 13)
+        self.assertEqual(sum(site.enabled for site in PUBLIC_SITES[:-1]), 10)
 
     def test_generates_only_requested_canonical_candidate(self):
         for chapter, title in ((3224, "First Thunder"), (3225, "The Fourth Warrior")):
