@@ -1,22 +1,15 @@
 {
-  "latest_seen": 3225,
-  "latest_title": "The Fourth Warrior",
-  "latest_url": "https://rentry.co/3225ss",
+  "latest_seen": 3226,
+  "latest_title": "Raised from the Dead",
+  "latest_url": "https://rentry.co/3226ss",
   "latest_webnovel": 3226,
   "latest_webnovel_title": "Raised from the Dead",
-  "mode": "watch_free_sites",
-  "target_chapter": 3226,
-  "target_title": "Raised from the Dead",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Live": 4,
-    "Novel Phoenix": 4,
-    "NovelArrow": 4,
-    "NovelFire": 4,
-    "ReChapters": 4,
-    "Readwn": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 7,
   "source_positions": {
     "LightNovelUp": {
@@ -29,5 +22,5 @@
   "webnovel_success_cycle": 1494150,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-10-26T02:20:29+00:00"
+  "updated_at": "2026-10-26T04:20:24+00:00"
 }
