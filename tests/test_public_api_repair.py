@@ -300,7 +300,7 @@ class PublicAPIIntegrationTests(unittest.TestCase):
 
     def test_parser_revision_migration_preserves_cursor_and_pending_state(self):
         state = waiting_state()
-        state["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION - 1
+        state["public_source_failure_revision"] = 6  # Last revision before these parser repairs.
         state["public_source_failures"] = {"Chikari": 4, "LightNovelUp": 4}
         state["source_positions"] = {"LightNovelUp": dict(NavigationVerificationTests.cursor)}
         state["pending_notification"] = pending_from_report(

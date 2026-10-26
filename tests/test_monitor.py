@@ -63,7 +63,7 @@ def run_main_with_state(state: dict, *, first: bool = False, allow_system_exit: 
 
 class PublicSourceFailureLoggingTests(unittest.TestCase):
     def test_new_optional_source_failure_does_not_hide_healthy_source(self) -> None:
-        failed = next(site for site in PUBLIC_SITES if site.name == "Novel Live")
+        failed = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
         good = next(site for site in PUBLIC_SITES if site.name == "Chikari")
         report = ChapterReport("Chikari", 3182, "Plight of Gods",
                                "https://chikari.moe/novels/shadow-slave/3182")
@@ -78,29 +78,29 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
         with patch.object(monitor, "PUBLIC_SITES", (failed, good)), \
              patch.object(monitor, "check_public_site", side_effect=check):
             self.assertEqual(monitor.check_public_sites(result, failures), [report])
-        self.assertEqual(failures, {"Novel Live": 1})
-        self.assertEqual(result.degraded_reasons, ["optional public sources failed: Novel Live"])
+        self.assertEqual(failures, {"NovelFull": 1})
+        self.assertEqual(result.degraded_reasons, ["optional public sources failed: NovelFull"])
 
     def test_new_sources_participate_in_order_and_degrade_independently(self) -> None:
-        readwn = next(site for site in PUBLIC_SITES if site.name == "Readwn")
+        readnovelfull = next(site for site in PUBLIC_SITES if site.name == "ReadNovelFull")
         lightnovelup = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
         report = ChapterReport("LightNovelUp", 3174, "Tatal's Basilisk",
                                "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk")
 
         def check(site: SourceConfig, source_position=None) -> ChapterReport:
-            if site.name == "Readwn":
+            if site.name == "ReadNovelFull":
                 raise RuntimeError("template changed")
             return report
 
         result = monitor.RunResult()
         failures: dict[str, int] = {}
-        with patch.object(monitor, "PUBLIC_SITES", (readwn, lightnovelup)), \
+        with patch.object(monitor, "PUBLIC_SITES", (readnovelfull, lightnovelup)), \
              patch.object(monitor, "check_public_site", side_effect=check):
             reports = monitor.check_public_sites(result, failures)
 
         self.assertEqual(reports, [report])
-        self.assertEqual(failures, {"Readwn": 1})
-        self.assertEqual(result.degraded_reasons, ["optional public sources failed: Readwn"])
+        self.assertEqual(failures, {"ReadNovelFull": 1})
+        self.assertEqual(result.degraded_reasons, ["optional public sources failed: ReadNovelFull"])
 
     def test_lightnovelup_position_is_updated_only_in_controlling_thread(self) -> None:
         source = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
@@ -354,7 +354,7 @@ class WatchFreeSitesTests(unittest.TestCase):
 
     def test_completing_cycle_clears_public_source_failures(self) -> None:
         state = self.watch_free_state()
-        state["public_source_failures"] = {"NovelFire": 4}
+        state["public_source_failures"] = {"NovelFull": 4}
         reports = [ChapterReport("Chikari", 11, "Chapter Eleven", "https://public.example/11", "page")]
         with patch.object(monitor, "check_public_sites", return_value=reports), patch.object(monitor, "send_new_chapter"):
             run_main_with_state(state)
@@ -363,7 +363,7 @@ class WatchFreeSitesTests(unittest.TestCase):
 
     def test_confirming_newer_target_inside_cycle_preserves_suppression(self) -> None:
         state = self.watch_free_state()
-        state["public_source_failures"] = {"NovelFire": 4}
+        state["public_source_failures"] = {"NovelFull": 4}
         reports = [ChapterReport("Chikari", 13, "Chapter Thirteen", "https://public.example/13", "page")]
         official = ChapterReport("WebNovel", 12, "Chapter Twelve", "https://webnovel.example/12", "catalog")
         with patch.object(monitor, "check_public_sites", return_value=reports), \
@@ -371,7 +371,7 @@ class WatchFreeSitesTests(unittest.TestCase):
              patch.object(monitor, "send_new_chapter"):
             run_main_with_state(state, allow_system_exit=True)
         self.assertEqual(state["target_chapter"], 12)
-        self.assertEqual(state["public_source_failures"], {"NovelFire": 4})
+        self.assertEqual(state["public_source_failures"], {"NovelFull": 4})
 
     def test_watch_free_sites_checks_every_run_and_does_not_save_before_target(self) -> None:
         state = self.watch_free_state()
@@ -387,24 +387,24 @@ class WatchFreeSitesTests(unittest.TestCase):
 
     def test_failure_counter_transition_is_persisted(self) -> None:
         state = self.watch_free_state()
-        failed = SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net",))
+        failed = SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com",))
         good = SourceConfig("Chikari", "https://chikari.moe/novels/shadow-slave", True, ("chikari.moe",))
         report = ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")
 
         def check(site):
-            if site.name == "NovelFire":
+            if site.name == "NovelFull":
                 raise RuntimeError("unsafe")
             return report
 
         with patch.object(monitor, "PUBLIC_SITES", (failed, good)), patch.object(monitor, "check_public_site", side_effect=check):
             saved = run_main_with_state(state)
-        self.assertEqual(state["public_source_failures"], {"NovelFire": 1})
+        self.assertEqual(state["public_source_failures"], {"NovelFull": 1})
         self.assertEqual(len(saved), 1)
 
     def test_unchanged_suppressed_source_does_not_cause_state_save(self) -> None:
         state = self.watch_free_state()
-        state["public_source_failures"] = {"NovelFire": 4}
-        suppressed = SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", True, ("novelfire.net",))
+        state["public_source_failures"] = {"NovelFull": 4}
+        suppressed = SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com",))
         good = SourceConfig("Chikari", "https://chikari.moe/novels/shadow-slave", True, ("chikari.moe",))
         report = ChapterReport("Chikari", 10, "Chapter Ten", "https://public.example/10", "page")
         with patch.object(monitor, "PUBLIC_SITES", (suppressed, good)), \
@@ -586,7 +586,7 @@ class StateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["public_source_failure_revision"], PUBLIC_SOURCE_PARSER_REVISION)
         migrated["public_source_failures"] = {"ReadNovelFull": 4}
         self.assertEqual(validate_state(migrated)["public_source_failures"], {"ReadNovelFull": 4})
-        migrated["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION - 1
+        migrated["public_source_failure_revision"] = 6  # Last revision before the current healthy-source parsers.
         self.assertEqual(validate_state(migrated)["public_source_failures"], {})
 
     def test_malformed_parser_revision_is_rejected(self) -> None:
@@ -597,8 +597,8 @@ class StateMigrationTests(unittest.TestCase):
                 validate_state(state)
 
     def test_invalid_public_source_failure_shapes_and_counts_are_rejected(self) -> None:
-        invalid_values = ([], {"NovelFire": True}, {"NovelFire": -1}, {"NovelFire": 0},
-                          {"NovelFire": 5}, {"NovelFire": "1"}, {"Unknown": 1})
+        invalid_values = ([], {"NovelFull": True}, {"NovelFull": -1}, {"NovelFull": 0},
+                          {"NovelFull": 5}, {"NovelFull": "1"}, {"Unknown": 1})
         for value in invalid_values:
             with self.subTest(value=value):
                 state = base_state()

@@ -371,7 +371,9 @@ class ParserDiagnosticTests(unittest.TestCase):
                 check_public_site(site)
             except ParseError as error:
                 return diagnostic_summary(site, error)
-        with patch.object(parsers, 'fetch_html', side_effect=fetch), patch.object(parsers, 'iter_public_candidates', side_effect=candidates):
+        with patch.object(parsers, 'PUBLIC_SITES', tuple(sites)), \
+             patch.object(parsers, 'fetch_html', side_effect=fetch), \
+             patch.object(parsers, 'iter_public_candidates', side_effect=candidates):
             with ThreadPoolExecutor(max_workers=2) as executor:
                 summaries = list(executor.map(check, sites))
         for site, summary in zip(sites, summaries):

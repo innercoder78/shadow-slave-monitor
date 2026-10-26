@@ -66,7 +66,7 @@ Keep the following in mind if you fork this repository:
 ## PUBLIC SOURCE DIAGNOSTICS
 
 In **Actions**, select **Public source diagnostics**, click **Run workflow**, choose the
-repository branch to check, and enter the exact public source name from
+repository branch to check, and enter the exact enabled public source name from
 `src/shadow_slave_monitor/config.py` (including spaces and capitalization). The workflow
 uses that selected checkout and makes a real, read-only source check, even when normal
 monitor checks are suppressed. It reads the existing cursor and target context without
@@ -99,3 +99,9 @@ canonical chapter URL when one can be independently validated for logging.
 Expected source failures are diagnostic outcomes and leave the workflow successful;
 invalid source names, invalid state, dependency/setup failures, or internal errors fail
 it. This workflow is independent of the scheduled monitor and watchdog.
+
+Disabled reference entries are excluded from scheduled checks, recovery probes, and
+manual diagnostics. Three inactive integrations have been removed; the remaining
+enabled sources retain their relative priority. Loading a previous state discards
+only known obsolete failure counters from the previous inventory, preserving chapter
+history, pending delivery, authority tracking, source cursors, and emergency state.

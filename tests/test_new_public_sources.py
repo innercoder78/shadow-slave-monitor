@@ -16,7 +16,6 @@ from shadow_slave_monitor.parsers import (
     parse_freewebnovel_candidates,
     parse_freewebnovel_net_candidates,
     parse_readnovelfull_candidates,
-    parse_rechapters_candidates,
 )
 from shadow_slave_monitor.state_manager import validate_source_config, validate_state, initial_state
 
@@ -25,18 +24,17 @@ class NewSourceConfigurationTests(unittest.TestCase):
     def test_exact_configs_are_appended_without_reordering_existing_sources(self) -> None:
         validate_source_config()
         names = [site.name for site in PUBLIC_SITES]
-        self.assertEqual(names[13:16], ["ReadNovelFull", "ReChapters", "FreeWebNovel.net"])
-        self.assertEqual(names[:13], [
+        self.assertEqual(names[11:13], ["ReadNovelFull", "FreeWebNovel.net"])
+        self.assertEqual(names[:11], [
             "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
-            "Novel Phoenix", "NovelArrow", "NovelFire", "SSNovel", "NovelFull",
-            "Novel Live", "Readwn", "LightNovelUp",
+            "Novel Phoenix", "NovelPing", "NovelFire", "SSNovel", "NovelFull",
+            "LightNovelUp",
         ])
         expected = {
             "ReadNovelFull": SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
-            "ReChapters": SourceConfig("ReChapters", "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4", True, ("rechapters.com", "www.rechapters.com")),
             "FreeWebNovel.net": SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
         }
-        self.assertEqual({site.name: site for site in PUBLIC_SITES[13:16]}, expected)
+        self.assertEqual({site.name: site for site in PUBLIC_SITES[11:13]}, expected)
         self.assertEqual([PUBLIC_SITE_ORDER[name] for name in names], list(range(len(names))))
 
     def test_com_and_net_are_distinct_config_and_failure_identities(self) -> None:
@@ -219,114 +217,11 @@ class FreeWebNovelNetTests(unittest.TestCase):
         ), [])
 
 
-class ReChaptersTests(unittest.TestCase):
-    source = next(site for site in PUBLIC_SITES if site.name == "ReChapters")
-
-    def parse(self, html: str):
-        return parse_rechapters_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
-
-    def test_stale_metadata_ignored_and_highest_visible_chapter_selected(self) -> None:
-        html = '''<p>3181 chapters</p><p>Ch. 3101–3181</p><p>Newest first</p>
-          <a href="/book/shadow-slave-r2k2ivbd6ez4/abc123xyz">Ch 3185: Mundane Fortune</a>
-          <a href="/book/shadow-slave-r2k2ivbd6ez4/ggwdia9jih">Ch 3186: Lots of Fishes</a>'''
-        candidates = self.parse(html)
-        self.assertEqual([c.chapter for c in candidates], [3185, 3186])
-        detail = '<html><h1>Ch 3186: lots   OF fishes</h1><p>Chapter 9999 noise</p></html>'
-        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[html, detail]) as fetch:
-            report = check_public_site(self.source)
-        self.assertEqual((report.chapter, report.title, report.url), (3186, "lots OF fishes", "https://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4/ggwdia9jih"))
-        self.assertEqual(fetch.call_args_list, [call(self.source), call(self.source, report.url)])
-
-    def test_opaque_id_and_continuations_never_supply_chapter(self) -> None:
-        html = '''<a href="/book/shadow-slave-r2k2ivbd6ez4/9999">Read</a>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/abc123xyz/2">Ch 3187 Wrong</a>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/abc123xyz/2/more">Ch 3188 Wrong</a>'''
-        self.assertEqual(self.parse(html), [])
-
-    def test_namespace_authority_and_url_syntax_are_strict(self) -> None:
-        invalid = [
-            'http://www.rechapters.com/book/shadow-slave-r2k2ivbd6ez4/abc123xyz',
-            'https://evil.example/book/shadow-slave-r2k2ivbd6ez4/abc123xyz',
-            'https://user@rechapters.com/book/shadow-slave-r2k2ivbd6ez4/abc123xyz',
-            'https://rechapters.com:443/book/shadow-slave-r2k2ivbd6ez4/abc123xyz',
-            '/book/other-r2k2ivbd6ez4/abc123xyz', '/book/shadow-slave-r2k2ivbd6ez4/a!',
-            '/book/shadow-slave-r2k2ivbd6ez4/abc123xyz?x=1', '/book/shadow-slave-r2k2ivbd6ez4/abc123xyz#x',
-        ]
-        for href in invalid:
-            with self.subTest(href=href): self.assertEqual(self.parse(f'<a href="{href}">Ch 3186: Lots of Fishes</a>'), [])
-
-    def test_verification_fails_on_wrong_missing_malformed_or_contradictory_heading(self) -> None:
-        listing = '<a href="/book/shadow-slave-r2k2ivbd6ez4/ggwdia9jih">Ch 3186: Lots of Fishes</a>'
-        pages = ['<h1>Ch 3185: Lots of Fishes</h1>', '<div>Ch 3186: Lots of Fishes</div>', '<h1>3186 Lots of Fishes</h1>', '<h1>Login</h1>', '<h1>Ch 3186: Different Title</h1>']
-        for page in pages:
-            with self.subTest(page=page), patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, page]):
-                with self.assertRaises(ParseError): check_public_site(self.source)
-
-    def test_authoritative_target_confirms_title_only_newest_first_entry(self) -> None:
-        listing = '''<nav><a href="/">Home</a><a href="/discover">Discover</a>
-        <a href="/account">Account</a></nav>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/outside9x">Chapter Wrong Outside</a>
-        <section><h2>Chapter list</h2><p>3184 chapters · Updated today</p>
-        <p>Newest first</p><p>Ch. 3101–3184</p>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/newest9xyz">Chapter Entertaining Guest</a>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a>
-        <a href="/book/shadow-slave-r2k2ivbd6ez4/previous7x">Ch 3187: Pursuit of Light</a></section>'''
-        self.assertEqual([c.chapter for c in self.parse(listing)], [3188, 3187])
-        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Entertaining Guest</h1>']):
-            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
-        self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
-        no_order = listing.replace("Newest first", "Chapter list")
-        candidates = parse_rechapters_candidates(
-            BeautifulSoup(no_order, "html.parser"), self.source.url, 3189, "Entertaining Guest")
-        self.assertEqual([c.chapter for c in candidates], [3188, 3187])
-
-    def test_title_only_inference_requires_first_entry_and_exact_predecessor(self) -> None:
-        template = '''<section><h2>Chapter list</h2><p>Newest first</p>{entries}</section>'''
-        title = '<a href="/book/shadow-slave-r2k2ivbd6ez4/newest9xyz">Chapter Entertaining Guest</a>'
-        predecessor = '<a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a>'
-        wrong = '<a href="/book/shadow-slave-r2k2ivbd6ez4/previous7x">Ch 3187: Pursuit of Light</a>'
-        cases = [title, predecessor + title, title + wrong]
-        for entries in cases:
-            with self.subTest(entries=entries):
-                candidates = parse_rechapters_candidates(
-                    BeautifulSoup(template.format(entries=entries), "html.parser"),
-                    self.source.url, 3189, "Entertaining Guest",
-                )
-                self.assertNotIn(3189, [candidate.chapter for candidate in candidates])
-
-    def test_title_only_inference_rejects_title_page_and_unsafe_url_mismatches(self) -> None:
-        def listing(href: str, title: str = "Entertaining Guest") -> str:
-            return f'''<section><h2>Chapter list</h2><p>Newest first</p>
-            <a href="{href}">Chapter {title}</a>
-            <a href="/book/shadow-slave-r2k2ivbd6ez4/previous8x">Ch 3188: Lost Soul</a></section>'''
-
-        valid_href = "/book/shadow-slave-r2k2ivbd6ez4/newest9xyz"
-        candidates = parse_rechapters_candidates(
-            BeautifulSoup(listing(valid_href), "html.parser"), self.source.url,
-            3189, "Different Title",
-        )
-        self.assertNotIn(3189, [candidate.chapter for candidate in candidates])
-        for href in ("http://rechapters.com/book/shadow-slave-r2k2ivbd6ez4/newest9xyz",
-                     "/book/shadow-slave-r2k2ivbd6ez4/newest9xyz?bad=1"):
-            with self.subTest(href=href):
-                candidates = parse_rechapters_candidates(
-                    BeautifulSoup(listing(href), "html.parser"), self.source.url,
-                    3189, "Entertaining Guest",
-                )
-                self.assertNotIn(3189, [candidate.chapter for candidate in candidates])
-        with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[
-            listing(valid_href), '<h1>Chapter Different Guest</h1>',
-        ]):
-            with self.assertRaises(ParseError):
-                check_public_site(self.source, None, 3189, "Entertaining Guest")
-
-
 class NewSourceIntegrationTests(unittest.TestCase):
     def test_dispatches_each_new_source_to_dedicated_parser(self) -> None:
         soup = BeautifulSoup("<html></html>", "html.parser")
         targets = {
             "ReadNovelFull": "parse_readnovelfull_candidates",
-            "ReChapters": "parse_rechapters_candidates",
             "FreeWebNovel.net": "parse_freewebnovel_net_candidates",
         }
         for name, target in targets.items():
@@ -344,7 +239,7 @@ class NewSourceIntegrationTests(unittest.TestCase):
         self.assertIn("optional public sources failed", result.degraded_reasons[0])
 
     def test_notifications_use_configured_general_urls(self) -> None:
-        for site in PUBLIC_SITES[13:16]:
+        for site in PUBLIC_SITES[11:13]:
             report = ChapterReport(site.name, 3186, "Title", "https://chapter.invalid/private")
             body = notification_body(3185, report)
             self.assertIn(f"{site.name} [{site.url}]", body)

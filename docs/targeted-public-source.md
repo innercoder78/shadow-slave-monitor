@@ -1,6 +1,6 @@
 # Targeted public source verification
 
-Rentry is **enabled** and remains appended at index 16. Its configured general
+Rentry is **enabled** and remains last in source priority order. Its configured general
 notification URL is `https://rentry.co/`, with allowed host `rentry.co`.
 WebNovel remains authoritative: only a confirmed integer target in the existing
 chapter range produces a request to `https://rentry.co/{N}ss`. Missing target
