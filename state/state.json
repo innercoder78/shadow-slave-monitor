@@ -10,17 +10,17 @@
   "target_url": null,
   "pending_notification": null,
   "public_source_failures": {},
-  "public_source_failure_revision": 7,
+  "public_source_failure_revision": 8,
   "source_positions": {
     "LightNovelUp": {
       "chapter": 3193,
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3193-regret-can/"
     }
   },
-  "webnovel_failures": 0,
-  "webnovel_failure_cycle": null,
+  "webnovel_failures": 1,
+  "webnovel_failure_cycle": 1494215,
   "webnovel_success_cycle": 1494214,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-10-26T23:20:25+00:00"
+  "updated_at": "2026-10-26T23:40:26+00:00"
 }
