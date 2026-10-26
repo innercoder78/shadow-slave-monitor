@@ -11,6 +11,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+from shadow_slave_monitor.state_manager import initial_state, initial_watchdog_state
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("state_writer", ROOT / "scripts" / "state_writer.py")
@@ -193,10 +195,10 @@ class StateWriterPersistenceTests(unittest.TestCase):
     def sha256(self, path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    def initialize_repo(self, repo: Path) -> None:
+    def initialize_repo(self, repo: Path, *, monitor_state: dict | None = None) -> None:
         (repo / "state").mkdir()
-        (repo / "state" / "state.json").write_text((ROOT / "state" / "state.json").read_text(encoding="utf-8"), encoding="utf-8")
-        (repo / "state" / "watchdog_state.json").write_text((ROOT / "state" / "watchdog_state.json").read_text(encoding="utf-8"), encoding="utf-8")
+        self.write_json(repo / "state" / "state.json", initial_state() if monitor_state is None else monitor_state)
+        self.write_json(repo / "state" / "watchdog_state.json", initial_watchdog_state())
         self.run_git(repo, "init", "-b", "main")
         self.run_git(repo, "config", "user.name", "Test")
         self.run_git(repo, "config", "user.email", "test@example.invalid")
@@ -309,22 +311,35 @@ class StateWriterPersistenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
             repo.mkdir()
-            self.initialize_repo(repo)
+            baseline = initial_state()
+            baseline.update(latest_seen=3225, latest_webnovel=3225,
+                            latest_title="Baseline", latest_webnovel_title="Baseline",
+                            latest_url="https://reader.example/chapter/3225", webnovel_success_cycle=99)
+            self.initialize_repo(repo, monitor_state=state_writer.validate_state(baseline))
             state_file = "state/state.json"
             state_data = state_writer.validate_state(json.loads((repo / state_file).read_text(encoding="utf-8")))
             state_data.update(webnovel_failures=4, webnovel_failure_cycle=100,
                               emergency_last_check_ok=False)
             artifact_dir = Path(tmp) / "artifact"
             push_calls: list[list[str]] = []
-            for expected, updates in ((4, {}), (0, dict(webnovel_failures=0, emergency_last_check_ok=None))):
+            for expected, updates in ((4, {}), (0, dict(webnovel_failures=0, emergency_last_check_ok=None,
+                                                       webnovel_success_cycle=100))):
                 state_data.update(updates)
+                self.assertEqual(state_writer.validate_state(state_data), state_data)
+                previous_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
                 self.write_artifact(repo, artifact_dir, state_file, state_data, self.sha256(repo / state_file))
                 with chdir(repo):
                     self.persist(artifact_dir, state_file, push_calls)
                 persisted = json.loads((repo / state_file).read_text(encoding="utf-8"))
+                self.assertEqual(state_writer.validate_state(persisted), state_data)
                 self.assertEqual(persisted["webnovel_failures"], expected)
-                self.assertEqual(persisted["latest_webnovel"], state_data["latest_webnovel"])
-            self.assertEqual(len(push_calls), 2)
+                self.assertEqual(persisted["latest_webnovel"], baseline["latest_webnovel"])
+                self.assertEqual(persisted["latest_seen"], baseline["latest_seen"])
+                self.assertEqual(subprocess.check_output(["git", "rev-parse", "HEAD^"], cwd=repo, text=True).strip(),
+                                 previous_commit)
+                committed = json.loads(subprocess.check_output(["git", "show", f"HEAD:{state_file}"], cwd=repo, text=True))
+                self.assertEqual(committed, persisted)
+            self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]] * 2)
 
     def test_legacy_repository_accepts_migrated_monitor_artifact_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

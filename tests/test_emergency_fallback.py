@@ -608,13 +608,31 @@ class EmergencyParserTests(unittest.TestCase):
 
 class EmergencyStateTests(unittest.TestCase):
     def test_legacy_state_migrates_without_rewriting_chapters(self):
-        raw = json.loads((Path(__file__).resolve().parents[1] / "state/state.json").read_text())
+        # A pre-emergency payload deliberately omits all five emergency fields.
+        raw = {
+            "latest_seen": 3225,
+            "latest_webnovel": 3225,
+            "latest_title": "Baseline",
+            "latest_webnovel_title": "Baseline",
+            "latest_url": "https://reader.example/chapter/3225",
+            "mode": "watch_webnovel",
+        }
+        before = copy.deepcopy(raw)
         clean = validate_state(raw)
-        self.assertEqual(clean["latest_seen"], raw["latest_seen"])
-        self.assertEqual(clean["latest_webnovel"], raw["latest_webnovel"])
+        self.assertEqual(raw, before)
+        for key, value in before.items():
+            self.assertEqual(clean[key], value)
         self.assertEqual(clean["webnovel_failures"], 0)
+        self.assertIsNone(clean["webnovel_failure_cycle"])
+        self.assertIsNone(clean["emergency_last_check_ok"])
         self.assertIsNone(clean["emergency_provenance"])
         self.assertIsNone(clean["webnovel_success_cycle"])
+        with TemporaryDirectory() as tmp, patch("shadow_slave_monitor.state_manager.iso_now", return_value=START.isoformat()):
+            path = Path(tmp) / "state.json"
+            save_state(clean, path)
+            reloaded, first = load_state(path)
+        self.assertFalse(first)
+        self.assertEqual(reloaded, dict(clean, updated_at=START.isoformat()))
 
     def test_invalid_fields_and_combinations_rejected(self):
         cases = [("webnovel_failures", v) for v in (True, False, -1, 5, "4", 4.0, None)]
