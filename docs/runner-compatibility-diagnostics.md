@@ -11,7 +11,8 @@ After independent review and merge:
 
 1. Open the repository's **Actions** tab.
 2. Select **Runner compatibility diagnostics**.
-3. Select **Run workflow**, choose `main`, and deliberately dispatch once.
+3. Select **Run workflow**, choose `main`, leave **diagnostic_mode** at `core`,
+   and deliberately dispatch once for the authority/emergency comparison.
 4. Inspect both **Compare (ubuntu-24.04)** and **Compare (ubuntu-26.04)** jobs.
    Open each job's summary and its diagnostic step log.
 
@@ -96,3 +97,76 @@ regression. A single successful mocked test run or live snapshot is insufficient
 to explain an intermittent incident. Source-access differences, missing metadata,
 setup/internal failures, parser rejections or inconsistent timing require further
 investigation before migration. Keep production on Ubuntu 24.04 in this PR.
+
+## Optional inactive-source investigation
+
+`diagnostic_mode` defaults to `core`; the existing authority/emergency comparison,
+fields, baseline handling and safety behavior above apply to that mode. Core mode
+does not contact disabled references. Select `inactive_sources` for a separate
+investigation of the three exact disabled references in `PUBLIC_SITES`. This mode
+does not request the authority or emergency source, read a state snapshot, send
+notifications or change source configuration. It refuses all retrieval if any
+required reference is missing, duplicated or enabled. Arbitrary names and URLs
+are not accepted. Disabled sources remain disabled after the test.
+
+After independent review and merge, run the optional mode manually:
+
+1. Open **Actions → Runner compatibility diagnostics → Run workflow**.
+2. Choose branch `main` and set **diagnostic_mode** to `inactive_sources`.
+3. Click **Run workflow** once.
+4. Open **Compare (ubuntu-24.04)** and **Compare (ubuntu-26.04)**. In each job,
+   inspect the summary and **Compare independent source checks without side effects**
+   log. Compare the same source identities in the ordered `sources` array.
+5. Confirm identical `runner.checkout_sha` values, then compare HTTP completion,
+   status, transport classification, redirect rejection and parser outcomes.
+   The shared `runner` object applies to every source in that job; requested label,
+   actual OS version, image version, libraries and execution time distinguish the
+   environments. Missing image metadata is explicitly `unavailable`.
+
+Both jobs retain Python 3.12, the pinned actions, hash-locked dependencies,
+immutable dispatch SHA, read-only permissions and `fail-fast: false`. Each source
+gets one bounded fetch invocation at its configured listing URL, including only
+the existing bounded retries and approved redirects. Existing HTTPS, allowed-host,
+TLS, timeout, streaming-size and content-type policy is unchanged. No chapter
+page is fetched, and no extra probes, bulk crawling or access workarounds occur.
+One source's retrieval or parser failure does not stop the remaining checks.
+
+HTTP and parser evidence are reported separately:
+
+| Field / outcome | Meaning |
+| --- | --- |
+| `category: HTTP_ACCESSIBLE` | The bounded transport returned a document after policy checks. HTTP 200 is evidence of reachability only. |
+| `HTTP_ERROR` | Observed failing status; access denial, rate limiting and server errors remain distinct classifications. |
+| `NETWORK_ERROR` / `TLS_ERROR` | Timeout, connection/request failure, or certificate/handshake failure. |
+| `HTTP_POLICY_ERROR` | HTTPS/host/redirect, content-type or size policy rejected retrieval. `redirect_rejected` explicitly identifies rejected redirects, including an observed 3xx status when available. |
+| `http_completed` | Full bounded retrieval completed; observing HTTP 200 before a body/policy failure does not set this field. |
+| `parser_available` / `parser_inspected` | A retained dedicated parser exists / was actually applied to the fetched HTML. |
+| `parser_category: PARSER_CANDIDATE_FOUND` | A retained parser found a candidate that passed existing chapter range and canonical chapter URL validation. Only its number is reported in `chapter_candidate`; no title, URL or chapter body is emitted. |
+| `PARSER_NO_TRUSTWORTHY_CANDIDATE` | No candidate survived those checks, or the parser rejected evidence. Counts, dates, ratings, pagination and generic numeric text are not chapter evidence. |
+| `PARSER_UNAVAILABLE` | No dedicated parser exists for this identity; retrieval can still succeed. |
+| `INTERNAL_ERROR` | Unexpected transport/diagnostic failure, or a separately reported parser crash. No raw exception or traceback is emitted. |
+| `setup_error` | Required disabled identities could not be resolved safely; no sources were contacted. |
+
+Novel Phoenix uses its retained latest-release candidate parser. NovelFire uses
+its retained candidate parser plus existing canonical chapter URL validation;
+a listing/count link alone is insufficient, even if the retained parser can
+extract a number from it. NovelPing has no active dedicated parser and reports
+`PARSER_UNAVAILABLE`. The ordinary enabled-source dispatcher is never called.
+
+`additional_parser_work_required` is true for missing/unavailable/rejected parser
+evidence, false when a trustworthy candidate was found, and null when an available
+parser could not be inspected because retrieval failed. True calls for parser
+investigation; it does not establish the reason evidence is absent. False only
+means no additional work was identified by this single candidate examination.
+`inconclusive` remains true unless a trustworthy candidate was found. False
+describes this narrow observation, never production suitability. Parser failures
+preserve successful HTTP status/completion fields. HTTP failures leave available
+parsers uninspected. Expected failures or inconclusive results produce a warning;
+setup/internal failures exit nonzero. A green job means the investigation finished.
+
+HTTP access and parser compatibility are separate requirements. A single success
+may reflect a temporary network condition. Different hosted jobs may have
+different outbound IP addresses, but an Ubuntu runner label does not guarantee a
+particular outbound IP. No public runner IP addresses are collected or logged.
+None of these results activates a source or validates a complete production
+integration. Production source activation requires a separate review.

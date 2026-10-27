@@ -2,6 +2,15 @@ name: Runner compatibility diagnostics
 
 on:
   workflow_dispatch:
+    inputs:
+      diagnostic_mode:
+        description: Isolated diagnostic to compare on both runners
+        type: choice
+        required: true
+        default: core
+        options:
+          - core
+          - inactive_sources
 
 permissions:
   contents: read
@@ -37,4 +46,5 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
           DIAGNOSTIC_RUNNER_LABEL: ${{ matrix.runner }}
           DIAGNOSTIC_CHECKOUT_SHA: ${{ github.sha }}
+          DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
         run: python -m shadow_slave_monitor.diagnose_runner

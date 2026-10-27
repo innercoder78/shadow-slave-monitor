@@ -15,9 +15,10 @@ import ssl
 
 import requests
 import urllib3
+from bs4 import BeautifulSoup
 
-from shadow_slave_monitor import parsers
-from shadow_slave_monitor.config import PUBLIC_SITES, STATE_PATH, WEBNOVEL_SOURCE
+from shadow_slave_monitor import http_client, parsers
+from shadow_slave_monitor.config import PUBLIC_SITES, STATE_PATH, WEBNOVEL_SOURCE, SourceConfig
 from shadow_slave_monitor.diagnostics import HTTP_POLICY_CODES, HtmlDocument, diagnostic_summary
 from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 from shadow_slave_monitor.http_client import HttpFetchError
@@ -35,6 +36,27 @@ class SourceResult:
     chapter: int | None = None
     baseline: int | None = None
     newer_than_baseline: bool | None = None
+    detail: str | None = None
+
+
+INACTIVE_SOURCE_NAMES = ("Novel Phoenix", "NovelPing", "NovelFire")
+
+
+@dataclass
+class InactiveSourceResult:
+    source: str
+    category: str = "INTERNAL_ERROR"
+    classification: str = "unexpected_internal_error"
+    http_status: int | str = "unavailable"
+    http_completed: bool = False
+    redirect_rejected: bool = False
+    parser_available: bool = False
+    parser_inspected: bool = False
+    parser_category: str = "NOT_INSPECTED"
+    parser_classification: str | None = None
+    chapter_candidate: int | None = None
+    additional_parser_work_required: bool | None = None
+    inconclusive: bool = True
     detail: str | None = None
 
 
@@ -78,7 +100,9 @@ def _quiet_source_logs():
         logging.disable(previous)
 
 
-def _failure(result: SourceResult, source, exc: Exception) -> SourceResult:
+def _failure(
+    result: SourceResult | InactiveSourceResult, source, exc: Exception,
+) -> SourceResult | InactiveSourceResult:
     status = getattr(exc, "status", None)
     if isinstance(exc, requests.HTTPError) and exc.response is not None:
         status = exc.response.status_code
@@ -212,20 +236,123 @@ def diagnose_runner(*, state_path: Path = STATE_PATH) -> dict:
     }
 
 
+def _inactive_source(name: str) -> SourceConfig:
+    # Resolve exact identities from the live registry; no URLs or config clones.
+    if name not in INACTIVE_SOURCE_NAMES:
+        raise ValueError("invalid_inactive_source_configuration")
+    matches = [source for source in PUBLIC_SITES if source.name == name]
+    if len(matches) != 1 or matches[0].enabled is not False:
+        raise ValueError("invalid_inactive_source_configuration")
+    return matches[0]
+
+
+def diagnose_inactive_source(name: str) -> InactiveSourceResult:
+    site = _inactive_source(name)
+    candidate_parser = {
+        "Novel Phoenix": parsers.parse_novel_phoenix_candidates,
+        "NovelFire": parsers.parse_novelfire_candidates,
+    }.get(site.name)
+    result = InactiveSourceResult(
+        source=site.name, parser_available=candidate_parser is not None,
+        parser_category="NOT_INSPECTED" if candidate_parser else "PARSER_UNAVAILABLE",
+        additional_parser_work_required=None if candidate_parser else True,
+    )
+    with _quiet_source_logs():
+        try:
+            # One invocation of the existing bounded transport, at the configured
+            # listing URL. Never call the enabled-source dispatcher or chapter pages.
+            document = http_client.fetch_html(site)
+            if isinstance(document, HtmlDocument):
+                result.http_status = _status(document.metadata.status)
+                # requests does not identify a 3xx without Location as a redirect.
+                # Do not report that unresolved response as a retrieved listing.
+                if isinstance(result.http_status, int) and 300 <= result.http_status < 400:
+                    raise HttpFetchError("missing_redirect_location", status=result.http_status)
+            result.http_completed = True
+            result.category, result.classification = "HTTP_ACCESSIBLE", "retrieval_completed"
+        except Exception as exc:
+            _failure(result, site, exc)
+            result.redirect_rejected = (
+                isinstance(exc, HttpFetchError)
+                and exc.reason in {"non_https_url", "redirect_host_not_allowed", "missing_redirect_location",
+                                   "redirect_limit", "redirect_not_allowed"}
+                and isinstance(result.http_status, int) and 300 <= result.http_status < 400
+            )
+            return result
+        if candidate_parser is None:
+            return result
+        result.parser_inspected = True
+        try:
+            candidates = candidate_parser(BeautifulSoup(document, "html.parser"), site.url)
+            candidates = parsers.filter_public_candidates(candidates, site.name)
+            # This retained validator rechecks canonical chapter URLs, including
+            # rejecting a count/listing link as individual chapter evidence.
+            candidates = [candidate for candidate in candidates if parsers._safe_success_url(site, candidate)]
+            if candidates:
+                result.chapter_candidate = max(candidate.chapter for candidate in candidates)
+                result.parser_category = "PARSER_CANDIDATE_FOUND"
+                result.additional_parser_work_required = False
+                result.inconclusive = False
+            else:
+                result.parser_category = "PARSER_NO_TRUSTWORTHY_CANDIDATE"
+                result.additional_parser_work_required = True
+        except parsers.ParseError as exc:
+            result.parser_category = "PARSER_NO_TRUSTWORTHY_CANDIDATE"
+            result.parser_classification = parsers.parser_code(exc.reason)
+            result.additional_parser_work_required = True
+        except Exception:
+            # Retrieval succeeded; a parser crash must not become an HTTP error.
+            result.parser_category = "INTERNAL_ERROR"
+            result.parser_classification = "unexpected_parser_error"
+            result.additional_parser_work_required = True
+    return result
+
+
+def diagnose_inactive_sources() -> dict:
+    outcome = {"diagnostic_mode": "inactive_sources", "runner": runner_information(), "sources": []}
+    try:
+        # Fail closed before any request if even one reference is missing/enabled.
+        for name in INACTIVE_SOURCE_NAMES:
+            _inactive_source(name)
+    except ValueError:
+        outcome["setup_error"] = "invalid_inactive_source_configuration"
+        return outcome
+    outcome["sources"] = [asdict(diagnose_inactive_source(name)) for name in INACTIVE_SOURCE_NAMES]
+    return outcome
+
+
 def main() -> int:
     try:
-        outcome = diagnose_runner()
-        sources = (outcome["webnovel"], outcome["telegram_emergency"])
-        healthy = all(source["chapter_validated"] for source in sources)
-        summary = ("Both source checks validated chapters." if healthy else
-                   "SOURCE CHECK FAILURES: inspect each source result below.")
+        mode = os.environ.get("DIAGNOSTIC_MODE", "core")
+        if mode == "core":
+            outcome = diagnose_runner()
+            sources = (outcome["webnovel"], outcome["telegram_emergency"])
+            healthy = all(source["chapter_validated"] for source in sources)
+            summary = ("Both source checks validated chapters." if healthy else
+                       "SOURCE CHECK FAILURES: inspect each source result below.")
+        elif mode == "inactive_sources":
+            outcome = diagnose_inactive_sources()
+            sources = outcome["sources"]
+            healthy = (not outcome.get("setup_error") and all(
+                source["category"] == "HTTP_ACCESSIBLE" and not source["inconclusive"] for source in sources
+            ))
+            summary = ("Inactive-source observations only; all sources remain disabled. "
+                       "HTTP access and parser candidates do not establish production suitability.")
+            if not healthy:
+                summary += " INCONCLUSIVE OR FAILED CHECKS: inspect each source result below."
+        else:
+            print("::error::Diagnostic setup failure: invalid_diagnostic_mode")
+            return 2
         payload = json.dumps(outcome, indent=2, sort_keys=True)
         print(summary + "\n" + payload)
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary_path:
             with Path(summary_path).open("a", encoding="utf-8") as stream:
                 stream.write("## Runner compatibility diagnostics\n\n" + summary + "\n\n```json\n" + payload + "\n```\n")
-        if any(source["category"] in {"SETUP_ERROR", "INTERNAL_ERROR"} for source in sources):
+        if (outcome.get("setup_error") or any(
+            source["category"] in {"SETUP_ERROR", "INTERNAL_ERROR"}
+            or source.get("parser_category") == "INTERNAL_ERROR" for source in sources
+        )):
             return 2
         if not healthy:
             print("::warning::Source check failures; see the diagnostic summary for separate results.")
