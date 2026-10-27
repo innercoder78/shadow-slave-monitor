@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -19,7 +19,7 @@ from bs4 import BeautifulSoup
 
 from shadow_slave_monitor import http_client, parsers
 from shadow_slave_monitor.config import PUBLIC_SITES, STATE_PATH, WEBNOVEL_SOURCE, SourceConfig
-from shadow_slave_monitor.diagnostics import HTTP_POLICY_CODES, HtmlDocument, diagnostic_summary
+from shadow_slave_monitor.diagnostics import HTTP_POLICY_CODES, HtmlDocument, challenge_suspected, diagnostic_summary
 from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 from shadow_slave_monitor.http_client import HttpFetchError
 from shadow_slave_monitor.models import ChapterReport
@@ -55,6 +55,10 @@ class InactiveSourceResult:
     parser_category: str = "NOT_INSPECTED"
     parser_classification: str | None = None
     chapter_candidate: int | None = None
+    reference_chapter: int | None = None
+    newer_than_reference: bool | None = None
+    jump_check: str = "not_checked_without_reference"
+    evidence: dict[str, int] = field(default_factory=dict)
     additional_parser_work_required: bool | None = None
     inconclusive: bool = True
     detail: str | None = None
@@ -246,14 +250,52 @@ def _inactive_source(name: str) -> SourceConfig:
     return matches[0]
 
 
-def diagnose_inactive_source(name: str) -> InactiveSourceResult:
+def _inactive_evidence(soup: BeautifulSoup, site: SourceConfig) -> dict[str, int]:
+    """Bounded structural observations only; never retain page text or URLs."""
+    anchors = [anchor for anchor in soup.find_all("a", href=True) if parsers._inactive_visible(anchor)]
+    series_path = "/novel/shadow-slave/" if site.name == "Novel Phoenix" else "/book/shadow-slave/"
+    listings = {prefix + series_path + "chapters" + suffix
+                for prefix in ("", *("https://" + host for host in site.allowed_hosts)) for suffix in ("", "/")}
+    marker = r"^\s*Latest\s+chapter\s*:?\s*$" if site.name == "NovelPing" else r"^\s*Latest\s+Release\s*:?\s*$"
+    markers = len(parsers._inactive_latest_groups(soup, marker))
+    if site.name == "NovelFire":
+        markers += sum(bool(re.match(r"^Latest\s+Release\s*:", parsers._inactive_text(anchor), re.I))
+                       for anchor in anchors)
+    return {key: min(value, 9999) for key, value in {
+        "links_inspected": len(anchors),
+        "canonical_chapter_links": sum(parsers._inactive_chapter_url(anchor.get("href"), site.url, site.name)
+                                       is not None for anchor in anchors),
+        "series_path_links": sum(series_path in str(anchor.get("href", "")) for anchor in anchors),
+        "listing_links": sum(anchor.get("href") in listings for anchor in anchors),
+        "latest_release_markers": markers,
+        "challenge_indicators": int(challenge_suspected(soup)),
+    }.items()}
+
+
+def _inactive_rejection(result: InactiveSourceResult) -> str:
+    if result.evidence["challenge_indicators"]:
+        return "challenge_page_suspected"
+    if not result.evidence["canonical_chapter_links"] and result.evidence["listing_links"]:
+        return "listing_without_individual_chapter"
+    if result.source in {"Novel Phoenix", "NovelPing"} and not result.evidence["latest_release_markers"]:
+        return "latest_section_missing"
+    if not result.evidence["canonical_chapter_links"]:
+        return "no_canonical_chapter_links"
+    return "chapter_evidence_rejected"
+
+
+def diagnose_inactive_source(name: str, *, reference_chapter: int | None = None) -> InactiveSourceResult:
     site = _inactive_source(name)
+    if reference_chapter is not None and parsers.chapter_validity_category(reference_chapter) is not None:
+        raise ValueError("invalid_reference_chapter")
     candidate_parser = {
         "Novel Phoenix": parsers.parse_novel_phoenix_candidates,
+        "NovelPing": parsers.parse_novelping_candidates,
         "NovelFire": parsers.parse_novelfire_candidates,
     }.get(site.name)
     result = InactiveSourceResult(
-        source=site.name, parser_available=candidate_parser is not None,
+        source=site.name, reference_chapter=reference_chapter, parser_available=candidate_parser is not None,
+        jump_check="not_inspected" if reference_chapter is not None else "not_checked_without_reference",
         parser_category="NOT_INSPECTED" if candidate_parser else "PARSER_UNAVAILABLE",
         additional_parser_work_required=None if candidate_parser else True,
     )
@@ -283,22 +325,46 @@ def diagnose_inactive_source(name: str) -> InactiveSourceResult:
             return result
         result.parser_inspected = True
         try:
-            candidates = candidate_parser(BeautifulSoup(document, "html.parser"), site.url)
+            soup = BeautifulSoup(document, "html.parser")
+            result.evidence = _inactive_evidence(soup, site)
+            if challenge_suspected(soup):
+                raise parsers.ParseError("chapter_data_missing")
+            candidates = candidate_parser(soup, site.url, reference_chapter=reference_chapter)
             candidates = parsers.filter_public_candidates(candidates, site.name)
+            if any(candidate.source != site.name for candidate in candidates):
+                raise parsers.ParseError("chapter_data_invalid")
             # This retained validator rechecks canonical chapter URLs, including
             # rejecting a count/listing link as individual chapter evidence.
             candidates = [candidate for candidate in candidates if parsers._safe_success_url(site, candidate)]
+            candidates = parsers._inactive_consensus(
+                candidates, latest_only=site.name != "NovelFire", reference_chapter=reference_chapter,
+            )
             if candidates:
                 result.chapter_candidate = max(candidate.chapter for candidate in candidates)
+                if reference_chapter is not None:
+                    result.newer_than_reference = result.chapter_candidate > reference_chapter
+                    result.jump_check = "within_limit"
                 result.parser_category = "PARSER_CANDIDATE_FOUND"
                 result.additional_parser_work_required = False
                 result.inconclusive = False
             else:
                 result.parser_category = "PARSER_NO_TRUSTWORTHY_CANDIDATE"
+                result.parser_classification = _inactive_rejection(result)
                 result.additional_parser_work_required = True
         except parsers.ParseError as exc:
             result.parser_category = "PARSER_NO_TRUSTWORTHY_CANDIDATE"
-            result.parser_classification = parsers.parser_code(exc.reason)
+            result.parser_classification = {
+                "inactive_release_conflict": "contradictory_release_evidence",
+                "inactive_suspicious_jump": "suspicious_chapter_jump",
+                "inactive_latest_link_invalid": "latest_link_invalid_or_contradictory",
+                "inactive_latest_link_missing": "latest_section_without_chapter_link",
+            }.get(exc.reason, parsers.parser_code(exc.reason))
+            if result.evidence.get("challenge_indicators"):
+                result.parser_classification = "challenge_page_suspected"
+            elif result.evidence and not result.evidence["canonical_chapter_links"] and result.evidence["listing_links"]:
+                result.parser_classification = "listing_without_individual_chapter"
+            if exc.reason == "inactive_suspicious_jump":
+                result.jump_check = "rejected"
             result.additional_parser_work_required = True
         except Exception:
             # Retrieval succeeded; a parser crash must not become an HTTP error.
@@ -308,16 +374,19 @@ def diagnose_inactive_source(name: str) -> InactiveSourceResult:
     return result
 
 
-def diagnose_inactive_sources() -> dict:
+def diagnose_inactive_sources(*, reference_chapter: int | None = None) -> dict:
     outcome = {"diagnostic_mode": "inactive_sources", "runner": runner_information(), "sources": []}
     try:
+        if reference_chapter is not None and parsers.chapter_validity_category(reference_chapter) is not None:
+            raise ValueError("invalid_inactive_source_configuration")
         # Fail closed before any request if even one reference is missing/enabled.
         for name in INACTIVE_SOURCE_NAMES:
             _inactive_source(name)
     except ValueError:
         outcome["setup_error"] = "invalid_inactive_source_configuration"
         return outcome
-    outcome["sources"] = [asdict(diagnose_inactive_source(name)) for name in INACTIVE_SOURCE_NAMES]
+    outcome["sources"] = [asdict(diagnose_inactive_source(name, reference_chapter=reference_chapter))
+                          for name in INACTIVE_SOURCE_NAMES]
     return outcome
 
 
@@ -331,7 +400,11 @@ def main() -> int:
             summary = ("Both source checks validated chapters." if healthy else
                        "SOURCE CHECK FAILURES: inspect each source result below.")
         elif mode == "inactive_sources":
-            outcome = diagnose_inactive_sources()
+            raw_reference = os.environ.get("DIAGNOSTIC_REFERENCE_CHAPTER", "")
+            if raw_reference and not re.fullmatch(r"[1-9][0-9]{0,4}", raw_reference):
+                print("::error::Diagnostic setup failure: invalid_reference_chapter")
+                return 2
+            outcome = diagnose_inactive_sources(reference_chapter=int(raw_reference) if raw_reference else None)
             sources = outcome["sources"]
             healthy = (not outcome.get("setup_error") and all(
                 source["category"] == "HTTP_ACCESSIBLE" and not source["inconclusive"] for source in sources

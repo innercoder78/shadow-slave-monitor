@@ -27,6 +27,9 @@ PRIVATE = "private-secret https://untrusted.example/private?token=secret"
 PHOENIX = ('<section><b>Latest Release:</b><a href="/novel/shadow-slave/chapter-3227">'
            'Chapter 3227 Private Title</a></section>')
 FIRE = '<a href="/book/shadow-slave/chapter-3227">Chapter 3227 Private Title</a>'
+PING = ('<h1>Shadow Slave</h1><section><b>Latest chapter:</b>'
+        '<a href="/book/shadow-slave/chapter-3227-a-soul-and-a-shadow-walk-into-a-bar">'
+        'Chapter 3227 A Soul and a Shadow Walk Into a Bar</a></section>')
 
 
 def response(site, html=None, status=200):
@@ -131,7 +134,15 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
             self.assertEqual(result["chapter_candidate"], 3227)
             self.assertFalse(result["additional_parser_work_required"])
             self.assertFalse(result["inconclusive"])
-        unavailable = results[1]
+        rejected = results[1]
+        self.assertTrue(rejected["parser_available"])
+        self.assertTrue(rejected["parser_inspected"])
+        self.assertEqual(rejected["parser_category"], "PARSER_NO_TRUSTWORTHY_CANDIDATE")
+        self.assertTrue(rejected["additional_parser_work_required"])
+        self.assertTrue(rejected["inconclusive"])
+        # Keep genuine unavailability distinct from a dedicated parser's rejection.
+        with patch.object(parsers, "parse_novelping_candidates", None):
+            unavailable = self.run_diagnostic()[1]
         self.assertFalse(unavailable["parser_available"])
         self.assertFalse(unavailable["parser_inspected"])
         self.assertEqual(unavailable["parser_category"], "PARSER_UNAVAILABLE")
@@ -140,11 +151,127 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
 
     def test_retained_parsers_are_called_directly_once_without_extra_requests(self):
         with patch.object(parsers, "parse_novel_phoenix_candidates", wraps=parsers.parse_novel_phoenix_candidates) as phoenix, \
+             patch.object(parsers, "parse_novelping_candidates", wraps=parsers.parse_novelping_candidates) as ping, \
              patch.object(parsers, "parse_novelfire_candidates", wraps=parsers.parse_novelfire_candidates) as fire:
             self.run_diagnostic()
         phoenix.assert_called_once()
+        ping.assert_called_once()
         fire.assert_called_once()
         self.assertEqual(self.get.call_count, 3)
+
+    def test_all_three_dedicated_parsers_accept_independent_canonical_evidence(self):
+        self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
+                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING, SITES[2].url: FIRE}[url])
+        with patch.object(parsers, "parse_novelarrow_candidates", side_effect=AssertionError("legacy dispatch")) as legacy:
+            results = self.run_diagnostic()
+        for result in results:
+            self.assertTrue(result["parser_available"] and result["parser_inspected"])
+            self.assertEqual(result["parser_category"], "PARSER_CANDIDATE_FOUND")
+            self.assertEqual(result["chapter_candidate"], 3227)
+            self.assertEqual(result["jump_check"], "not_checked_without_reference")
+            self.assertIsNone(result["reference_chapter"])
+            self.assertIsNone(result["newer_than_reference"])
+        legacy.assert_not_called()
+
+    def test_explicit_reference_reports_older_unchanged_new_and_suspicious_results_without_state(self):
+        self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
+                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING, SITES[2].url: FIRE}[url])
+        for reference, newer in ((3226, True), (3227, False), (3228, False)):
+            for result in diagnostic.diagnose_inactive_sources(reference_chapter=reference)["sources"]:
+                self.assertEqual((result["chapter_candidate"], result["reference_chapter"], result["newer_than_reference"]),
+                                 (3227, reference, newer))
+                self.assertEqual(result["jump_check"], "within_limit")
+        for result in diagnostic.diagnose_inactive_sources(reference_chapter=3201)["sources"]:
+            self.assertTrue(result["http_completed"])
+            self.assertIsNone(result["chapter_candidate"])
+            self.assertEqual(result["parser_classification"], "suspicious_chapter_jump")
+            self.assertEqual(result["jump_check"], "rejected")
+
+    def test_invalid_references_refuse_all_requests_and_never_echo_input(self):
+        for reference in (True, 0, 10001, "3227", PRIVATE):
+            with self.subTest(reference=reference):
+                self.assertIn("setup_error", diagnostic.diagnose_inactive_sources(reference_chapter=reference))
+                self.get.assert_not_called()
+        for reference in ("0", "10001", "-1", "3.5", PRIVATE, "3227\n"):
+            output = io.StringIO()
+            with patch.dict(diagnostic.os.environ, {"DIAGNOSTIC_MODE": "inactive_sources",
+                                                   "DIAGNOSTIC_REFERENCE_CHAPTER": reference}), redirect_stdout(output):
+                self.assertEqual(diagnostic.main(), 2)
+            self.assert_safe(output.getvalue())
+            self.get.assert_not_called()
+
+    def test_structural_rejections_distinguish_listing_missing_section_and_bad_link(self):
+        cases = ((SITES[2], '<a href="/book/shadow-slave/chapters">Chapter 3227 Private Title</a>',
+                  "listing_without_individual_chapter"),
+                 (SITES[0], PHOENIX.replace("Latest Release:", "Catalog:"), "latest_section_missing"),
+                 (SITES[1], '<h1>Shadow Slave</h1>' + PING.split('</b>')[1].split('</section>')[0], "latest_section_missing"),
+                 (SITES[0], PHOENIX.replace("chapter-3227", "chapter-3226"), "latest_link_invalid_or_contradictory"))
+        for site, html, classification in cases:
+            self.get.side_effect = lambda url, **kw: response(next(item for item in SITES if item.url == url), html)
+            result = diagnostic.diagnose_inactive_source(site.name)
+            self.assertEqual(result.parser_classification, classification)
+            self.assertTrue(result.http_completed)
+            self.assertIsNone(result.chapter_candidate)
+            self.assertTrue(all(type(count) is int and 0 <= count <= 9999 for count in result.evidence.values()))
+
+    def test_challenge_and_dynamic_shell_remain_unusable_without_fetching_scripts(self):
+        for html, classification in (('<title>Just a moment...</title><form id="challenge-form"></form>' + PHOENIX,
+                                      "challenge_page_suspected"),
+                                     ('<h1>Shadow Slave</h1><script src="/chapters.js"></script><div id="app"></div>',
+                                      "latest_section_missing")):
+            self.get.side_effect = lambda url, **kw: response(SITES[0], html)
+            result = diagnostic.diagnose_inactive_source(SITES[0].name)
+            self.assertEqual(result.parser_classification, classification)
+            self.assertIsNone(result.chapter_candidate)
+        self.assertEqual(self.get.call_count, 2)
+
+    def test_each_parser_failure_remains_independent_and_recovery_has_no_stale_result(self):
+        for name, parser_name in zip(NAMES, ("parse_novel_phoenix_candidates", "parse_novelping_candidates", "parse_novelfire_candidates")):
+            for error, category in ((parsers.ParseError("chapter_data_invalid"), "PARSER_NO_TRUSTWORTHY_CANDIDATE"),
+                                    (RuntimeError(PRIVATE), "INTERNAL_ERROR")):
+                with self.subTest(source=name, error=type(error)), patch.object(parsers, parser_name, side_effect=error):
+                    results = self.run_diagnostic()
+                    failed = next(item for item in results if item["source"] == name)
+                    self.assertEqual(failed["parser_category"], category)
+                    self.assertTrue(failed["http_completed"])
+                    self.assertEqual(sum(item["http_completed"] for item in results), 3)
+            recovered = next(item for item in self.run_diagnostic() if item["source"] == name)
+            self.assertNotEqual(recovered["parser_category"], "INTERNAL_ERROR")
+            if name != "NovelPing":
+                self.assertEqual(recovered["chapter_candidate"], 3227)
+
+    def test_access_failure_followed_by_recovery_reexamines_current_html(self):
+        for site in SITES:
+            self.get.side_effect = lambda url, **kw: response(site, status=403)
+            self.assertFalse(diagnostic.diagnose_inactive_source(site.name).http_completed)
+            self.get.side_effect = lambda url, **kw: response(site, PING if site.name == "NovelPing" else None)
+            recovered = diagnostic.diagnose_inactive_source(site.name)
+            self.assertEqual((recovered.http_status, recovered.chapter_candidate), (200, 3227))
+            self.get.side_effect = lambda url, **kw: response(site, "<h1>Shadow Slave</h1>")
+            self.assertIsNone(diagnostic.diagnose_inactive_source(site.name).chapter_candidate)
+
+    def test_remaining_temporary_statuses_have_bounded_retries_for_every_source(self):
+        for site in SITES:
+            for status in (500, 502, 504):
+                with self.subTest(source=site.name, status=status):
+                    self.get.reset_mock()
+                    self.get.side_effect = lambda url, **kw: response(site, status=status)
+                    result = diagnostic.diagnose_inactive_source(site.name)
+                    self.assertEqual((result.http_status, result.classification), (status, "server_error"))
+                    self.assertEqual(self.get.call_count, HTTP_RETRIES)
+
+    def test_parser_source_identity_is_rechecked_before_acceptance(self):
+        candidate = ChapterReport("Other", 3227, "Private Title", SITES[0].url.replace("/chapters", "/chapter-3227"))
+        with patch.object(parsers, "parse_novel_phoenix_candidates", return_value=[candidate]):
+            result = self.run_diagnostic()[0]
+        self.assertIsNone(result["chapter_candidate"])
+        self.assertEqual(result["parser_classification"], "PARSE_CHAPTER_INVALID")
+
+    def test_workflow_reference_is_optional_and_passed_as_environment_data(self):
+        workflow = (ROOT / ".github/workflows/runner-compatibility-diagnostics.yml").read_text()
+        self.assertIn('reference_chapter:\n', workflow)
+        self.assertIn('DIAGNOSTIC_REFERENCE_CHAPTER: ${{ inputs.reference_chapter }}', workflow)
+        self.assertNotIn('run: python -m shadow_slave_monitor.diagnose_runner ${{', workflow)
 
     def test_http_status_failures_and_bounded_retries_for_each_source(self):
         for site in SITES:
@@ -349,7 +476,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                 self.assert_safe(text)
                 self.assertIn("all sources remain disabled", text)
                 self.assertIn("INCONCLUSIVE OR FAILED CHECKS", text)
-                self.assertIn("PARSER_UNAVAILABLE", text)
+                self.assertIn("PARSER_NO_TRUSTWORTHY_CANDIDATE", text)
             self.assertIn("::warning::", output.getvalue())
 
     def test_setup_or_internal_parser_failures_exit_nonzero_without_traceback(self):
@@ -371,6 +498,20 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
 
 
 class DiagnosticModeTests(unittest.TestCase):
+    def test_core_ignores_inactive_reference_input_and_keeps_its_result_shape(self):
+        result = {"webnovel": {"chapter_validated": True, "category": "SUCCESS_VALID_CHAPTER"},
+                  "telegram_emergency": {"chapter_validated": True, "category": "SUCCESS_VALID_CHAPTER"}}
+        output = io.StringIO()
+        with patch.dict(diagnostic.os.environ, {"DIAGNOSTIC_MODE": "core", "DIAGNOSTIC_REFERENCE_CHAPTER": PRIVATE,
+                                               "GITHUB_STEP_SUMMARY": ""}), \
+             patch.object(diagnostic, "diagnose_runner", return_value=result) as core, \
+             patch.object(diagnostic, "diagnose_inactive_sources") as inactive, redirect_stdout(output):
+            self.assertEqual(diagnostic.main(), 0)
+        core.assert_called_once_with()
+        inactive.assert_not_called()
+        self.assertNotIn("reference_chapter", output.getvalue())
+        self.assertNotIn(PRIVATE, output.getvalue())
+
     def test_core_remains_the_default_and_does_not_resolve_inactive_sources(self):
         core_result = {"webnovel": {"chapter_validated": True, "category": "SUCCESS_VALID_CHAPTER"},
                        "telegram_emergency": {"chapter_validated": True, "category": "SUCCESS_VALID_CHAPTER"}}

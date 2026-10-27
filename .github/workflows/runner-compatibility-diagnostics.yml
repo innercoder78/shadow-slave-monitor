@@ -11,6 +11,11 @@ on:
         options:
           - core
           - inactive_sources
+      reference_chapter:
+        description: Optional independently confirmed chapter for inactive-mode jump checks
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -47,4 +52,5 @@ jobs:
           DIAGNOSTIC_RUNNER_LABEL: ${{ matrix.runner }}
           DIAGNOSTIC_CHECKOUT_SHA: ${{ github.sha }}
           DIAGNOSTIC_MODE: ${{ inputs.diagnostic_mode }}
+          DIAGNOSTIC_REFERENCE_CHAPTER: ${{ inputs.reference_chapter }}
         run: python -m shadow_slave_monitor.diagnose_runner
