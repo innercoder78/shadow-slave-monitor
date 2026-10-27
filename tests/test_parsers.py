@@ -294,13 +294,12 @@ class NovelFireParserTests(unittest.TestCase):
         best = max(candidates, key=lambda report: report.chapter)
         return ChapterReport(self.source.name, best.chapter, best.title, best.url)
 
-    def test_disabled_reference_configuration_and_main_latest_card(self) -> None:
+    def test_disabled_reference_configuration_and_listing_card_is_not_a_chapter(self) -> None:
         validate_source_config()
         self.assertFalse(self.source.enabled)
         html = '<p>3122Chapters</p><a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>'
-        report = self.check(html)
-        self.assertEqual((report.chapter, report.title, report.url),
-                         (3122, "Field of Dishonor", "https://novelfire.net/book/shadow-slave/chapters"))
+        with self.assertRaises(ParseError):
+            self.check(html)
 
     def test_latest_release_individual_url_and_numeric_title(self) -> None:
         report = self.check('<a href="/book/shadow-slave/chapter-3098">Latest Release: Chapter 3098 Catch 22 Updated 2 hours ago</a>')
@@ -314,16 +313,13 @@ class NovelFireParserTests(unittest.TestCase):
             with self.subTest(html=html), self.assertRaises(ParseError):
                 self.check(html)
 
-    def test_conflict_keeps_higher_self_consistent_main_candidate(self) -> None:
+    def test_conflicting_listing_card_and_individual_release_fail_closed(self) -> None:
         html = '''
           <a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>
           <a href="/book/shadow-slave/chapter-3098">Latest Release: Chapter 3098 Usurpation</a>
         '''
-        with self.assertLogs(level="WARNING") as logs:
-            report = self.check(html)
-        self.assertEqual((report.chapter, report.title, report.url),
-                         (3122, "Field of Dishonor", "https://novelfire.net/book/shadow-slave/chapters"))
-        self.assertIn("NovelFire pages disagreed: chapters=3098,3122", "\n".join(logs.output))
+        with self.assertRaisesRegex(ParseError, "inactive_release_conflict"):
+            self.check(html)
 
 
 class NovelArrowParserTests(unittest.TestCase):

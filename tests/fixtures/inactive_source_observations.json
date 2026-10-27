@@ -1,0 +1,31 @@
+{
+  "raw_html_verified": false,
+  "provenance": "User-supplied historical observations and pre-existing test examples; no current raw HTML was retrieved on 2026-10-27. Semantic DOMs built by tests are contract tests, not captured site templates.",
+  "Novel Phoenix": {
+    "evidence": "Existing test_parsers.py example; hosted run 40555600098 independently accepted 3227 but retained no HTML.",
+    "marker": "Latest Release:",
+    "label": "Chapter 3148 Division of Power",
+    "href": "/novel/shadow-slave/chapter-3148",
+    "chapter": 3148,
+    "title": "Division of Power"
+  },
+  "NovelPing": {
+    "evidence": "Historical external observation supplied in the task; URL and visible text only, not a verified HTML template or current release claim.",
+    "series": "Shadow Slave",
+    "author": "Guiltythree",
+    "marker": "Latest chapter:",
+    "label": "Chapter 3227 A Soul and a Shadow Walk Into a Bar",
+    "href": "https://novelping.com/book/shadow-slave/chapter-3227-a-soul-and-a-shadow-walk-into-a-bar",
+    "chapter": 3227,
+    "title": "A Soul and a Shadow Walk Into a Bar"
+  },
+  "NovelFire": {
+    "evidence": "Existing test_parsers.py examples, not freshly verified markup. Hosted run 40555600098 returned 200 without a trustworthy candidate; its HTML is unavailable.",
+    "label": "Latest Release: Chapter 3098 Catch 22 Updated 2 hours ago",
+    "href": "/book/shadow-slave/chapter-3098",
+    "chapter": 3098,
+    "title": "Catch 22",
+    "listing_label": "Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago",
+    "listing_href": "/book/shadow-slave/chapters"
+  }
+}
