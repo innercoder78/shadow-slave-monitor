@@ -19,8 +19,6 @@ from shadow_slave_monitor.parsers import (
     parse_lightnovelup_chapter_page,
     parse_novel_phoenix_candidates,
     parse_novel_buddy_candidates,
-    parse_novelarrow_candidates,
-    _confirm_novelarrow_chapter_page,
     parse_novelfull_candidates,
     parse_shadowslave_space_chapter_title,
     parse_telegram_candidates,
@@ -280,116 +278,6 @@ class NovelBuddyParserTests(unittest.TestCase):
                  self.assertRaisesRegex(ParseError, "chapter_page_confirmation_failed"):
                 check_public_site(
                     self.source, None, 3190, "Freedom of Choice", 3189, "Entertaining Guest")
-
-
-class NovelArrowParserTests(unittest.TestCase):
-    source = SourceConfig(
-        "NovelArrow",
-        "https://novelarrow.com/novel/shadow-slave",
-        False,
-        ("novelarrow.com", "www.novelarrow.com"),
-    )
-
-    def check(self, html: str):
-        candidates = parse_novelarrow_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
-        if not candidates:
-            raise ParseError("no reference candidates")
-        best = max(candidates, key=lambda report: report.chapter)
-        return ChapterReport(self.source.name, best.chapter, best.title, best.url)
-
-
-    def test_realistic_latest_chapter_section(self) -> None:
-        html = """
-            <main>
-              <h1>Shadow Slave</h1>
-              <p>3128 Chapters</p>
-              <section>
-                <h2>Latest chapter</h2>
-                <a href="/chapter/shadow-slave/chapter-3128-song-of-fire">C3128 Song of Fire</a>
-              </section>
-              <section>
-                <h2>Older chapters</h2>
-                <a href="/chapter/shadow-slave/chapter-3127-burning-skies">C3127 Burning Skies</a>
-                <a href="/chapter/shadow-slave/chapter-30-starless-void">C30 Starless Void 2</a>
-              </section>
-              <nav>Previous Next</nav><p>4.8 rating · 25 comments · updated 2 hours ago</p>
-              <a href="/chapter/other-novel/chapter-9999-not-shadow-slave">C9999 Not Shadow Slave</a>
-            </main>
-        """
-        report = self.check(html)
-        self.assertEqual(
-            (report.source, report.chapter, report.title, report.url),
-            (
-                "NovelArrow",
-                3128,
-                "Song of Fire",
-                "https://novelarrow.com/chapter/shadow-slave/chapter-3128-song-of-fire",
-            ),
-        )
-
-    def test_novel_wide_chapter_count_is_not_a_candidate(self) -> None:
-        with self.assertRaises(ParseError):
-            self.check("<main><h1>Shadow Slave</h1><p>3128 Chapters</p><p>Latest chapter</p></main>")
-
-    def test_mismatched_visible_and_href_chapters_are_rejected(self) -> None:
-        with self.assertRaises(ParseError):
-            self.check(
-                '<p>Latest chapter</p><a href="/chapter/shadow-slave/chapter-3128-song-of-fire">'
-                "C3127 Song of Fire</a>"
-            )
-
-    def test_unrelated_novel_link_is_rejected(self) -> None:
-        with self.assertRaises(ParseError):
-            self.check(
-                '<p>Latest chapter</p><a href="/chapter/other-novel/chapter-3128-song-of-fire">'
-                "C3128 Song of Fire</a>"
-            )
-
-    def test_trailing_site_metadata_is_removed_when_slug_confirms_it(self) -> None:
-        report = self.check(
-            '<a href="/chapter/shadow-slave/chapter-30-starless-void">C30 Starless Void 2</a>'
-        )
-        self.assertEqual((report.chapter, report.title), (30, "Starless Void"))
-
-    def test_legitimate_numeric_title_is_preserved_when_present_in_slug(self) -> None:
-        report = self.check(
-            '<a href="/chapter/shadow-slave/chapter-3120-catch-22">C3120 Catch 22</a>'
-        )
-        self.assertEqual((report.chapter, report.title), (3120, "Catch 22"))
-
-    def test_relative_chapter_url_becomes_absolute_https(self) -> None:
-        report = self.check(
-            '<a href="/chapter/shadow-slave/chapter-3128-song-of-fire">C3128 Song of Fire</a>'
-        )
-        self.assertEqual(
-            report.url,
-            "https://novelarrow.com/chapter/shadow-slave/chapter-3128-song-of-fire",
-        )
-
-    def test_title_only_target_is_confirmed_by_strict_document_title(self) -> None:
-        listing = ("<h2>Latest chapter</h2><div><a href='/chapter/shadow-slave/"
-                   "chapter-entertaining-guest'>Chapter Entertaining Guest</a></div>")
-        page = "<title>Shadow Slave / Chapter Entertaining Guest | Read on NovelArrow</title><h1>Reader</h1>"
-        reports = parse_novelarrow_candidates(BeautifulSoup(listing, "html.parser"), self.source.url,
-                                               3189, "Entertaining Guest")
-        self.assertEqual([(r.chapter, r.title) for r in reports], [(3189, "Entertaining Guest")])
-        self.assertEqual(_confirm_novelarrow_chapter_page(page, 3189, "Entertaining Guest"), "Entertaining Guest")
-
-    def test_title_only_target_page_confirmation_fails_closed(self) -> None:
-        listing = ("<h2>Latest chapter</h2><div><a href='/chapter/shadow-slave/"
-                   "chapter-entertaining-guest'>Chapter Entertaining Guest</a></div>")
-        bad_pages = (
-            "<title>Shadow Slave / Chapter Wrong Title | Read on NovelArrow</title>",
-            "<title>Shadow Slave / Chapter 3188 Wrong | Read on NovelArrow</title>",
-            ("<title>Shadow Slave / Chapter Entertaining Guest | Read on NovelArrow</title>"
-             "<h1>Chapter Different Title</h1>"),
-            "<title>Shadow Slave reader</title><h1>Reader</h1>",
-        )
-        for page in bad_pages:
-            with self.subTest(page=page), self.assertRaises(ParseError):
-                _confirm_novelarrow_chapter_page(page, 3189, "Entertaining Guest")
-        self.assertEqual(parse_novelarrow_candidates(BeautifulSoup(listing, "html.parser"),
-                         self.source.url, 3189, "Wrong Title"), [])
 
 
 class ShadowSlaveSpaceParserTests(unittest.TestCase):
@@ -1324,14 +1212,6 @@ class TargetAwareLiveShapeTests(unittest.TestCase):
         self.assertEqual(targeted[0].chapter, 3189)
         self.assertEqual(parse_freewebnovel_candidates(
             soup, "https://freewebnovel.com/novel/shadow-slave")[0].chapter, 3189)
-
-        arrow_html = """<div><h2>Latest chapter</h2><div>
-          <a href='/chapter/shadow-slave/chapter-entertaining-guest'>Chapter Entertaining Guest</a>
-          <span>9999 Chapters</span></div></div>"""
-        reports = parse_novelarrow_candidates(
-            BeautifulSoup(arrow_html, "html.parser"),
-            "https://novelarrow.com/novel/shadow-slave", 3189, "Entertaining Guest")
-        self.assertEqual([(r.chapter, r.title) for r in reports], [(3189, "Entertaining Guest")])
 
         full_html = """<section><h2>Latest chapters</h2><div>
           <a href='/shadow-slave/chapter-entertaining-guest.html'>Chapter Entertaining Guest</a>

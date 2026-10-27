@@ -1357,7 +1357,7 @@ def parse_novel_phoenix_candidates(
 
 
 def novelping_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    """Historical numbered/title-slug path; never dispatch the legacy parser."""
+    """Canonical numbered/title-slug path for diagnostic evidence."""
     return _inactive_candidate(anchor, base_url, "NovelPing")
 
 
@@ -1622,132 +1622,6 @@ def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> s
                 continue
             return title
     return None
-
-
-# Dormant reference for the previous website. Never dispatch this as NovelPing.
-def novelarrow_chapter_path(href: str, base_url: str) -> tuple[int, str, str] | None:
-    """Return the chapter, title slug, and URL for a canonical NovelArrow link."""
-    url = urljoin(base_url, href)
-    parsed_url = urlparse(url)
-    if parsed_url.scheme != "https" or parsed_url.netloc.casefold() not in {"novelarrow.com", "www.novelarrow.com"}:
-        return None
-    if parsed_url.params or parsed_url.query or parsed_url.fragment:
-        return None
-
-    match = re.fullmatch(
-        r"/chapter/shadow-slave/chapter-(\d{1,5})-([a-z0-9]+(?:-[a-z0-9]+)*)/?",
-        unquote(parsed_url.path),
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return None
-    return int(match.group(1)), match.group(2).casefold(), url
-
-
-def novelarrow_title(text: str, slug: str) -> tuple[int, str] | None:
-    normalized = re.sub(r"\s+", " ", text).strip()
-    match = re.fullmatch(r"C(\d{1,5})\s+(.+)", normalized, flags=re.IGNORECASE)
-    if not match:
-        return None
-
-    title = clean_title(match.group(2))
-    if not title or is_non_chapter_title(title):
-        return None
-
-    def title_slug(value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
-
-    # Some older rows append a numeric site value after the displayed title. Only
-    # remove it when the canonical URL proves that it is absent from the title.
-    without_metadata = re.fullmatch(r"(.+?)\s+(\d+)", title)
-    if title_slug(title) != slug and without_metadata:
-        possible_title = clean_title(without_metadata.group(1))
-        if possible_title and title_slug(possible_title) == slug:
-            title = possible_title
-    return int(match.group(1)), title
-
-
-def novelarrow_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    href = anchor.get("href")
-    if not href:
-        return None
-    path = novelarrow_chapter_path(href, base_url)
-    if not path:
-        return None
-    href_chapter, slug, url = path
-    visible = novelarrow_title(anchor.get_text(" ", strip=True), slug)
-    if not visible or visible[0] != href_chapter:
-        return None
-    return ChapterReport("", href_chapter, visible[1], url)
-
-
-def parse_novelarrow_candidates(
-    soup: BeautifulSoup, base_url: str,
-    expected_chapter: int | None = None, expected_title: str | None = None,
-    previous_chapter: int | None = None, previous_title: str | None = None,
-) -> list[ChapterReport]:
-    """Parse strict Shadow Slave chapter links, preferring the Latest chapter section."""
-    def candidates(nodes: list[Any]) -> list[ChapterReport]:
-        found: list[ChapterReport] = []
-        seen: set[tuple[int, str]] = set()
-        for node in nodes:
-            anchors = [node] if getattr(node, "name", None) == "a" else node.find_all("a", href=True)
-            for anchor in anchors:
-                candidate = novelarrow_candidate_from_anchor(anchor, base_url)
-                if candidate and (candidate.chapter, candidate.url) not in seen:
-                    seen.add((candidate.chapter, candidate.url))
-                    found.append(candidate)
-        return found
-
-    markers = soup.find_all(string=re.compile(r"^\s*Latest\s+chapter\s*$", re.IGNORECASE))
-    for marker in markers:
-        heading = marker.parent
-        if not heading:
-            continue
-        scopes = [heading, *heading.find_next_siblings(limit=1)]
-        nearby = candidates(scopes)
-        if nearby:
-            return nearby
-        parent = heading.parent
-        if parent and getattr(parent, "name", None) not in {"body", "html", "[document]"}:
-            latest = candidates([parent])
-            if latest:
-                return latest
-            scopes.append(parent)
-        if (len(markers) == 1 and (
-                (chapter_validity_category(expected_chapter) is None and _normalized_title(expected_title))
-                or (chapter_validity_category(previous_chapter) is None and _normalized_title(previous_title)))):
-            title_only: dict[str, tuple[str, str]] = {}
-            for scope in scopes:
-                for anchor in ([scope] if getattr(scope, "name", None) == "a" else scope.find_all("a", href=True)):
-                    href = anchor.get("href")
-                    if not isinstance(href, str) or not href or "%" in href:
-                        continue
-                    try:
-                        url = urljoin(base_url, href)
-                        parsed = urlparse(url)
-                    except ValueError:
-                        continue
-                    if (parsed.scheme != "https" or (parsed.hostname or "").casefold() not in
-                            {"novelarrow.com", "www.novelarrow.com"}
-                            or parsed.netloc.casefold() != (parsed.hostname or "").casefold()
-                            or parsed.params or parsed.query or parsed.fragment):
-                        continue
-                    path = re.fullmatch(
-                        r"/chapter/shadow-slave/chapter-([a-z0-9]+(?:-[a-z0-9]+)*)/?",
-                        parsed.path, re.IGNORECASE,
-                    )
-                    title = _title_only_label(anchor.get_text(" ", strip=True))
-                    if (path and title and _title_slug(title) == path.group(1).casefold()
-                            and not parse_chapter_text(anchor.get_text(" ", strip=True))):
-                        title_only[url] = (title, url)
-            if len(title_only) == 1:
-                title, url = next(iter(title_only.values()))
-                chapter = _trusted_title_chapter(title, expected_chapter, expected_title,
-                                                 previous_chapter, previous_title)
-                if chapter is not None:
-                    return [ChapterReport("", chapter, title, url)]
-    return candidates([soup])
 
 
 def parse_telegram_doc_title(text: str) -> tuple[int, str | None] | None:
@@ -2201,50 +2075,6 @@ def _confirm_novel_buddy_chapter_page(
     return expected_title
 
 
-def _confirm_novelarrow_chapter_page(
-    html: str, expected_chapter: int, expected_title: str,
-) -> str:
-    """Confirm a title-only target using only trusted headings or document title."""
-    expected_normalized = _normalized_title(expected_title)
-    if not expected_normalized:
-        raise ParseError("NovelArrow expected title is missing")
-    soup = BeautifulSoup(html, "html.parser")
-    confirmations: list[str] = []
-    for heading in soup.find_all(["h1", "h2"]):
-        text = heading.get_text(" ", strip=True)
-        numbered = parse_chapter_text(text)
-        if numbered:
-            if numbered[0] != expected_chapter:
-                raise ParseError("NovelArrow chapter heading contradicted expected target")
-            if numbered[1] and _normalized_title(numbered[1]) != expected_normalized:
-                raise ParseError("NovelArrow chapter heading contradicted expected target")
-            if numbered[1]:
-                confirmations.append(numbered[1])
-            continue
-        title = _title_only_label(text)
-        if title:
-            confirmations.append(title)
-
-    if soup.title:
-        document_text = re.sub(r"\s+", " ", soup.title.get_text(" ", strip=True)).strip()
-        numbered = parse_chapter_text(document_text)
-        if numbered and numbered[0] != expected_chapter:
-            raise ParseError("NovelArrow document title contradicted expected target")
-        match = re.fullmatch(
-            r"Shadow\s+Slave\s*/\s*Chapter\s+(.+?)\s*\|\s*Read\s+on\s+NovelArrow",
-            document_text, re.IGNORECASE,
-        )
-        if match:
-            title = clean_title(match.group(1))
-            if title:
-                confirmations.append(title)
-
-    normalized = {_normalized_title(title) for title in confirmations}
-    if normalized != {expected_normalized}:
-        raise ParseError("NovelArrow chapter page did not unambiguously confirm expected title")
-    return expected_title
-
-
 def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
     """Recheck chapter link syntax for logging without changing accepted reports."""
     url = report.url
@@ -2264,9 +2094,6 @@ def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
         candidate = lightnovelup_candidate_from_href(url, site.url)
     elif site.name == "Telegram":
         candidate = parse_telegram_telegra_link(url)
-    elif site.name == "NovelArrow":
-        path = novelarrow_chapter_path(url, site.url)
-        return url if path and path[0] == report.chapter else None
     elif site.name == "Rentry":
         return url if chapter_validity_category(report.chapter) is None and url == rentry_chapter_url(report.chapter) else None
     else:

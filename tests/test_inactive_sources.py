@@ -18,8 +18,8 @@ from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import merge_pending, NotificationDeliveryError, report_from_pending
 
 
-# Exact previous identities are retained only to exercise migration and rejection.
-OBSOLETE = ("Novel Phoenix", "NovelArrow", "NovelFire", "Novel Live", "Readwn", "ReChapters")
+# Synthetic unconfigured identities exercise rejection without integration aliases.
+UNCONFIGURED = ("Archived Source", "Former Source", "Unknown")
 DISABLED = ("Novel Phoenix", "NovelPing")
 ENABLED = [
     "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
@@ -28,11 +28,6 @@ ENABLED = [
 
 
 class InactiveInventoryTests(unittest.TestCase):
-    def test_retired_parser_entry_points_are_absent(self):
-        for name in ("novelfire_candidate_from_anchor", "parse_novelfire_candidates",
-                     "_strip_novelfire_metadata"):
-            self.assertFalse(hasattr(parsers, name), name)
-
     def test_exact_inventory_order_and_disabled_references(self):
         state_manager.validate_source_config()
         self.assertEqual([site.name for site in PUBLIC_SITES], [
@@ -75,10 +70,9 @@ class InactiveInventoryTests(unittest.TestCase):
 
     def test_inactive_names_cannot_enter_network_or_candidate_dispatch(self):
         soup = BeautifulSoup('<a href="/chapter-9999">Chapter 9999 Bogus</a>', "html.parser")
-        for name in (*OBSOLETE, "NovelPing", "Unknown"):
+        for name in (*UNCONFIGURED, *DISABLED):
             with self.subTest(name=name), patch.object(parsers, "fetch_html") as html, \
-                 patch.object(parsers, "fetch_json") as api, \
-                 patch.object(parsers, "parse_novelarrow_candidates") as old_parser:
+                 patch.object(parsers, "fetch_json") as api:
                 configured = next((site for site in PUBLIC_SITES if site.name == name),
                                   SourceConfig(name, "https://retired.example/", True, ("retired.example",)))
                 # Even a stale caller setting enabled=True cannot activate an identity.
@@ -88,11 +82,10 @@ class InactiveInventoryTests(unittest.TestCase):
                 self.assertEqual(parsers.iter_public_candidates(soup, configured.url, name, 3225, "Target"), [])
                 html.assert_not_called()
                 api.assert_not_called()
-                old_parser.assert_not_called()
-        self.assertTrue(monitor.TARGET_AWARE_PUBLIC_SOURCES.isdisjoint((*OBSOLETE, "NovelPing")))
+        self.assertTrue(monitor.TARGET_AWARE_PUBLIC_SOURCES.isdisjoint((*UNCONFIGURED, *DISABLED)))
 
     def test_manual_diagnostics_reject_inactive_entries_before_loading_state(self):
-        for name in (*OBSOLETE, "NovelPing"):
+        for name in (*UNCONFIGURED, *DISABLED):
             with self.subTest(name=name), patch.object(diagnose_source, "load_state") as load, \
                  patch.object(diagnose_source, "check_public_site") as check:
                 self.assertEqual(diagnose_source.diagnose_source(name), 2)
@@ -108,12 +101,12 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
                      target_chapter=3226, target_title="Target", target_url="https://www.webnovel.com/target",
                      public_source_failure_revision=7, webnovel_success_cycle=99,
                      updated_at="2026-10-25T12:00:00+00:00")
-        state["public_source_failures"] = {**dict.fromkeys(OBSOLETE, 4), "Chikari": 2, "LightNovelUp": 4}
+        state["public_source_failures"] = {"Novel Phoenix": 4, "Chikari": 2, "LightNovelUp": 4}
         state["source_positions"] = {"LightNovelUp": {
             "chapter": 3224, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3224-baseline/",
         }}
         state["pending_notification"] = merge_pending(
-            None, 3224, ChapterReport("Novel Live", 3225, "Pending", "https://retired.example/"),
+            None, 3224, ChapterReport("Former Source", 3225, "Pending", "https://retired.example/"),
             NotificationDeliveryError("http_error", 503, 600),
         )
         return state
@@ -138,7 +131,7 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
     def test_current_revision_preserves_enabled_failures_and_retired_pending_provenance_without_writes(self):
         state = state_manager.validate_state(self.previous_state())
         state["pending_notification"].update(
-            sources=["NovelFire"], url="https://novelfire.net/book/shadow-slave/chapter-3225",
+            sources=["Archived Source"], url="https://archived.example/book/shadow-slave/chapter-3225",
         )
         before = copy.deepcopy(state)
         with TemporaryDirectory() as tmp:
@@ -154,9 +147,9 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original)
 
     def test_retired_pending_reconstructs_and_delivers_once_without_state_writes_or_live_io(self):
-        for sources in (["NovelFire"], ["Telegram", "NovelFire"]):
-            for url in ("https://novelfire.net/book/shadow-slave/chapter-3225",
-                        "https://readnovel.site/novel/shadow-slave/chapter-3225"):
+        for sources in (["Archived Source"], ["Telegram", "Archived Source"]):
+            for url in ("https://archived.example/book/shadow-slave/chapter-3225",
+                        "https://untrusted.example/novel/shadow-slave/chapter-3225"):
                 with self.subTest(sources=sources, url=url):
                     previous = self.previous_state()
                     previous["pending_notification"].update(
@@ -190,11 +183,11 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
                         post.assert_called_once()
                         body = post.call_args.args[2]
                         expected = (["Telegram [https://t.me/s/shadow_slave_fastes]"]
-                                    if "Telegram" in sources else []) + ["NovelFire"]
+                                    if "Telegram" in sources else []) + ["Archived Source"]
                         self.assertEqual(body.splitlines()[4:], expected)
                         self.assertNotIn(url, body)
-                        self.assertNotIn("novelfire.net", body)
-                        self.assertNotIn("readnovel.site", body)
+                        self.assertNotIn("archived.example", body)
+                        self.assertNotIn("untrusted.example", body)
                         self.assertEqual(path.read_bytes(), original)
                         for guard in blocked:
                             guard.assert_not_called()
@@ -213,7 +206,7 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
 
     def test_malformed_or_unknown_counters_fail_even_during_migration(self):
         for revision in (None, 6, 7, PUBLIC_SOURCE_PARSER_REVISION):
-            for name in (*OBSOLETE, "NovelPing", "Unknown", "Chikari"):
+            for name in (*UNCONFIGURED, *DISABLED, "Chikari"):
                 for count in (True, False, 0, -1, 5, "1", 1.0, None, [], {}):
                     with self.subTest(revision=revision, name=name, count=count):
                         state = self.previous_state()
@@ -224,7 +217,7 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
                         state["public_source_failures"] = {name: count}
                         with self.assertRaises(state_manager.StateError):
                             state_manager.validate_state(state)
-            for name in ("NovelPing", "Unknown"):
+            for name in (*UNCONFIGURED, "NovelPing"):
                 state = self.previous_state()
                 if revision is None:
                     state.pop("public_source_failure_revision")
@@ -234,9 +227,33 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
                 with self.assertRaises(state_manager.StateError):
                     state_manager.validate_state(state)
 
+    def test_unconfigured_legacy_counters_fail_closed_without_mutating_pending_or_disk(self):
+        for revision in (None, 1, 6, 7, PUBLIC_SOURCE_PARSER_REVISION):
+            for name in UNCONFIGURED:
+                with self.subTest(revision=revision, name=name):
+                    state = self.previous_state()
+                    if revision is None:
+                        state.pop("public_source_failure_revision")
+                    else:
+                        state["public_source_failure_revision"] = revision
+                    state["public_source_failures"] = {"Chikari": 2, name: 1}
+                    before = copy.deepcopy(state)
+                    with self.assertRaises(state_manager.StateError):
+                        state_manager.validate_state(state)
+                    self.assertEqual(state, before)
+                    with TemporaryDirectory() as tmp:
+                        path = Path(tmp) / "state.json"
+                        path.write_text(json.dumps(state), encoding="utf-8")
+                        original = path.read_bytes()
+                        with patch.object(state_manager, "atomic_write_json") as write:
+                            with self.assertRaises(state_manager.StateError):
+                                state_manager.load_state(path)
+                        write.assert_not_called()
+                        self.assertEqual(path.read_bytes(), original)
+
     def test_current_schema_rejects_valid_counts_for_obsolete_names(self):
         clean = state_manager.validate_state(self.previous_state())
-        for name in (*OBSOLETE, "NovelPing", "Unknown"):
+        for name in (*UNCONFIGURED, *DISABLED):
             with self.subTest(name=name):
                 state = copy.deepcopy(clean)
                 state["public_source_failures"][name] = 1

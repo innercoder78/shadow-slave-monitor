@@ -100,8 +100,14 @@ Expected source failures are diagnostic outcomes and leave the workflow successf
 invalid source names, invalid state, dependency/setup failures, or internal errors fail
 it. This workflow is independent of the scheduled monitor and watchdog.
 
-Disabled reference entries are excluded from scheduled checks, recovery probes, and
-manual diagnostics. Three inactive integrations have been removed; the remaining
-enabled sources retain their relative priority. Loading a previous state discards
-only known obsolete failure counters from the previous inventory, preserving chapter
-history, pending delivery, authority tracking, source cursors, and emergency state.
+The 11 enabled public sources retain their configuration and relative priority.
+The two disabled references are excluded from scheduled checks, recovery probes,
+and enabled-source manual diagnostics; their parsers are available only through
+the isolated `inactive_sources` diagnostics. Loading older state can discard a
+validated formerly enabled reference counter, but unconfigured failure-counter
+names fail closed at every revision and require explicit operator reconciliation.
+Revision 7 and current-revision enabled counters are preserved; older parser
+revisions retain their existing reset behavior. Chapter history, pending delivery,
+authority tracking, source cursors, and emergency state are preserved. Pending
+notifications retain unknown source attribution without exposing stored chapter
+URLs; configured general URLs and target-specific Rentry links remain available.

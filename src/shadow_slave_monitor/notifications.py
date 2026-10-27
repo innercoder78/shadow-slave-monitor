@@ -60,7 +60,7 @@ def source_names(source: str) -> list[str]:
     return [*known, *(name for name in unique if name not in configured)]
 
 
-def source_lines(source: str, fallback_url: str = "", *, chapter: int, include_urls: bool = True) -> list[str]:
+def source_lines(source: str, *, chapter: int, include_urls: bool = True) -> list[str]:
     names = source_names(source)
     configured_urls = {site.name: site.url for site in PUBLIC_SITES}
     lines = []
@@ -70,10 +70,7 @@ def source_lines(source: str, fallback_url: str = "", *, chapter: int, include_u
             # No chapter index: derive this link from the verified number, since
             # the aggregate report URL may belong to a different source.
             url = rentry_chapter_url(chapter)
-        # Historical provenance stays visible without linking a retired source's
-        # recorded chapter URL. Other unknown sources retain their fallback.
-        if url is None and len(names) == 1 and name != "NovelFire":
-            url = fallback_url or None
+        # Unknown historical attribution remains visible, but its stored URL is untrusted.
         label = _SOURCE_DISPLAY_NAMES.get(name, name)
         lines.append(f"{label} [{url}]" if include_urls and url else label)
     return lines
@@ -95,19 +92,19 @@ def notification_body(previous_seen: int | None, latest: ChapterReport) -> str:
     def build(lines: list[str], chapter_line: str = latest_line) -> str:
         return "\n".join([availability, chapter_line, "", heading, *lines])
 
-    body = build(source_lines(latest.source, latest.url, chapter=latest.chapter))
+    body = build(source_lines(latest.source, chapter=latest.chapter))
     if _fits_ntfy_body(body):
         return body
 
     # URLs are the least important and largest optional part of an overlong body.
-    body = build(source_lines(latest.source, latest.url, chapter=latest.chapter, include_urls=False))
+    body = build(source_lines(latest.source, chapter=latest.chapter, include_urls=False))
     if _fits_ntfy_body(body):
         return body
 
     # Keep the chapter number and as many complete source names as possible.  Never
     # truncate a URL or split a Unicode character while applying this rare fallback.
     kept: list[str] = []
-    for name in source_lines(latest.source, latest.url, chapter=latest.chapter, include_urls=False):
+    for name in source_lines(latest.source, chapter=latest.chapter, include_urls=False):
         candidate = build([*kept, name], f"Latest Chapter: {latest.chapter}")
         if not _fits_ntfy_body(candidate):
             break
