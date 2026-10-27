@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      actions: read
     outputs:
       result: ${{ steps.result.outputs.result }}
     steps:
@@ -84,9 +83,6 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/src
           SHADOW_SLAVE_FORCE_WEBNOVEL_CHECK: ${{ inputs.force_webnovel_check && 'true' || 'false' }}
           SHADOW_SLAVE_MONITOR_RESULT_PATH: ${{ runner.temp }}/shadow-slave-monitor-state-${{ github.run_id }}-${{ github.run_attempt }}/run_result.json
-          # Current-run artifact lookup happens inside public aggregation only.
-          SHADOW_SLAVE_ISOLATED_EVIDENCE: "true"
-          GITHUB_TOKEN: ${{ github.token }}
         run: python -m shadow_slave_monitor.monitor
 
       - name: Capture monitor result

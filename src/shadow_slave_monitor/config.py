@@ -108,7 +108,3 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
 )
 
 PUBLIC_SITE_ORDER = {site.name: index for index, site in enumerate(PUBLIC_SITES)}
-
-# This is separate from enabled: existing local dispatch and diagnostics retain
-# their exact inventory and order. No other source can opt into this path.
-ISOLATED_PUBLIC_SOURCE_NAMES = ("Novel Phoenix", "NovelPing")

@@ -202,7 +202,9 @@ def runner_information() -> dict[str, str]:
         release = {}
     system = platform.system()
     image = os.environ.get("ImageOS", "")
+    event = os.environ.get("GITHUB_EVENT_NAME", "")
     return {
+        "trigger": event if event in {"schedule", "workflow_dispatch"} else "unavailable",
         "requested_runner": label if label in {"ubuntu-24.04", "ubuntu-26.04"} else "unavailable",
         "actual_os": system if system in {"Linux", "Windows", "Darwin"} else "unavailable",
         "distribution": "Ubuntu" if release.get("ID") == "ubuntu" else "unavailable",
