@@ -1803,13 +1803,15 @@ def check_telegram_emergency(site: SourceConfig, baseline: int) -> ChapterReport
                 if title_only and not re.search(r"\b[0-9]+\b", title_only[1]):
                     title = clean_title(title_only[1])
                     if title:
-                        title_documents.append((title, closest_href(title_node, site.url)))
+                        title_documents.append((title, closest_href(title_node, "")))
                 continue
             parsed = parse_telegram_doc_title(text)
             if parsed is None or chapter_validity_category(parsed[0]) is not None:
                 raise ParseError("chapter_data_invalid")
             chapter, title = parsed
-            href = closest_href(title_node, site.url)
+            # Emergency evidence must be canonical as supplied. Resolving it
+            # first can erase empty query/fragment delimiters or control bytes.
+            href = closest_href(title_node, "")
             if href and not telegram_emergency_evidence_url(href, chapter, site.url):
                 raise ParseError("chapter_data_invalid")
             documents.append((chapter, title, href))

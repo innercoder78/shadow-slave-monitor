@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import requests
+from bs4 import BeautifulSoup
 
 from shadow_slave_monitor import monitor, parsers, watchdog
 from shadow_slave_monitor.config import MAX_CHAPTER, MAX_WEBNOVEL_CYCLE, PUBLIC_SITES
@@ -23,6 +24,14 @@ from test_state_writer import state_writer
 
 SOURCE = next(site for site in PUBLIC_SITES if site.name == "Telegram")
 START = datetime(2026, 10, 25, 12, tzinfo=timezone.utc)
+
+
+def observed_messages():
+    """Sanitized live structure, not the unavailable incident response body."""
+    return BeautifulSoup(
+        (Path(__file__).parent / "fixtures/telegram_emergency_grouped.html").read_text(encoding="utf-8"),
+        "html.parser",
+    )
 
 
 def message(chapter=3226, title="Synthetic Chapter", *, doc=True, link=True):
@@ -80,6 +89,43 @@ class EmergencyMonitorTests(unittest.TestCase):
         # Every independent run must be serializable and accepted on reload.
         self.assertEqual(validate_state(json.loads(json.dumps(state))), state)
         return result
+
+    def test_observed_grouped_history_then_new_release_notifies_once_and_recovers(self):
+        soup = observed_messages()
+        newest = soup.select_one('[data-post="shadow_slave_fastes/2342"]').extract()
+        state = active()
+        state.update(latest_seen=3226, latest_webnovel=3226)
+        self.assertEqual(self.tick(state, html=str(soup)).status, Health.DEGRADED)
+        self.send.assert_not_called()
+        self.assertEqual(self.tick(state, 20, html=str(soup) + str(newest)).status, Health.DEGRADED)
+        self.assertEqual(state["latest_seen"], 3227)
+        self.assertEqual(state["latest_webnovel"], 3226)
+        provenance = copy.deepcopy(state["emergency_provenance"])
+        self.assertEqual(provenance["chapter"], 3227)
+        self.tick(state, 40)
+        self.tick(state, 45, official=3227)
+        self.assertEqual(self.send.call_count, 1)
+        self.assertEqual(state["webnovel_failures"], 0)
+        self.assertEqual(state["emergency_provenance"], provenance)
+
+    def test_single_media_document_provenance_survives_save_load(self):
+        soup = observed_messages()
+        grouped = soup.select_one('[data-post="shadow_slave_fastes/2331"]')
+        grouped.select_one('.tgme_widget_message_text').decompose()
+        state = active()
+        state.update(latest_seen=3216, latest_webnovel=3216)
+        self.tick(state, html=str(grouped))
+        self.assertEqual(state["latest_seen"], 3218)
+        self.assertEqual(state["emergency_provenance"]["evidence_url"],
+                         "https://t.me/shadow_slave_fastes/2332?single")
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            save_state(state, path)
+            loaded, _ = load_state(path)
+        self.assertIsNotNone(loaded["updated_at"])
+        self.assertEqual(loaded, {**state, "updated_at": loaded["updated_at"]})
+        self.tick(loaded, 20)
+        self.assertEqual(self.send.call_count, 1)
 
     def test_four_distinct_failed_cycles_activate_in_same_run_and_only_one_poll_per_cycle(self):
         state = initialized()
@@ -480,6 +526,56 @@ class EmergencyMonitorTests(unittest.TestCase):
 
 
 class EmergencyParserTests(unittest.TestCase):
+    def test_observed_grouped_history_does_not_block_newest_release(self):
+        soup = observed_messages()
+        for doc, link in ((True, True), (True, False), (False, True)):
+            variant = BeautifulSoup(str(soup), "html.parser")
+            if not doc:
+                for node in variant.select('.tgme_widget_message_document_wrap'):
+                    node.decompose()
+            if not link:
+                for node in variant.select('.tgme_widget_message_text'):
+                    node.decompose()
+            with self.subTest(doc=doc, link=link):
+                report = self.check(str(variant), baseline=3226)
+                self.assertEqual((report.chapter, report.title),
+                                 (3227, "A Soul and a Shadow Walk Into a Bar"))
+        ordinary = parsers.parse_telegram_candidates(soup, SOURCE.url)
+        self.assertEqual(max(r.chapter for r in ordinary), 3227)
+
+    def test_single_media_query_is_exact_and_only_for_configured_posts(self):
+        from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
+        base = "https://t.me/shadow_slave_fastes/2332"
+        for url in (base, base + '?single', base.replace('/shadow_', '/s/shadow_') + '?single'):
+            with self.subTest(url=url):
+                self.assertTrue(telegram_emergency_evidence_url(url, 3218, SOURCE.url))
+        invalid = [base + suffix for suffix in (
+            '?', '?single=', '?single=1', '?Single', '?single&x=1', '?x=1&single',
+            '?single&single', '?%73ingle', '?single#x', '?single#', '?single/',
+            '?single\n', '/?single', '?single?x', '?single%00',
+        )]
+        invalid += [base.replace('https:', 'http:') + '?single',
+                    base.replace('t.me/', 't.me.evil.example/') + '?single',
+                    base.replace('t.me/', 'u@t.me/') + '?single',
+                    base.replace('t.me/', 't.me:443/') + '?single',
+                    base.replace('shadow_slave_fastes', 'another_channel') + '?single',
+                    base.replace('2332', '%32%33%33%32') + '?single',
+                    'https://telegra.ph/3218-Empty-Darkness-10-17?single']
+        html = str(observed_messages())
+        for url in invalid:
+            with self.subTest(url=url):
+                self.assertFalse(telegram_emergency_evidence_url(url, 3218, SOURCE.url))
+                with self.assertRaises(parsers.ParseError):
+                    self.check(html.replace(base + '?single', url))
+
+    def test_grouped_history_conflicts_still_reject_newer_valid_release(self):
+        html = str(observed_messages())
+        for changed in (html.replace('3218-Empty-Darkness', '3218-Contradictory-Title'),
+                        html.replace('3218-Empty-Darkness', '3219-Empty-Darkness'),
+                        html.replace('3218 Empty Darkness.docx', '9999 Empty Darkness.docx')):
+            with self.subTest(html=changed), self.assertRaises(parsers.ParseError):
+                self.check(changed, baseline=3226)
+
     def check(self, html, baseline=3225):
         with patch.object(parsers, "fetch_html", return_value=html) as fetch:
             report = parsers.check_telegram_emergency(SOURCE, baseline)

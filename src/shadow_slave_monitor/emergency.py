@@ -16,4 +16,7 @@ def telegram_emergency_evidence_url(url: str, chapter: int, base_url: str) -> bo
     if linked:
         return int(linked[1]) == chapter and bool(re.search(r"[a-zA-Z]", linked[2]))
     channel = urlparse(base_url).path.removeprefix("/s/").strip("/")
-    return bool(re.fullmatch(rf"https://t\.me/(?:s/)?{re.escape(channel)}/[1-9][0-9]*", url))
+    # Grouped media document wrappers use this exact flag to identify one
+    # channel post. Keep the same rule for parsing and persisted provenance;
+    # values, extra parameters, fragments and encoded variants remain invalid.
+    return bool(re.fullmatch(rf"https://t\.me/(?:s/)?{re.escape(channel)}/[1-9][0-9]*(?:\?single)?", url))
