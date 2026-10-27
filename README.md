@@ -23,6 +23,11 @@ state, and scheduling rules.
 
 A separate watchdog runs through GitHub Actions approximately every 90 minutes. It sends an error notification only if the main monitor has not completed successfully for at least five hours.
 
+An independent [scheduled public diagnostic](docs/scheduled-public-diagnostics.md)
+runs twice daily on Ubuntu 26.04 and supports manual execution. It observes only
+two disabled references through the existing diagnostic CLI. Results stay in
+Actions logs and summaries; they do not affect production state or notifications.
+
 ## PHONE APP
 
 The ntfy app is available for both Android and iOS:
