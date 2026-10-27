@@ -2,12 +2,12 @@
   "latest_seen": 3226,
   "latest_title": "Raised from the Dead",
   "latest_url": "https://rentry.co/3226ss",
-  "latest_webnovel": 3226,
-  "latest_webnovel_title": "Raised from the Dead",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3227,
+  "latest_webnovel_title": "A Soul and a Shadow Walk Into a Bar",
+  "mode": "watch_free_sites",
+  "target_chapter": 3227,
+  "target_title": "A Soul and a Shadow Walk Into a Bar",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 8,
@@ -17,10 +17,10 @@
       "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3193-regret-can/"
     }
   },
-  "webnovel_failures": 4,
+  "webnovel_failures": 0,
   "webnovel_failure_cycle": 1494224,
-  "webnovel_success_cycle": 1494214,
-  "emergency_last_check_ok": false,
+  "webnovel_success_cycle": 1494225,
+  "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-10-27T02:40:18+00:00"
+  "updated_at": "2026-10-27T03:00:31+00:00"
 }
