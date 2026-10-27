@@ -289,14 +289,14 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(failures, dict):
         raise StateError("public_source_failures must be an object")
     enabled_names = {site.name for site in PUBLIC_SITES if site.enabled}
-    # Only older inventories may contain these formerly enabled identities.
-    # Validate their counts before discarding them; unknown names stay invalid.
-    obsolete_names = {"Novel Phoenix", "NovelArrow", "NovelFire", "Novel Live", "Readwn", "ReChapters"}
+    # Only this retained identity has a validated formerly enabled inventory.
+    # Unconfigured historical identities fail closed, even during migration.
+    formerly_enabled_names = {"Novel Phoenix"}
     migrating_inventory = revision is None or revision < 8
     clean_failures: dict[str, int] = {}
     for source, count in failures.items():
         if (not isinstance(source, str)
-                or source not in enabled_names and not (migrating_inventory and source in obsolete_names)):
+                or source not in enabled_names and not (migrating_inventory and source in formerly_enabled_names)):
             raise StateError("public_source_failures contains an unknown or disabled source")
         if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
             raise StateError(

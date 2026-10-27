@@ -14,7 +14,6 @@ from shadow_slave_monitor.parsers import (
     parse_freewebnovel_net_candidates,
     parse_novel_buddy_candidates,
     parse_novelfull_candidates,
-    parse_novelarrow_candidates,
     parse_readnovelfull_candidates,
     parse_telegram_candidates,
     parse_telegram_telegra_link,
@@ -107,18 +106,6 @@ class PreviousContextParserTests(unittest.TestCase):
         html = '<section><h3>Latest chapter</h3><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a></section>'
         reports = parse_readnovelfull_candidates(BeautifulSoup(html, "html.parser"), source.url, *CONTEXT)
         self.assertEqual([(r.chapter, r.title) for r in reports], [(3189, "Entertaining Guest")])
-
-    def test_single_latest_opaque_link_reports_previous_then_target(self) -> None:
-        base = "https://novelarrow.com/novel/shadow-slave"
-        previous = ('<section><h3>Latest chapter</h3><a href="/chapter/shadow-slave/'
-                    'chapter-entertaining-guest">Chapter Entertaining Guest</a></section>')
-        target = previous.replace("entertaining-guest", "freedom-of-choice").replace(
-            "Entertaining Guest", "Freedom of Choice")
-        waiting = parse_novelarrow_candidates(BeautifulSoup(previous, "html.parser"), base, *CONTEXT)
-        released = parse_novelarrow_candidates(BeautifulSoup(target, "html.parser"), base, *CONTEXT)
-        self.assertEqual(waiting[0].chapter, 3189)
-        self.assertEqual(released[0].chapter, 3190)
-
 
     def test_telegram_sequential_title_only_messages(self) -> None:
         def message(title: str, slug: str) -> str:

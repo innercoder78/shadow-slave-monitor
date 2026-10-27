@@ -36,10 +36,6 @@ PARSE_CODES = {
     "WebNovel parsed chapter is outside the trusted range": "PARSE_CHAPTER_INVALID",
     "chapter heading contained contradictory numeric evidence": "PARSE_CHAPTER_MISMATCH",
     "chapter heading did not confirm expected target title": "PARSE_CHAPTER_MISMATCH",
-    "NovelArrow expected title is missing": "PARSE_CHAPTER_MISMATCH",
-    "NovelArrow chapter heading contradicted expected target": "PARSE_CHAPTER_MISMATCH",
-    "NovelArrow document title contradicted expected target": "PARSE_CHAPTER_MISMATCH",
-    "NovelArrow chapter page did not unambiguously confirm expected title": "PARSE_CHAPTER_MISMATCH",
     "Could not find WebNovel Latest Release chapter in catalog page.": "PARSE_NO_CHAPTER_LINKS",
 }
 REJECTION_CATEGORIES = frozenset({

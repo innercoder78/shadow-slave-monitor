@@ -55,7 +55,7 @@ class NewChapterNotificationTests(unittest.TestCase):
     def test_body_handles_missing_title_unknown_sources_and_large_jump(self) -> None:
         self.assertEqual(notification_body(None, self.report(title=None)), "There is 1 new chapter available on the free sites.\nLatest Chapter: 3117\n\nSOURCE:\nChikari [https://chikari.moe/novels/shadow-slave]")
         self.assertEqual(notification_body(3000, self.report("Mystery Site, Telegram")), "There are 117 new chapters available on the free sites.\nLatest Chapter: 3117 — Old Bones\n\nSOURCES:\nTelegram [https://t.me/s/shadow_slave_fastes]\nMystery Site")
-        self.assertEqual(notification_body(3116, self.report("Mystery Site", url="https://mystery.example")), "There is 1 new chapter available on the free sites.\nLatest Chapter: 3117 — Old Bones\n\nSOURCE:\nMystery Site [https://mystery.example]")
+        self.assertEqual(notification_body(3116, self.report("Mystery Site", url="https://mystery.example")), "There is 1 new chapter available on the free sites.\nLatest Chapter: 3117 — Old Bones\n\nSOURCE:\nMystery Site")
 
     def test_known_sources_receive_their_own_notification_urls(self) -> None:
         report = self.report(", ".join(site.name for site in reversed(PUBLIC_SITES)))
@@ -109,7 +109,7 @@ class NewChapterNotificationTests(unittest.TestCase):
             with self.subTest(source=source):
                 report = ChapterReport(source, 3225, None, "https://unknown.example/")
                 self.assertEqual(notification_body(3224, report).splitlines()[4:],
-                                 [f"{source} [https://unknown.example/]"])
+                                 [source])
                 report = ChapterReport(f"{source}, Rentry", 3225, None, "https://untrusted.example/")
                 self.assertEqual(notification_body(3224, report).splitlines()[4:],
                                  ["Rentry [https://rentry.co/3225ss]", source])
@@ -147,7 +147,7 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertEqual(source_names("ShadowSlave Space, ShadowSlave.Space, ShadowSlave Space"),
                          ["ShadowSlave.Space", "ShadowSlave Space"])
         body = notification_body(3116, self.report("ShadowSlave Space", url="https://unknown.example"))
-        self.assertEqual(body.splitlines()[4:], ["ShadowSlave Space [https://unknown.example]"])
+        self.assertEqual(body.splitlines()[4:], ["ShadowSlave Space"])
         body = notification_body(3116, self.report("ShadowSlave Space, Telegram"))
         self.assertEqual(body.splitlines()[4:], [
             "Telegram [https://t.me/s/shadow_slave_fastes]", "ShadowSlave Space",
@@ -191,31 +191,31 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertNotIn("chapter-3182", body)
 
     def test_retired_source_provenance_is_preserved_without_a_configured_url(self) -> None:
-        body = notification_body(3116, self.report("Novel Buddy, NovelFire", url="https://chapter.example"))
+        body = notification_body(3116, self.report("Novel Buddy, Archived Source", url="https://chapter.example"))
         self.assertIn("Novel Buddy [https://novelbuddy.me/shadow-slave]", body)
         self.assertEqual(body.splitlines()[4:], [
-            "Novel Buddy [https://novelbuddy.me/shadow-slave]", "NovelFire",
+            "Novel Buddy [https://novelbuddy.me/shadow-slave]", "Archived Source",
         ])
-        self.assertNotIn("novelfire.net", body)
+        self.assertNotIn("archived.example", body)
         self.assertNotIn("chapter.example", body)
 
     def test_retired_single_source_keeps_its_name_without_linking_recorded_urls(self) -> None:
-        for url in ("https://novelfire.net/book/shadow-slave/chapter-3117",
-                    "https://readnovel.site/novel/shadow-slave/chapter-3117"):
+        for url in ("https://archived.example/book/shadow-slave/chapter-3117",
+                    "https://untrusted.example/novel/shadow-slave/chapter-3117"):
             with self.subTest(url=url):
-                report = self.report(" NovelFire, NovelFire ", url=url)
+                report = self.report(" Archived Source, Archived Source ", url=url)
                 body = notification_body(3116, report)
-                self.assertEqual(body.splitlines()[3:], ["SOURCE:", "NovelFire"])
+                self.assertEqual(body.splitlines()[3:], ["SOURCE:", "Archived Source"])
                 self.assertNotIn("https://", body)
                 self.assertEqual(report.url, url)
 
     def test_retired_source_mixed_with_enabled_source_never_uses_recorded_urls(self) -> None:
-        for url in ("https://novelfire.net/book/shadow-slave/chapter-3117",
-                    "https://readnovel.site/novel/shadow-slave/chapter-3117"):
+        for url in ("https://archived.example/book/shadow-slave/chapter-3117",
+                    "https://untrusted.example/novel/shadow-slave/chapter-3117"):
             with self.subTest(url=url):
-                body = notification_body(3116, self.report("NovelFire, Telegram, NovelFire", url=url))
+                body = notification_body(3116, self.report("Archived Source, Telegram, Archived Source", url=url))
                 self.assertEqual(body.splitlines()[4:], [
-                    "Telegram [https://t.me/s/shadow_slave_fastes]", "NovelFire",
+                    "Telegram [https://t.me/s/shadow_slave_fastes]", "Archived Source",
                 ])
                 self.assertNotIn(url, body)
 

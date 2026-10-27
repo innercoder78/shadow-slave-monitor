@@ -227,7 +227,7 @@ class InactiveParserBoundaryTests(unittest.TestCase):
         for name in PARSERS:
             site = SITES[name]
             path = OBSERVATIONS[name]["href"].removeprefix("https://" + site.allowed_hosts[0])
-            for host in ("novelfire.net", "www.novelfire.net", "readnovel.site"):
+            for host in ("archived.example", "www.archived.example", "untrusted.example"):
                 href = "https://" + host + path
                 with self.subTest(source=name, host=host):
                     self.assertNotIn(host, site.allowed_hosts)

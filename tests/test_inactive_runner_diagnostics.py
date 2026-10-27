@@ -120,8 +120,8 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                     self.get.assert_not_called()
 
     def test_unexpected_identities_are_refused_without_echoing_input(self):
-        for name in ("Telegram", "WebNovel", "NovelArrow", "NovelFire", "novelfire", "NovelFire ",
-                     "readnovel.site", "https://readnovel.site/novel/shadow-slave/chapter-3227", PRIVATE):
+        for name in ("Telegram", "WebNovel", "Former Source", "Archived Source", "archived-source", "Archived Source ",
+                     "untrusted.example", "https://untrusted.example/novel/shadow-slave/chapter-3227", PRIVATE):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "^invalid_inactive_source_configuration$"):
                 diagnostic.diagnose_inactive_source(name)
         self.get.assert_not_called()
@@ -161,8 +161,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
     def test_both_dedicated_parsers_accept_independent_canonical_evidence(self):
         self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
                                                         {SITES[0].url: PHOENIX, SITES[1].url: PING}[url])
-        with patch.object(parsers, "parse_novelarrow_candidates", side_effect=AssertionError("legacy dispatch")) as legacy:
-            results = self.run_diagnostic()
+        results = self.run_diagnostic()
         for result in results:
             self.assertTrue(result["parser_available"] and result["parser_inspected"])
             self.assertEqual(result["parser_category"], "PARSER_CANDIDATE_FOUND")
@@ -170,7 +169,6 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
             self.assertEqual(result["jump_check"], "not_checked_without_reference")
             self.assertIsNone(result["reference_chapter"])
             self.assertIsNone(result["newer_than_reference"])
-        legacy.assert_not_called()
 
     def test_explicit_reference_reports_older_unchanged_new_and_suspicious_results_without_state(self):
         self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
@@ -310,8 +308,8 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
 
     def test_rejected_redirects_never_reach_unapproved_destinations(self):
         for location, reason in (("https://untrusted.example/private?token=secret", "redirect_host_not_allowed"),
-                                 ("https://readnovel.site/novel/shadow-slave/chapter-3227", "redirect_host_not_allowed"),
-                                 ("https://novelfire.net/book/shadow-slave/chapter-3227", "redirect_host_not_allowed"),
+                                 ("https://untrusted.example/novel/shadow-slave/chapter-3227", "redirect_host_not_allowed"),
+                                 ("https://archived.example/book/shadow-slave/chapter-3227", "redirect_host_not_allowed"),
                                  ("http://novelphoenix.com/private?token=secret", "non_https_url"),
                                  (None, "missing_redirect_location")):
             with self.subTest(location=location):
@@ -408,8 +406,8 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
         for href in ("https://untrusted.example/novel/shadow-slave/chapter-3227",
                      "https://user:password@novelphoenix.com/novel/shadow-slave/chapter-3227",
                      "https://novelphoenix.com:443/novel/shadow-slave/chapter-3227",
-                     "https://novelfire.net/novel/shadow-slave/chapter-3227",
-                     "https://readnovel.site/novel/shadow-slave/chapter-3227",
+                     "https://archived.example/novel/shadow-slave/chapter-3227",
+                     "https://alternate.example/novel/shadow-slave/chapter-3227",
                      "/novel/shadow-slave/chapter-3227?token=secret", "/novel/other/chapter-3227",
                      "/novel/shadow-slave/chapter-3226"):
             self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
