@@ -39,7 +39,7 @@ class SourceResult:
     detail: str | None = None
 
 
-INACTIVE_SOURCE_NAMES = ("Novel Phoenix", "NovelPing", "NovelFire")
+INACTIVE_SOURCE_NAMES = ("Novel Phoenix", "NovelPing")
 
 
 @dataclass
@@ -258,9 +258,6 @@ def _inactive_evidence(soup: BeautifulSoup, site: SourceConfig) -> dict[str, int
                 for prefix in ("", *("https://" + host for host in site.allowed_hosts)) for suffix in ("", "/")}
     marker = r"^\s*Latest\s+chapter\s*:?\s*$" if site.name == "NovelPing" else r"^\s*Latest\s+Release\s*:?\s*$"
     markers = len(parsers._inactive_latest_groups(soup, marker))
-    if site.name == "NovelFire":
-        markers += sum(bool(re.match(r"^Latest\s+Release\s*:", parsers._inactive_text(anchor), re.I))
-                       for anchor in anchors)
     return {key: min(value, 9999) for key, value in {
         "links_inspected": len(anchors),
         "canonical_chapter_links": sum(parsers._inactive_chapter_url(anchor.get("href"), site.url, site.name)
@@ -291,7 +288,6 @@ def diagnose_inactive_source(name: str, *, reference_chapter: int | None = None)
     candidate_parser = {
         "Novel Phoenix": parsers.parse_novel_phoenix_candidates,
         "NovelPing": parsers.parse_novelping_candidates,
-        "NovelFire": parsers.parse_novelfire_candidates,
     }.get(site.name)
     result = InactiveSourceResult(
         source=site.name, reference_chapter=reference_chapter, parser_available=candidate_parser is not None,
@@ -337,7 +333,7 @@ def diagnose_inactive_source(name: str, *, reference_chapter: int | None = None)
             # rejecting a count/listing link as individual chapter evidence.
             candidates = [candidate for candidate in candidates if parsers._safe_success_url(site, candidate)]
             candidates = parsers._inactive_consensus(
-                candidates, latest_only=site.name != "NovelFire", reference_chapter=reference_chapter,
+                candidates, latest_only=True, reference_chapter=reference_chapter,
             )
             if candidates:
                 result.chapter_candidate = max(candidate.chapter for candidate in candidates)

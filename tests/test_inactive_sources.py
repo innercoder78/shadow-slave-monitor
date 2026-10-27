@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import ExitStack
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -14,12 +15,12 @@ from bs4 import BeautifulSoup
 from shadow_slave_monitor import diagnose_source, monitor, parsers, state_manager
 from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SITE_ORDER, PUBLIC_SOURCE_PARSER_REVISION, SourceConfig
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
-from shadow_slave_monitor.notifications import merge_pending, NotificationDeliveryError
+from shadow_slave_monitor.notifications import merge_pending, NotificationDeliveryError, report_from_pending
 
 
 # Exact previous identities are retained only to exercise migration and rejection.
 OBSOLETE = ("Novel Phoenix", "NovelArrow", "NovelFire", "Novel Live", "Readwn", "ReChapters")
-DISABLED = ("Novel Phoenix", "NovelPing", "NovelFire")
+DISABLED = ("Novel Phoenix", "NovelPing")
 ENABLED = [
     "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
     "SSNovel", "NovelFull", "LightNovelUp", "ReadNovelFull", "FreeWebNovel.net", "Rentry",
@@ -27,6 +28,11 @@ ENABLED = [
 
 
 class InactiveInventoryTests(unittest.TestCase):
+    def test_retired_parser_entry_points_are_absent(self):
+        for name in ("novelfire_candidate_from_anchor", "parse_novelfire_candidates",
+                     "_strip_novelfire_metadata"):
+            self.assertFalse(hasattr(parsers, name), name)
+
     def test_exact_inventory_order_and_disabled_references(self):
         state_manager.validate_source_config()
         self.assertEqual([site.name for site in PUBLIC_SITES], [
@@ -39,8 +45,6 @@ class InactiveInventoryTests(unittest.TestCase):
                          ("novelphoenix.com", "www.novelphoenix.com")),
             SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False,
                          ("novelping.com", "www.novelping.com")),
-            SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False,
-                         ("novelfire.net", "www.novelfire.net")),
         ])
 
     def test_regular_and_recovery_checks_only_schedule_enabled_sources(self):
@@ -130,6 +134,70 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
         for key in previous.keys() - {"public_source_failures", "public_source_failure_revision"}:
             self.assertEqual(clean[key], previous[key], key)
         self.assertEqual(state_manager.validate_state(clean), clean)
+
+    def test_current_revision_preserves_enabled_failures_and_retired_pending_provenance_without_writes(self):
+        state = state_manager.validate_state(self.previous_state())
+        state["pending_notification"].update(
+            sources=["NovelFire"], url="https://novelfire.net/book/shadow-slave/chapter-3225",
+        )
+        before = copy.deepcopy(state)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            path.write_text(json.dumps(state), encoding="utf-8")
+            original = path.read_bytes()
+            with patch.object(state_manager, "atomic_write_json") as write:
+                clean, first = state_manager.load_state(path)
+                state_manager.save_state(clean, path)
+            write.assert_not_called()
+            self.assertFalse(first)
+            self.assertEqual(clean, before)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_retired_pending_reconstructs_and_delivers_once_without_state_writes_or_live_io(self):
+        for sources in (["NovelFire"], ["Telegram", "NovelFire"]):
+            for url in ("https://novelfire.net/book/shadow-slave/chapter-3225",
+                        "https://readnovel.site/novel/shadow-slave/chapter-3225"):
+                with self.subTest(sources=sources, url=url):
+                    previous = self.previous_state()
+                    previous["pending_notification"].update(
+                        sources=sources, url=url, next_retry_at="2026-10-25T12:00:00+00:00",
+                    )
+                    pending_before = copy.deepcopy(previous["pending_notification"])
+                    with TemporaryDirectory() as tmp, ExitStack() as guards:
+                        path = Path(tmp) / "state.json"
+                        path.write_text(json.dumps(previous), encoding="utf-8")
+                        original = path.read_bytes()
+                        blocked = [guards.enter_context(patch(target, side_effect=AssertionError("unexpected side effect")))
+                                   for target in ("requests.sessions.Session.request", "socket.socket.connect",
+                                                  "socket.getaddrinfo", "shadow_slave_monitor.state_manager.atomic_write_json",
+                                                  "shadow_slave_monitor.monitor.save_state")]
+                        with patch("shadow_slave_monitor.notifications._post_ntfy") as post, \
+                             patch.dict(monitor.os.environ, {"NTFY_NEWCHAPTER": "test-topic"}):
+                            state, first = state_manager.load_state(path)
+                            self.assertFalse(first)
+                            self.assertEqual(state["pending_notification"], pending_before)
+                            previous_seen, report = report_from_pending(state["pending_notification"])
+                            self.assertEqual((previous_seen, report.chapter, report.title, report.source, report.url),
+                                             (3224, 3225, "Pending", ", ".join(sources), url))
+                            self.assertEqual(state["pending_notification"], pending_before)
+                            outcome = monitor.try_deliver_pending(state, RunResult())
+                            self.assertEqual(outcome, monitor.PendingDeliveryOutcome.DELIVERED)
+                            self.assertIsNone(state["pending_notification"])
+                            self.assertEqual((state["latest_seen"], state["latest_title"], state["latest_url"]),
+                                             (3225, "Pending", url))
+                            self.assertEqual(monitor.try_deliver_pending(state, RunResult()),
+                                             monitor.PendingDeliveryOutcome.NONE)
+                        post.assert_called_once()
+                        body = post.call_args.args[2]
+                        expected = (["Telegram [https://t.me/s/shadow_slave_fastes]"]
+                                    if "Telegram" in sources else []) + ["NovelFire"]
+                        self.assertEqual(body.splitlines()[4:], expected)
+                        self.assertNotIn(url, body)
+                        self.assertNotIn("novelfire.net", body)
+                        self.assertNotIn("readnovel.site", body)
+                        self.assertEqual(path.read_bytes(), original)
+                        for guard in blocked:
+                            guard.assert_not_called()
 
     def test_older_parser_revisions_keep_existing_reset_behavior(self):
         for revision in (None, 1, 6):

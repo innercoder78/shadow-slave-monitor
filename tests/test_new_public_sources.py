@@ -24,17 +24,17 @@ class NewSourceConfigurationTests(unittest.TestCase):
     def test_exact_configs_are_appended_without_reordering_existing_sources(self) -> None:
         validate_source_config()
         names = [site.name for site in PUBLIC_SITES]
-        self.assertEqual(names[11:13], ["ReadNovelFull", "FreeWebNovel.net"])
-        self.assertEqual(names[:11], [
+        self.assertEqual(names[10:12], ["ReadNovelFull", "FreeWebNovel.net"])
+        self.assertEqual(names[:10], [
             "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
-            "Novel Phoenix", "NovelPing", "NovelFire", "SSNovel", "NovelFull",
+            "Novel Phoenix", "NovelPing", "SSNovel", "NovelFull",
             "LightNovelUp",
         ])
         expected = {
             "ReadNovelFull": SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
             "FreeWebNovel.net": SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
         }
-        self.assertEqual({site.name: site for site in PUBLIC_SITES[11:13]}, expected)
+        self.assertEqual({site.name: site for site in PUBLIC_SITES[10:12]}, expected)
         self.assertEqual([PUBLIC_SITE_ORDER[name] for name in names], list(range(len(names))))
 
     def test_com_and_net_are_distinct_config_and_failure_identities(self) -> None:
@@ -239,7 +239,7 @@ class NewSourceIntegrationTests(unittest.TestCase):
         self.assertIn("optional public sources failed", result.degraded_reasons[0])
 
     def test_notifications_use_configured_general_urls(self) -> None:
-        for site in PUBLIC_SITES[11:13]:
+        for site in PUBLIC_SITES[10:12]:
             report = ChapterReport(site.name, 3186, "Title", "https://chapter.invalid/private")
             body = notification_body(3185, report)
             self.assertIn(f"{site.name} [{site.url}]", body)

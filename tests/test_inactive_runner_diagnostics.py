@@ -21,12 +21,11 @@ from shadow_slave_monitor.models import ChapterReport
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NAMES = ("Novel Phoenix", "NovelPing", "NovelFire")
+NAMES = ("Novel Phoenix", "NovelPing")
 SITES = tuple(next(site for site in PUBLIC_SITES if site.name == name) for name in NAMES)
 PRIVATE = "private-secret https://untrusted.example/private?token=secret"
 PHOENIX = ('<section><b>Latest Release:</b><a href="/novel/shadow-slave/chapter-3227">'
            'Chapter 3227 Private Title</a></section>')
-FIRE = '<a href="/book/shadow-slave/chapter-3227">Chapter 3227 Private Title</a>'
 PING = ('<h1>Shadow Slave</h1><section><b>Latest chapter:</b>'
         '<a href="/book/shadow-slave/chapter-3227-a-soul-and-a-shadow-walk-into-a-bar">'
         'Chapter 3227 A Soul and a Shadow Walk Into a Bar</a></section>')
@@ -38,7 +37,7 @@ def response(site, html=None, status=200):
     result.headers = {"Content-Type": "text/html"}
     result.encoding, result.is_redirect = "utf-8", False
     if html is None:
-        html = {"Novel Phoenix": PHOENIX, "NovelFire": FIRE}.get(site.name, PRIVATE)
+        html = {"Novel Phoenix": PHOENIX}.get(site.name, PRIVATE)
     result.iter_content.return_value = [html.encode()]
     if status >= 400:
         result.raise_for_status.side_effect = requests.HTTPError(PRIVATE, response=result)
@@ -94,6 +93,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
             self.assertNotIn(forbidden, text)
 
     def test_exact_disabled_references_use_original_configuration_and_http_policy(self):
+        self.assertEqual(diagnostic.INACTIVE_SOURCE_NAMES, NAMES)
         with patch.object(diagnostic.http_client, "fetch_html", wraps=diagnostic.http_client.fetch_html) as fetch:
             results = self.run_diagnostic()
         self.assertEqual([item.args[0] for item in fetch.call_args_list], list(SITES))
@@ -120,14 +120,15 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                     self.get.assert_not_called()
 
     def test_unexpected_identities_are_refused_without_echoing_input(self):
-        for name in ("Telegram", "WebNovel", "NovelArrow", "novelfire", "NovelFire ", PRIVATE):
+        for name in ("Telegram", "WebNovel", "NovelArrow", "NovelFire", "novelfire", "NovelFire ",
+                     "readnovel.site", "https://readnovel.site/novel/shadow-slave/chapter-3227", PRIVATE):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "^invalid_inactive_source_configuration$"):
                 diagnostic.diagnose_inactive_source(name)
         self.get.assert_not_called()
 
     def test_valid_candidates_are_distinct_from_parser_unavailability(self):
         results = self.run_diagnostic()
-        for result in (results[0], results[2]):
+        for result in (results[0],):
             self.assertTrue(result["parser_available"])
             self.assertTrue(result["parser_inspected"])
             self.assertEqual(result["parser_category"], "PARSER_CANDIDATE_FOUND")
@@ -151,17 +152,15 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
 
     def test_retained_parsers_are_called_directly_once_without_extra_requests(self):
         with patch.object(parsers, "parse_novel_phoenix_candidates", wraps=parsers.parse_novel_phoenix_candidates) as phoenix, \
-             patch.object(parsers, "parse_novelping_candidates", wraps=parsers.parse_novelping_candidates) as ping, \
-             patch.object(parsers, "parse_novelfire_candidates", wraps=parsers.parse_novelfire_candidates) as fire:
+             patch.object(parsers, "parse_novelping_candidates", wraps=parsers.parse_novelping_candidates) as ping:
             self.run_diagnostic()
         phoenix.assert_called_once()
         ping.assert_called_once()
-        fire.assert_called_once()
-        self.assertEqual(self.get.call_count, 3)
+        self.assertEqual(self.get.call_count, 2)
 
-    def test_all_three_dedicated_parsers_accept_independent_canonical_evidence(self):
+    def test_both_dedicated_parsers_accept_independent_canonical_evidence(self):
         self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
-                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING, SITES[2].url: FIRE}[url])
+                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING}[url])
         with patch.object(parsers, "parse_novelarrow_candidates", side_effect=AssertionError("legacy dispatch")) as legacy:
             results = self.run_diagnostic()
         for result in results:
@@ -175,7 +174,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
 
     def test_explicit_reference_reports_older_unchanged_new_and_suspicious_results_without_state(self):
         self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
-                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING, SITES[2].url: FIRE}[url])
+                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING}[url])
         for reference, newer in ((3226, True), (3227, False), (3228, False)):
             for result in diagnostic.diagnose_inactive_sources(reference_chapter=reference)["sources"]:
                 self.assertEqual((result["chapter_candidate"], result["reference_chapter"], result["newer_than_reference"]),
@@ -201,7 +200,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
             self.get.assert_not_called()
 
     def test_structural_rejections_distinguish_listing_missing_section_and_bad_link(self):
-        cases = ((SITES[2], '<a href="/book/shadow-slave/chapters">Chapter 3227 Private Title</a>',
+        cases = ((SITES[0], '<a href="/novel/shadow-slave/chapters">Chapter 3227 Private Title</a>',
                   "listing_without_individual_chapter"),
                  (SITES[0], PHOENIX.replace("Latest Release:", "Catalog:"), "latest_section_missing"),
                  (SITES[1], '<h1>Shadow Slave</h1>' + PING.split('</b>')[1].split('</section>')[0], "latest_section_missing"),
@@ -226,7 +225,9 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
         self.assertEqual(self.get.call_count, 2)
 
     def test_each_parser_failure_remains_independent_and_recovery_has_no_stale_result(self):
-        for name, parser_name in zip(NAMES, ("parse_novel_phoenix_candidates", "parse_novelping_candidates", "parse_novelfire_candidates")):
+        self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
+                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING}[url])
+        for name, parser_name in zip(NAMES, ("parse_novel_phoenix_candidates", "parse_novelping_candidates")):
             for error, category in ((parsers.ParseError("chapter_data_invalid"), "PARSER_NO_TRUSTWORTHY_CANDIDATE"),
                                     (RuntimeError(PRIVATE), "INTERNAL_ERROR")):
                 with self.subTest(source=name, error=type(error)), patch.object(parsers, parser_name, side_effect=error):
@@ -234,11 +235,11 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                     failed = next(item for item in results if item["source"] == name)
                     self.assertEqual(failed["parser_category"], category)
                     self.assertTrue(failed["http_completed"])
-                    self.assertEqual(sum(item["http_completed"] for item in results), 3)
+                    self.assertEqual(sum(item["http_completed"] for item in results), 2)
+                    self.assertEqual([item["chapter_candidate"] for item in results if item["source"] != name], [3227])
             recovered = next(item for item in self.run_diagnostic() if item["source"] == name)
             self.assertNotEqual(recovered["parser_category"], "INTERNAL_ERROR")
-            if name != "NovelPing":
-                self.assertEqual(recovered["chapter_candidate"], 3227)
+            self.assertEqual(recovered["chapter_candidate"], 3227)
 
     def test_access_failure_followed_by_recovery_reexamines_current_html(self):
         for site in SITES:
@@ -287,7 +288,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                     self.assertFalse(result["http_completed"])
                     self.assertFalse(result["parser_inspected"])
                     self.assertEqual(sum(item.args[0] == site.url for item in self.get.call_args_list), attempts)
-                    self.assertEqual(sum(item["http_completed"] for item in results), 2)
+                    self.assertEqual(sum(item["http_completed"] for item in results), 1)
 
     def test_timeout_connection_tls_and_request_errors_are_sanitized(self):
         for error, category, classification, attempts in (
@@ -301,7 +302,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                 self.get.reset_mock()
                 self.get.side_effect = error(PRIVATE)
                 results = self.run_diagnostic()
-                self.assertEqual(self.get.call_count, attempts * 3)
+                self.assertEqual(self.get.call_count, attempts * 2)
                 for item in results:
                     self.assertEqual((item["category"], item["classification"], item["http_status"]),
                                      (category, classification, "unavailable"))
@@ -309,6 +310,8 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
 
     def test_rejected_redirects_never_reach_unapproved_destinations(self):
         for location, reason in (("https://untrusted.example/private?token=secret", "redirect_host_not_allowed"),
+                                 ("https://readnovel.site/novel/shadow-slave/chapter-3227", "redirect_host_not_allowed"),
+                                 ("https://novelfire.net/book/shadow-slave/chapter-3227", "redirect_host_not_allowed"),
                                  ("http://novelphoenix.com/private?token=secret", "non_https_url"),
                                  (None, "missing_redirect_location")):
             with self.subTest(location=location):
@@ -322,7 +325,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                 self.assertTrue(result["redirect_rejected"])
                 self.assertFalse(result["http_completed"])
                 self.assertFalse(result["parser_inspected"])
-                self.assertEqual(self.get.call_count, 3)
+                self.assertEqual(self.get.call_count, 2)
 
     def test_allowed_redirect_uses_existing_validation_and_same_bounded_fetch(self):
         redirect = response(SITES[0], status=302)
@@ -330,12 +333,12 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
         redirect.headers = {"Location": "https://www.novelphoenix.com/novel/shadow-slave/chapters"}
         destination = response(SITES[0])
         destination.url = redirect.headers["Location"]
-        self.get.side_effect = [redirect, destination, response(SITES[1]), response(SITES[2])]
+        self.get.side_effect = [redirect, destination, response(SITES[1])]
         result = self.run_diagnostic()[0]
         self.assertTrue(result["http_completed"])
         self.assertFalse(result["redirect_rejected"])
         self.assertEqual(result["chapter_candidate"], 3227)
-        self.assertEqual(self.get.call_count, 4)
+        self.assertEqual(self.get.call_count, 3)
 
     def test_real_response_without_redirect_location_is_not_http_accessible(self):
         bad = requests.Response()
@@ -358,7 +361,7 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
         result = self.run_diagnostic()[0]
         self.assertEqual(result["classification"], "redirect_limit")
         self.assertTrue(result["redirect_rejected"])
-        self.assertEqual(self.get.call_count, 8)
+        self.assertEqual(self.get.call_count, 7)
 
     def test_content_type_and_response_size_rejection_keep_observed_200_incomplete(self):
         for oversized in (False, True):
@@ -400,16 +403,18 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
     def test_invalid_chapter_ranges_and_noncanonical_urls_are_rejected(self):
         for number in (0, 10001):
             self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
-                                                             (PHOENIX + FIRE).replace("3227", str(number)))
+                                                             PHOENIX.replace("3227", str(number)))
             self.assertTrue(all(item["chapter_candidate"] is None for item in self.run_diagnostic()))
-        for href in ("https://untrusted.example/book/shadow-slave/chapter-3227",
-                     "https://user:password@novelfire.net/book/shadow-slave/chapter-3227",
-                     "https://novelfire.net:443/book/shadow-slave/chapter-3227",
-                     "/book/shadow-slave/chapter-3227?token=secret", "/book/other/chapter-3227",
-                     "/book/shadow-slave/chapter-3226"):
+        for href in ("https://untrusted.example/novel/shadow-slave/chapter-3227",
+                     "https://user:password@novelphoenix.com/novel/shadow-slave/chapter-3227",
+                     "https://novelphoenix.com:443/novel/shadow-slave/chapter-3227",
+                     "https://novelfire.net/novel/shadow-slave/chapter-3227",
+                     "https://readnovel.site/novel/shadow-slave/chapter-3227",
+                     "/novel/shadow-slave/chapter-3227?token=secret", "/novel/other/chapter-3227",
+                     "/novel/shadow-slave/chapter-3226"):
             self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
-                                                             f'<a href="{href}">Chapter 3227 Private Title</a>')
-            self.assertIsNone(self.run_diagnostic()[2]["chapter_candidate"])
+                                                             f'<section><b>Latest Release:</b><a href="{href}">Chapter 3227 Private Title</a></section>')
+            self.assertIsNone(self.run_diagnostic()[0]["chapter_candidate"])
 
     def test_shared_chapter_and_url_validation_rechecks_retained_parser_results(self):
         for candidate in (ChapterReport("", True, "Private Title", SITES[0].url),
@@ -419,6 +424,8 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                 self.assertIsNone(self.run_diagnostic()[0]["chapter_candidate"])
 
     def test_parser_errors_remain_separate_from_successful_http(self):
+        self.get.side_effect = lambda url, **kw: response(next(site for site in SITES if site.url == url),
+                                                        {SITES[0].url: PHOENIX, SITES[1].url: PING}[url])
         for error, category in ((parsers.ParseError("chapter_data_invalid"), "PARSER_NO_TRUSTWORTHY_CANDIDATE"),
                                 (RuntimeError(PRIVATE), "INTERNAL_ERROR")):
             with self.subTest(error=type(error)), patch.object(parsers, "parse_novel_phoenix_candidates", side_effect=error):
@@ -427,18 +434,18 @@ class InactiveRunnerDiagnosticTests(unittest.TestCase):
                 self.assertEqual((result["category"], result["http_status"], result["http_completed"]),
                                  ("HTTP_ACCESSIBLE", 200, True))
                 self.assertEqual(result["parser_category"], category)
-                self.assertEqual(results[2]["chapter_candidate"], 3227)
+                self.assertEqual(results[1]["chapter_candidate"], 3227)
 
     def test_internal_transport_error_does_not_suppress_other_sources(self):
         def fail_one(url, **kwargs):
             if url == SITES[0].url:
                 raise RuntimeError(PRIVATE)
-            return self.respond(url, **kwargs)
+            return response(SITES[1], PING)
         self.get.side_effect = fail_one
         results = self.run_diagnostic()
         self.assertEqual(results[0]["category"], "INTERNAL_ERROR")
-        self.assertEqual(results[2]["chapter_candidate"], 3227)
-        self.assertEqual(self.get.call_count, 3)
+        self.assertEqual(results[1]["chapter_candidate"], 3227)
+        self.assertEqual(self.get.call_count, 2)
 
     def test_source_logs_are_suppressed_and_logging_is_restored(self):
         level = logging.root.manager.disable

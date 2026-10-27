@@ -20,7 +20,6 @@ from shadow_slave_monitor.parsers import (
     parse_novel_phoenix_candidates,
     parse_novel_buddy_candidates,
     parse_novelarrow_candidates,
-    parse_novelfire_candidates,
     _confirm_novelarrow_chapter_page,
     parse_novelfull_candidates,
     parse_shadowslave_space_chapter_title,
@@ -57,7 +56,6 @@ class ChikariParserTests(unittest.TestCase):
                 "LightNovelUp": True,
                 "Novel Phoenix": False,
                 "NovelPing": False,
-                "NovelFire": False,
                 "SSNovel": True,
                 "NovelFull": True,
                 "ReadNovelFull": True,
@@ -282,44 +280,6 @@ class NovelBuddyParserTests(unittest.TestCase):
                  self.assertRaisesRegex(ParseError, "chapter_page_confirmation_failed"):
                 check_public_site(
                     self.source, None, 3190, "Freedom of Choice", 3189, "Entertaining Guest")
-
-
-class NovelFireParserTests(unittest.TestCase):
-    source = next(site for site in PUBLIC_SITES if site.name == "NovelFire")
-
-    def check(self, html: str):
-        candidates = parse_novelfire_candidates(BeautifulSoup(html, "html.parser"), self.source.url)
-        if not candidates:
-            raise ParseError("no reference candidates")
-        best = max(candidates, key=lambda report: report.chapter)
-        return ChapterReport(self.source.name, best.chapter, best.title, best.url)
-
-    def test_disabled_reference_configuration_and_listing_card_is_not_a_chapter(self) -> None:
-        validate_source_config()
-        self.assertFalse(self.source.enabled)
-        html = '<p>3122Chapters</p><a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>'
-        with self.assertRaises(ParseError):
-            self.check(html)
-
-    def test_latest_release_individual_url_and_numeric_title(self) -> None:
-        report = self.check('<a href="/book/shadow-slave/chapter-3098">Latest Release: Chapter 3098 Catch 22 Updated 2 hours ago</a>')
-        self.assertEqual((report.chapter, report.title, report.url),
-                         (3098, "Catch 22", "https://novelfire.net/book/shadow-slave/chapter-3098"))
-
-    def test_count_unrelated_book_and_mismatch_are_rejected(self) -> None:
-        for html in ('<p>3122Chapters</p>',
-                     '<a href="/book/other/chapter-3122">Chapter 3122 Wrong</a>',
-                     '<a href="/book/shadow-slave/chapter-3121">Chapter 3122 Wrong</a>'):
-            with self.subTest(html=html), self.assertRaises(ParseError):
-                self.check(html)
-
-    def test_conflicting_listing_card_and_individual_release_fail_closed(self) -> None:
-        html = '''
-          <a href="/book/shadow-slave/chapters">Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago</a>
-          <a href="/book/shadow-slave/chapter-3098">Latest Release: Chapter 3098 Usurpation</a>
-        '''
-        with self.assertRaisesRegex(ParseError, "inactive_release_conflict"):
-            self.check(html)
 
 
 class NovelArrowParserTests(unittest.TestCase):
@@ -1115,7 +1075,6 @@ class PublicSourceLoggingTests(unittest.TestCase):
             ("ShadowSlave.Space", "https://shadowslave.space/chapters/3144"),
             ("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave/chapter-3144/"),
             ("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapter-3144/"),
-            ("NovelFire", "https://novelfire.net/book/shadow-slave/chapter-3144/"),
             ("ReadNovelFull", "https://readnovelfull.com/shadow-slave/chapter-3144-a-new-day.html"),
             ("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave/chapter-3144-a-new-day.html"),
         )
@@ -1128,8 +1087,8 @@ class PublicSourceLoggingTests(unittest.TestCase):
 
     def test_success_catalog_and_unknown_source_urls_are_omitted(self) -> None:
         cases = (
-            (next(site for site in PUBLIC_SITES if site.name == "NovelFire"),
-             "https://novelfire.net/book/shadow-slave/chapters"),
+            (next(site for site in PUBLIC_SITES if site.name == "Novel Phoenix"),
+             "https://novelphoenix.com/novel/shadow-slave/chapters"),
             (next(site for site in PUBLIC_SITES if site.name == "SSNovel"), "https://ssnovel.app/private_secret"),
             (SourceConfig("Other Public Source", "https://example.com", True, ("example.com",)),
              "https://example.com/chapter/3144"),

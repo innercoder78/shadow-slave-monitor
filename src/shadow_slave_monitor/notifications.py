@@ -70,7 +70,9 @@ def source_lines(source: str, fallback_url: str = "", *, chapter: int, include_u
             # No chapter index: derive this link from the verified number, since
             # the aggregate report URL may belong to a different source.
             url = rentry_chapter_url(chapter)
-        if url is None and len(names) == 1:
+        # Historical provenance stays visible without linking a retired source's
+        # recorded chapter URL. Other unknown sources retain their fallback.
+        if url is None and len(names) == 1 and name != "NovelFire":
             url = fallback_url or None
         label = _SOURCE_DISPLAY_NAMES.get(name, name)
         lines.append(f"{label} [{url}]" if include_urls and url else label)
