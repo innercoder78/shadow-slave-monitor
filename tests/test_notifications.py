@@ -193,14 +193,31 @@ class NewChapterNotificationTests(unittest.TestCase):
     def test_retired_source_provenance_is_preserved_without_a_configured_url(self) -> None:
         body = notification_body(3116, self.report("Novel Buddy, NovelFire", url="https://chapter.example"))
         self.assertIn("Novel Buddy [https://novelbuddy.me/shadow-slave]", body)
-        self.assertIn("\nNovelFire", body)
+        self.assertEqual(body.splitlines()[4:], [
+            "Novel Buddy [https://novelbuddy.me/shadow-slave]", "NovelFire",
+        ])
         self.assertNotIn("novelfire.net", body)
         self.assertNotIn("chapter.example", body)
 
-    def test_retired_single_source_keeps_its_recorded_pending_url(self) -> None:
-        url = "https://novelfire.net/book/shadow-slave/chapter-3117"
-        body = notification_body(3116, self.report("NovelFire", url=url))
-        self.assertIn(f"NovelFire [{url}]", body)
+    def test_retired_single_source_keeps_its_name_without_linking_recorded_urls(self) -> None:
+        for url in ("https://novelfire.net/book/shadow-slave/chapter-3117",
+                    "https://readnovel.site/novel/shadow-slave/chapter-3117"):
+            with self.subTest(url=url):
+                report = self.report(" NovelFire, NovelFire ", url=url)
+                body = notification_body(3116, report)
+                self.assertEqual(body.splitlines()[3:], ["SOURCE:", "NovelFire"])
+                self.assertNotIn("https://", body)
+                self.assertEqual(report.url, url)
+
+    def test_retired_source_mixed_with_enabled_source_never_uses_recorded_urls(self) -> None:
+        for url in ("https://novelfire.net/book/shadow-slave/chapter-3117",
+                    "https://readnovel.site/novel/shadow-slave/chapter-3117"):
+            with self.subTest(url=url):
+                body = notification_body(3116, self.report("NovelFire, Telegram, NovelFire", url=url))
+                self.assertEqual(body.splitlines()[4:], [
+                    "Telegram [https://t.me/s/shadow_slave_fastes]", "NovelFire",
+                ])
+                self.assertNotIn(url, body)
 
     def test_body_size_fallback_stays_within_utf8_limit(self) -> None:
         body = notification_body(1, self.report("Chikari, " + ("界" * 2000), "界" * 2000))

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import ExitStack
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -14,7 +15,7 @@ from bs4 import BeautifulSoup
 from shadow_slave_monitor import diagnose_source, monitor, parsers, state_manager
 from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SITE_ORDER, PUBLIC_SOURCE_PARSER_REVISION, SourceConfig
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
-from shadow_slave_monitor.notifications import merge_pending, NotificationDeliveryError
+from shadow_slave_monitor.notifications import merge_pending, NotificationDeliveryError, report_from_pending
 
 
 # Exact previous identities are retained only to exercise migration and rejection.
@@ -151,6 +152,52 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
             self.assertFalse(first)
             self.assertEqual(clean, before)
             self.assertEqual(path.read_bytes(), original)
+
+    def test_retired_pending_reconstructs_and_delivers_once_without_state_writes_or_live_io(self):
+        for sources in (["NovelFire"], ["Telegram", "NovelFire"]):
+            for url in ("https://novelfire.net/book/shadow-slave/chapter-3225",
+                        "https://readnovel.site/novel/shadow-slave/chapter-3225"):
+                with self.subTest(sources=sources, url=url):
+                    previous = self.previous_state()
+                    previous["pending_notification"].update(
+                        sources=sources, url=url, next_retry_at="2026-10-25T12:00:00+00:00",
+                    )
+                    pending_before = copy.deepcopy(previous["pending_notification"])
+                    with TemporaryDirectory() as tmp, ExitStack() as guards:
+                        path = Path(tmp) / "state.json"
+                        path.write_text(json.dumps(previous), encoding="utf-8")
+                        original = path.read_bytes()
+                        blocked = [guards.enter_context(patch(target, side_effect=AssertionError("unexpected side effect")))
+                                   for target in ("requests.sessions.Session.request", "socket.socket.connect",
+                                                  "socket.getaddrinfo", "shadow_slave_monitor.state_manager.atomic_write_json",
+                                                  "shadow_slave_monitor.monitor.save_state")]
+                        with patch("shadow_slave_monitor.notifications._post_ntfy") as post, \
+                             patch.dict(monitor.os.environ, {"NTFY_NEWCHAPTER": "test-topic"}):
+                            state, first = state_manager.load_state(path)
+                            self.assertFalse(first)
+                            self.assertEqual(state["pending_notification"], pending_before)
+                            previous_seen, report = report_from_pending(state["pending_notification"])
+                            self.assertEqual((previous_seen, report.chapter, report.title, report.source, report.url),
+                                             (3224, 3225, "Pending", ", ".join(sources), url))
+                            self.assertEqual(state["pending_notification"], pending_before)
+                            outcome = monitor.try_deliver_pending(state, RunResult())
+                            self.assertEqual(outcome, monitor.PendingDeliveryOutcome.DELIVERED)
+                            self.assertIsNone(state["pending_notification"])
+                            self.assertEqual((state["latest_seen"], state["latest_title"], state["latest_url"]),
+                                             (3225, "Pending", url))
+                            self.assertEqual(monitor.try_deliver_pending(state, RunResult()),
+                                             monitor.PendingDeliveryOutcome.NONE)
+                        post.assert_called_once()
+                        body = post.call_args.args[2]
+                        expected = (["Telegram [https://t.me/s/shadow_slave_fastes]"]
+                                    if "Telegram" in sources else []) + ["NovelFire"]
+                        self.assertEqual(body.splitlines()[4:], expected)
+                        self.assertNotIn(url, body)
+                        self.assertNotIn("novelfire.net", body)
+                        self.assertNotIn("readnovel.site", body)
+                        self.assertEqual(path.read_bytes(), original)
+                        for guard in blocked:
+                            guard.assert_not_called()
 
     def test_older_parser_revisions_keep_existing_reset_behavior(self):
         for revision in (None, 1, 6):
