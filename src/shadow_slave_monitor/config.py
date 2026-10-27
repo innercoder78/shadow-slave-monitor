@@ -94,8 +94,7 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("Novel Buddy", "https://novelbuddy.me/shadow-slave", True, ("novelbuddy.me", "www.novelbuddy.me")),
     SourceConfig("ShadowSlave.Space", "https://shadowslave.space", True, ("shadowslave.space", "www.shadowslave.space")),
     SourceConfig("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave", True, ("freewebnovel.com", "www.freewebnovel.com")),
-    # Local dispatcher disabled: these identities are eligible only through the
-    # explicitly allowlisted isolated runner, never the ordinary source loop.
+    # Disabled references only; their parsers are available to isolated diagnostics.
     SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", False, ("novelphoenix.com", "www.novelphoenix.com")),
     SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False, ("novelping.com", "www.novelping.com")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
