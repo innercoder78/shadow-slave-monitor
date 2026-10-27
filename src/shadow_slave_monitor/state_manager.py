@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, MAX_WEBNOVEL_CYCLE, WEBNOVEL_EMERGENCY_FAILURE_LIMIT, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SOURCE_PARSER_REVISION, PUBLIC_SITES, STATE_PATH, WATCHDOG_STATE_PATH
+from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, MAX_WEBNOVEL_CYCLE, WEBNOVEL_EMERGENCY_FAILURE_LIMIT, PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT, PUBLIC_SOURCE_PARSER_REVISION, PUBLIC_SITES, ISOLATED_PUBLIC_SOURCE_NAMES, STATE_PATH, WATCHDOG_STATE_PATH
 from shadow_slave_monitor.timeutil import iso_now, parse_iso_datetime
 from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 
@@ -30,6 +30,7 @@ MONITOR_STATE_FIELDS = {
     "target_url",
     "pending_notification",
     "public_source_failures",
+    "isolated_public_source_failures",
     "public_source_failure_revision",
     "source_positions",
     "webnovel_failures",
@@ -131,6 +132,7 @@ def initial_state() -> dict[str, Any]:
         "target_url": None,
         "pending_notification": None,
         "public_source_failures": {},
+        "isolated_public_source_failures": {},
         "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
         "source_positions": {},
         "webnovel_failures": 0,
@@ -311,6 +313,16 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
         clean_failures = {}
     state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
     state["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION
+    # Additive, optional map: no parser revision bump/reset for existing sources.
+    # Legacy state normalizes to empty in memory and is not rewritten merely
+    # because this field was absent. It is persisted only on operational change.
+    isolated_failures = state.get("isolated_public_source_failures")
+    if (not isinstance(isolated_failures, dict) or any(
+            name not in ISOLATED_PUBLIC_SOURCE_NAMES or type(count) is not int
+            or not 1 <= count <= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT
+            for name, count in isolated_failures.items())):
+        raise StateError("isolated_public_source_failures contains invalid source counters")
+    state["isolated_public_source_failures"] = dict(sorted(isolated_failures.items()))
     positions = state.get("source_positions")
     if not isinstance(positions, dict):
         raise StateError("source_positions must be an object")

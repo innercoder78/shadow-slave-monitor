@@ -94,7 +94,8 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("Novel Buddy", "https://novelbuddy.me/shadow-slave", True, ("novelbuddy.me", "www.novelbuddy.me")),
     SourceConfig("ShadowSlave.Space", "https://shadowslave.space", True, ("shadowslave.space", "www.shadowslave.space")),
     SourceConfig("FreeWebNovel", "https://freewebnovel.com/novel/shadow-slave", True, ("freewebnovel.com", "www.freewebnovel.com")),
-    # Disabled references only; the previous redirected site parser stays dormant.
+    # Local dispatcher disabled: these identities are eligible only through the
+    # explicitly allowlisted isolated runner, never the ordinary source loop.
     SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", False, ("novelphoenix.com", "www.novelphoenix.com")),
     SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False, ("novelping.com", "www.novelping.com")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
@@ -108,3 +109,7 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
 )
 
 PUBLIC_SITE_ORDER = {site.name: index for index, site in enumerate(PUBLIC_SITES)}
+
+# This is separate from enabled: existing local dispatch and diagnostics retain
+# their exact inventory and order. No other source can opt into this path.
+ISOLATED_PUBLIC_SOURCE_NAMES = ("Novel Phoenix", "NovelPing")

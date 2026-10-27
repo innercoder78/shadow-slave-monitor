@@ -19,6 +19,7 @@ from shadow_slave_monitor.notifications import NotificationConfigError, Notifica
 from shadow_slave_monitor.parsers import ParseError, check_public_site, check_webnovel, check_telegram_emergency, require_valid_webnovel_report
 from shadow_slave_monitor.state_manager import StateError, load_state, parse_int, save_state
 from shadow_slave_monitor.timeutil import utc_now
+from shadow_slave_monitor import isolated_handoff
 
 
 class PendingDeliveryOutcome(StrEnum):
@@ -80,6 +81,8 @@ def check_public_sites(
     expected_title: str | None = None,
     previous_chapter: int | None = None,
     previous_title: str | None = None,
+    *,
+    isolated_state: dict[str, Any] | None = None,
 ) -> list[ChapterReport]:
     failure_counts = failure_counts if failure_counts is not None else {}
     source_positions = source_positions if source_positions is not None else {}
@@ -106,7 +109,7 @@ def check_public_sites(
             eligible.append(site)
             if failure_counts.get(site.name, 0) >= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
                 logging.info("Retrying previously suppressed public source during recovery window: %s.", site.name)
-    if suppressed and not eligible:
+    if suppressed and not eligible and isolated_state is None:
         result.fail("every enabled public source is temporarily suppressed outside the recovery window")
         return []
     reports_by_name: dict[str, ChapterReport] = {}
@@ -171,6 +174,11 @@ def check_public_sites(
                 logging.warning(
                     "%s is temporarily suppressed after consecutive failures; periodic recovery probes remain enabled.", site.name
                 )
+    # Existing requests, parameters, ordering and counters above are unchanged.
+    # Look up optional evidence only after this local work; never gate authority
+    # checks or first setup on another job's completion.
+    if isolated_state is not None:
+        reports.extend(isolated_handoff.collect(isolated_state, result))
     if failures and reports:
         result.degrade("optional public sources failed: " + ", ".join(sorted(failures)))
     if suppressed and reports:
@@ -186,6 +194,8 @@ def set_watch_webnovel(state: dict[str, Any]) -> None:
     state["target_title"] = None
     state["target_url"] = None
     state["public_source_failures"] = {}
+    if "isolated_public_source_failures" in state:
+        state["isolated_public_source_failures"] = {}
 
 def update_webnovel(state: dict[str, Any], report: ChapterReport, result: RunResult) -> bool:
     previous = parse_int(state.get("latest_webnovel"))
@@ -396,6 +406,8 @@ def run_watch_webnovel(state: dict[str, Any], result: RunResult) -> None:
         set_watch_webnovel(state)
     else:
         state["public_source_failures"] = {}
+        if "isolated_public_source_failures" in state:
+            state["isolated_public_source_failures"] = {}
         state["mode"] = "watch_free_sites"
         state["target_chapter"] = official.chapter
         state["target_title"] = official.title
@@ -414,6 +426,7 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
     reports = check_public_sites(
         result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {}),
         target, state.get("target_title"), parse_int(state.get("latest_seen")), state.get("latest_title"),
+        **({"isolated_state": state} if isolated_handoff.enabled() else {}),
     )
     if not reports:
         return

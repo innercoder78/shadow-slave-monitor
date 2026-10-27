@@ -23,6 +23,13 @@ state, and scheduling rules.
 
 A separate watchdog runs through GitHub Actions approximately every 90 minutes. It sends an error notification only if the main monitor has not completed successfully for at least five hours.
 
+Two additional public sources have an isolated read-only evidence path on
+Ubuntu 26.04. The monitor, its eleven existing public sources, WebNovel, and
+Telegram emergency checks remain on Ubuntu 24.04. Only the main monitor can
+validate evidence, decide notifications, and produce state for the existing
+writer. See [isolated public runner design and limits](docs/isolated-public-runner.md)
+for the current-run trust boundary and the optional handoff timing tradeoff.
+
 ## PHONE APP
 
 The ntfy app is available for both Android and iOS:

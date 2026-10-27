@@ -206,6 +206,10 @@ def timestamp_not_older(current: Any, artifact: Any) -> bool:
 def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any]) -> bool:
     if current == artifact:
         return True
+    # The isolated worker has no writer. Its monitor-owned failure/recovery
+    # transitions must obey the same base-hash lease, including cursor merges.
+    if current.get("isolated_public_source_failures", {}) != artifact.get("isolated_public_source_failures", {}):
+        return False
     # Counters can increase or reset without any chapter advancing. Chapter
     # maxima and updated_at cannot establish causality for these transitions.
     # A stale artifact with different authority history is a conflict, never an
