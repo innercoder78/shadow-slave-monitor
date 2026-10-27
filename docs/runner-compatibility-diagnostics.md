@@ -103,9 +103,10 @@ investigation before migration. Keep production on Ubuntu 24.04 in this PR.
 `diagnostic_mode` defaults to `core`; the existing authority/emergency comparison,
 fields, baseline handling and safety behavior above apply to that mode. Core mode
 does not contact disabled references. Select `inactive_sources` for a separate
-investigation of the three exact disabled references in `PUBLIC_SITES`. This mode
-does not request the authority or emergency source, read a state snapshot, send
-notifications or change source configuration. It refuses all retrieval if any
+investigation of exactly two disabled references in `PUBLIC_SITES`: Novel Phoenix
+and NovelPing. This mode does not request the authority or emergency source,
+read a state snapshot, send notifications or change source configuration.
+It refuses all retrieval if any
 required reference is missing, duplicated or enabled. Arbitrary names and URLs
 are not accepted. Disabled sources remain disabled after the test.
 
@@ -143,7 +144,7 @@ HTTP and parser evidence are reported separately:
 | `NETWORK_ERROR` / `TLS_ERROR` | Timeout, connection/request failure, or certificate/handshake failure. |
 | `HTTP_POLICY_ERROR` | HTTPS/host/redirect, content-type or size policy rejected retrieval. `redirect_rejected` explicitly identifies rejected redirects, including an observed 3xx status when available. |
 | `http_completed` | Full bounded retrieval completed; observing HTTP 200 before a body/policy failure does not set this field. |
-| `parser_available` / `parser_inspected` | A dedicated parser exists / was actually applied to the fetched HTML. All three now have dedicated parsers. |
+| `parser_available` / `parser_inspected` | A dedicated parser exists / was actually applied to the fetched HTML. Both retained references have dedicated parsers. |
 | `parser_category: PARSER_CANDIDATE_FOUND` | A parser found a candidate that passed chapter range, source identity, canonical URL and source-specific evidence validation. Only its number is reported in `chapter_candidate`; no title, URL or chapter body is emitted. |
 | `PARSER_NO_TRUSTWORTHY_CANDIDATE` | No candidate survived those checks, or the parser rejected evidence. Counts, dates, ratings, pagination and generic numeric text are not chapter evidence. |
 | `PARSER_UNAVAILABLE` | No dedicated parser exists for this identity; retrieval can still succeed. |
@@ -154,9 +155,9 @@ HTTP and parser evidence are reported separately:
 | `reference_chapter` / `newer_than_reference` | Explicit caller-supplied comparison context and whether the candidate exceeds it. Equal and older observations remain valid observations, with `newer_than_reference: false`. No state is advanced. |
 | `jump_check` | `within_limit`, `rejected`, `not_inspected` (supplied reference not reached), or `not_checked_without_reference`. Without a reference, candidate acceptance has no temporal or jump-validation claim. |
 
-All three use dedicated, reusable source-specific parsers. NovelPing never calls
-the dormant previous-domain parser. A listing/count link alone cannot become an
-individual chapter candidate. The ordinary enabled-source dispatcher is never
+Both references use dedicated, reusable source-specific parsers. NovelPing never
+calls the dormant previous-domain parser. A listing/count link alone cannot
+become an individual chapter candidate. The ordinary enabled-source dispatcher is never
 called. Parsers perform no I/O and do not read or write state. The optional
 reference is passed as environment data, validated before retrieval, and ignored
 by `core`; there is no authority request or snapshot read in inactive mode.
@@ -179,7 +180,26 @@ particular outbound IP. No public runner IP addresses are collected or logged.
 None of these results activates a source or validates a complete production
 integration. Production source activation requires a separate review.
 
+NovelFire has been retired from the configured inventory, parser entry points
+and inactive diagnostics because it no longer provides useful independent
+monitoring evidence. The user observed chapter navigation through `readnovel.site`
+and instructions to bookmark NovelPhoenix. That navigation chain was not
+independently verified here; it does not establish a formal merger. The two
+retained sources remain separately configured and disabled. `novelfire.net` and
+`readnovel.site` are not aliases or allowed redirect destinations for either
+retained source. There was no existing `readnovel.site` support to remove. No domain aliases,
+fallback sources or redirect exceptions were added.
+
+The parser revision remains unchanged so enabled-source failure history is
+preserved. Narrow obsolete-name recognition remains in legacy-state migration,
+and recorded notification provenance is retained. Retirement does not rewrite
+historical state or change pending delivery.
+
 ## Evidence and remaining live-verification work (2026-10-27)
+
+The investigation below predates retirement and describes the earlier
+three-source inventory. Its hosted results and access attempts are historical;
+they do not describe a run of the current two-source diagnostic.
 
 The supplied checkout started on `main` at
 `ff52e86ceab66f747f5b9b90c3d4f5516ea4e374`. Its five pre-existing diagnostic
@@ -217,17 +237,19 @@ TLS workarounds or live workflow dispatches were used.
 | --- | --- | --- |
 | Novel Phoenix | Retains the established `Latest Release` label, `/novel/shadow-slave/chapter-N` path, visible integer agreement and required title. Existing examples and the hosted acceptance support retaining these boundaries. Reproducible defects allowed encoded paths after decoding, raw URL normalization, first-marker early success despite later contradictions, and parent-wide catalog leakage. Raw syntax is now checked first; all release groups must agree in number/title; duplicate evidence is collapsed. Explicitly hidden/navigation evidence and contradictory page identity are rejected. | Current DOM nesting, the canonical href actually seen in the successful job, resilience to template changes, a future release, and sustained outage/recovery in hosted operation. Missing titles deliberately still reject, preserving the retained boundary. |
 | NovelPing | The task's historical external observation supplies `Shadow Slave`, `Guiltythree`, a `Latest chapter` label, chapter 3227 and `/book/shadow-slave/chapter-3227-a-soul-and-a-shadow-walk-into-a-bar`. The dedicated parser requires visible exact series identity, a semantic latest-chapter association, a configured host, ASCII canonical integer/title-slug path, matching visible number and matching supplied title/URL slug. Missing optional titles remain null; conflicting titles fail closed. No generic numeric guessing or legacy-domain code is used. | No verified raw template exists. Exact H1 representation, label nesting, author presentation, slug conventions for punctuation/Unicode and future URL variants require live verification. The semantic adapter is a conservative acceptance contract, not a claim that current HTML matches it. Author is historical context, not an invented selector. |
-| NovelFire | Retains the historical `/book/shadow-slave/chapter-N` pattern, numeric titles such as `Catch 22`, and trailing update-metadata removal. The old parser reproducibly emitted `/chapters` as a candidate and could prefer a higher listing summary despite conflicting individual evidence. It now emits only individual URLs, rejects conflicting summaries/numbers/titles, and deduplicates canonical numbered lists. A matching listing summary can constrain an independently valid individual link, but never supplies one. | The historical 200/rejection is **not fully explained**: the prior diagnostic retained no structural counters or HTML. Listing-only evidence would explain rejection and is now classified, but a changed path, missing links, different latest section, dynamic rendering or another template mismatch remains unproven. No new canonical URL pattern has been established or added. |
+| NovelFire (retired) | Before retirement, the parser used `/book/shadow-slave/chapter-N`, numeric titles such as `Catch 22`, and trailing update-metadata removal. Earlier repairs rejected `/chapters` as chapter evidence and conflicting summaries/numbers/titles. Its dedicated parser and unused fixture observations have now been removed. | The historical 200/rejection is **not fully explained**: the prior diagnostic retained no structural counters or HTML. Listing-only evidence was one possible explanation; a changed path, missing links, different latest section, dynamic rendering or another template mismatch remains unproven. Retirement does not resolve that historical uncertainty. |
 
-`tests/fixtures/inactive_source_observations.json` records these provenance limits.
+`tests/fixtures/inactive_source_observations.json` records these provenance limits
+for the two retained sources; the retired source's historical evidence remains above.
 It contains historical facts and pre-existing examples, not captured HTML. The
 test DOM wrappers and adversarial mutations are explicitly synthetic policy
 tests. Passing them proves rejection/acceptance boundaries, not live template
 compatibility. Tests include pure repeat observations, conflicts, optional
 titles, unsafe raw URLs, hidden evidence, jump limits, failures followed by
-recovery, independent transport/parser failures, and side-effect isolation. Two
-old tests that explicitly accepted listing URLs/conflicts now assert rejection;
-working individual-link and numeric-title behavior remains covered.
+recovery, independent transport/parser failures, and side-effect isolation.
+Earlier parser repairs rejected listing URLs and conflicting
+evidence. Obsolete parser tests were removed with the retired implementation;
+retained-source boundaries and explicit host-alias rejection remain covered.
 
 After independent review and merge, dispatch `inactive_sources` once using the
 steps above, preferably with a freshly confirmed chapter reference. For each
@@ -247,7 +269,7 @@ later genuinely new release, then examine a failure/recovery observation. A
 single accepted chapter does not demonstrate future discovery or freshness;
 stale-but-consistent HTML cannot be detected without independent context. The
 optional reference enforces an upper jump bound, not publication freshness.
-No result enables these sources: all three remain `enabled=False`.
+No result enables these sources: both retained references remain `enabled=False`.
 
 A future source-specific split across runners needs its own PR and independent
 design for target binding, freshness, ordering, runner failure, shared-state

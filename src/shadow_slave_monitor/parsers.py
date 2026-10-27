@@ -1205,7 +1205,6 @@ def _inactive_chapter_url(href: Any, base_url: str, source: str) -> ChapterRepor
     paths = {
         "Novel Phoenix": r"/novel/shadow-slave/chapter-([1-9][0-9]{0,4})/?",
         "NovelPing": r"/book/shadow-slave/chapter-([1-9][0-9]{0,4})-[a-z0-9]+(?:-[a-z0-9]+)*",
-        "NovelFire": r"/book/shadow-slave/chapter-([1-9][0-9]{0,4})/?",
     }
     site = next(site for site in PUBLIC_SITES if site.name == source)
     hosts = set(site.allowed_hosts)
@@ -1224,9 +1223,6 @@ def _inactive_text(node: Any) -> str:
 
 def _inactive_label(text: str, source: str) -> tuple[int, str | None] | None:
     text = re.sub(r"\s+", " ", text).strip()
-    if source == "NovelFire":
-        text = re.sub(r"^Latest\s+Release\s*:\s*", "", text, flags=re.I)
-        text = _strip_novelfire_metadata(text) or ""
     match = re.fullmatch(r"Chapter\s+([1-9][0-9]{0,4})(?:\s*[:\-–—]\s*(.*)|\s+(.+))?", text, re.I)
     if not match or chapter_validity_category(int(match[1])) is not None:
         return None
@@ -1626,66 +1622,6 @@ def parse_shadowslave_space_chapter_title(html: str, expected_chapter: int) -> s
                 continue
             return title
     return None
-
-
-def _strip_novelfire_metadata(value: str) -> str | None:
-    value = re.sub(
-        r"\s+Updated\s+(?:about\s+)?\d+\s+(?:seconds?|minutes?|hours?|days?|weeks?|months?|years?)\s+ago\s*$",
-        "", value, flags=re.IGNORECASE,
-    )
-    # Preserve the complete remaining label until chapter/title validation;
-    # truncating here could erase contradictory evidence past the title limit.
-    return value.strip() or None
-
-
-def novelfire_candidate_from_anchor(anchor: Any, base_url: str) -> ChapterReport | None:
-    # A /chapters listing is never individual chapter evidence, even when its
-    # card mentions a release number. The historical individual path is retained.
-    return _inactive_candidate(anchor, base_url, "NovelFire")
-
-
-def parse_novelfire_candidates(
-    soup: BeautifulSoup, base_url: str, *, reference_chapter: int | None = None,
-) -> list[ChapterReport]:
-    _inactive_page_identity(soup)
-    anchors = [anchor for anchor in soup.find_all("a", href=True) if _inactive_visible(anchor)]
-    for marker in soup.find_all(string=re.compile(r"^\s*Latest\s+Release\s*:\s*Chapter\s+[0-9]+", re.I)):
-        if (not isinstance(marker, Comment) and _inactive_visible(marker.parent)
-                and marker.find_parent("a") is None):
-            raise ParseError("inactive_latest_link_missing")
-    releases = [anchor for anchor in anchors if re.match(
-        r"^Latest\s+Release\s*:",
-        _inactive_text(anchor), re.I,
-    )]
-    groups = _inactive_latest_groups(soup, r"^\s*Latest\s+Release\s*:?\s*$")
-    if releases or groups:
-        candidates = _inactive_release_groups(groups + [[anchor] for anchor in releases],
-                                               base_url, novelfire_candidate_from_anchor)
-    else:
-        candidates = []
-        for anchor in anchors:
-            candidate = novelfire_candidate_from_anchor(anchor, base_url)
-            if candidate is not None:
-                candidates.append(candidate)
-            elif (_inactive_chapter_url(anchor.get("href"), base_url, "NovelFire") is not None
-                  and re.match(r"^Chapter\s+[0-9]+\b", _inactive_text(anchor), re.I)):
-                raise ParseError("inactive_latest_link_invalid")
-    if candidates:
-        latest = max(candidates, key=lambda candidate: candidate.chapter)
-        for anchor in anchors:
-            text = re.sub(r"\s+", " ", _inactive_text(anchor)).strip()
-            if not re.match(r"^Novel\s+Chapters\s+Chapter\s+[0-9]+\b", text, re.I):
-                continue
-            # Historical listing-card text can CONTRADICT an individual link,
-            # but can never supply one, even when it agrees with the number.
-            summary = _inactive_label(re.sub(r"^Novel\s+Chapters\s+", "", text, flags=re.I), "NovelFire")
-            if (summary is None or summary[0] != latest.chapter
-                    or (summary[1] and latest.title and _normalized_title(summary[1]) != _normalized_title(latest.title))):
-                raise ParseError("inactive_release_conflict")
-    # A canonical numbered list may contain several older chapters. Same-number
-    # title conflicts still reject the entire observation; there is no max-over-
-    # contradictions fallback and no listing-link candidate.
-    return _inactive_consensus(candidates, latest_only=bool(releases or groups), reference_chapter=reference_chapter)
 
 
 # Dormant reference for the previous website. Never dispatch this as NovelPing.
@@ -2343,15 +2279,12 @@ def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
             "FreeWebNovel": freewebnovel_candidate_from_anchor,
             "Novel Phoenix": novel_phoenix_candidate_from_anchor,
             "NovelPing": novelping_candidate_from_anchor,
-            "NovelFire": novelfire_candidate_from_anchor,
             "NovelFull": novelfull_candidate_from_anchor,
             "ReadNovelFull": readnovelfull_candidate_from_anchor,
             "FreeWebNovel.net": freewebnovel_net_candidate_from_anchor,
         }
         validator = validators.get(site.name)
         candidate = validator(anchor, site.url) if validator else None
-        if site.name == "NovelFire" and parse_chapter_from_href(url) != report.chapter:
-            return None
         if candidate is None and site.name in {"NovelFull", "ReadNovelFull", "FreeWebNovel.net"}:
             anchor.string = f"Chapter {report.title or ''}"
             title_link = _title_slug_candidate(anchor, site.url, hosts)

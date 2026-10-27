@@ -22,12 +22,10 @@ OBSERVATIONS = json.loads((Path(__file__).parent / "fixtures/inactive_source_obs
 PARSERS = {
     "Novel Phoenix": parsers.parse_novel_phoenix_candidates,
     "NovelPing": parsers.parse_novelping_candidates,
-    "NovelFire": parsers.parse_novelfire_candidates,
 }
 VALIDATORS = {
     "Novel Phoenix": parsers.novel_phoenix_candidate_from_anchor,
     "NovelPing": parsers.novelping_candidate_from_anchor,
-    "NovelFire": parsers.novelfire_candidate_from_anchor,
 }
 SITES = {site.name: site for site in PUBLIC_SITES if site.name in PARSERS}
 
@@ -43,8 +41,6 @@ def page(name, *, links=None, marker=None, identity="Shadow Slave"):
     evidence = OBSERVATIONS[name]
     links = link(name) if links is None else links
     heading = f"<h1>{identity}</h1>" if identity is not None else ""
-    if name == "NovelFire":
-        return heading + links
     marker = evidence["marker"] if marker is None else marker
     return heading + f"<section><b>{marker}</b>{links}</section>"
 
@@ -167,7 +163,7 @@ class InactiveParserBoundaryTests(unittest.TestCase):
             self.assert_rejected(name, page(name, links=link(name, attribute='title="Chapter 1 Different Title"')))
 
     def test_missing_optional_titles_keep_independent_numbers_and_urls(self):
-        for name in ("NovelPing", "NovelFire"):
+        for name in ("NovelPing",):
             chapter = OBSERVATIONS[name]["chapter"]
             result, = parse(name, page(name, links=link(name, label=f"Chapter {chapter}")))
             self.assertEqual((result.chapter, result.title), (chapter, None))
@@ -186,7 +182,7 @@ class InactiveParserBoundaryTests(unittest.TestCase):
         self.assert_rejected("NovelPing", page("NovelPing") + "<h1>Another Novel</h1>")
 
     def test_explicit_wrong_series_headings_reject_the_retained_sources(self):
-        for name in ("Novel Phoenix", "NovelFire"):
+        for name in ("Novel Phoenix",):
             self.assert_rejected(name, page(name, identity="Another Novel"))
 
     def test_navigation_and_explicitly_hidden_evidence_are_not_visible_releases(self):
@@ -208,8 +204,7 @@ class InactiveParserBoundaryTests(unittest.TestCase):
             evidence = OBSERVATIONS[name]
             hidden = link(name).replace(escape(evidence["label"]), '<span hidden>' + escape(evidence["label"]) + '</span>')
             self.assert_rejected(name, page(name, links=hidden))
-            if name != "NovelFire":
-                self.assert_rejected(name, '<h1>Shadow Slave</h1><section><!--' + evidence["marker"] + '-->' + link(name) + '</section>')
+            self.assert_rejected(name, '<h1>Shadow Slave</h1><section><!--' + evidence["marker"] + '-->' + link(name) + '</section>')
             # Hidden contradictory text must not poison a valid visible label.
             good = link(name).replace('</a>', '<span hidden>Chapter 9999 Wrong</span></a>')
             self.assertEqual(parse(name, page(name, links=good))[0].chapter, evidence["chapter"])
@@ -227,6 +222,26 @@ class InactiveParserBoundaryTests(unittest.TestCase):
     def test_wrong_series_path_is_rejected(self):
         for name in PARSERS:
             self.assert_rejected(name, page(name, links=link(name, href=OBSERVATIONS[name]["href"].replace("shadow-slave", "another-novel"))))
+
+    def test_retired_and_redirect_hosts_cannot_alias_either_retained_source(self):
+        for name in PARSERS:
+            site = SITES[name]
+            path = OBSERVATIONS[name]["href"].removeprefix("https://" + site.allowed_hosts[0])
+            for host in ("novelfire.net", "www.novelfire.net", "readnovel.site"):
+                href = "https://" + host + path
+                with self.subTest(source=name, host=host):
+                    self.assertNotIn(host, site.allowed_hosts)
+                    anchor = BeautifulSoup(link(name, href=href), "html.parser").a
+                    self.assertIsNone(VALIDATORS[name](anchor, site.url))
+                    self.assert_rejected(name, page(name, links=link(name, href=href)))
+
+    def test_phoenix_canonical_examples_remain_independent_chapter_observations(self):
+        name = "Novel Phoenix"
+        for chapter in (3227, 3226):
+            href = f"https://novelphoenix.com/novel/shadow-slave/chapter-{chapter}"
+            html = page(name, links=link(name, href=href, label=f"Chapter {chapter} Example Title"))
+            result, = parse(name, html)
+            self.assertEqual((result.chapter, result.url), (chapter, href))
 
     def test_unsafe_authorities_schemes_ports_and_delimiters_are_rejected_raw(self):
         for name in PARSERS:
@@ -272,43 +287,12 @@ class InactiveParserBoundaryTests(unittest.TestCase):
             self.assert_rejected(name, "<p>Temporarily unavailable</p>")
             self.assertEqual(parse(name, page(name)), first)
 
-    def test_fire_listing_never_becomes_a_candidate_with_or_without_a_number(self):
-        evidence = OBSERVATIONS["NovelFire"]
-        for label in (evidence["listing_label"], "Chapter 3098 Catch 22", "3098 Chapters"):
-            anchor = BeautifulSoup(link("NovelFire", href=evidence["listing_href"], label=label), "html.parser").a
-            self.assertIsNone(parsers.novelfire_candidate_from_anchor(anchor, SITES["NovelFire"].url))
-            self.assert_rejected("NovelFire", str(anchor))
-
-    def test_fire_summary_conflicts_in_both_number_and_title_are_fatal(self):
-        evidence = OBSERVATIONS["NovelFire"]
-        for summary in (evidence["listing_label"], "Novel Chapters Chapter 3098 Different Title"):
-            html = page("NovelFire") + link("NovelFire", href=evidence["listing_href"], label=summary)
-            with self.assertRaisesRegex(parsers.ParseError, "inactive_release_conflict"):
-                parse("NovelFire", html)
-
-    def test_fire_agreeing_summary_does_not_replace_individual_evidence(self):
-        name = "NovelFire"
-        summary = link(name, href=OBSERVATIONS[name]["listing_href"], label="Novel Chapters Chapter 3098 Catch 22")
-        result, = parse(name, summary + page(name))
-        self.assertTrue(result.url.endswith("/chapter-3098"))
-        self.assert_rejected(name, summary)
-
-    def test_fire_retains_numeric_titles_metadata_removal_and_ordered_chapter_lists(self):
-        name = "NovelFire"
-        recent = link(name, label="Chapter 3098 Catch 22 Updated 2 hours ago")
-        earlier = link(name, href="/book/shadow-slave/chapter-3097", label="Chapter 3097 Earlier")
-        candidates = parse(name, earlier + recent + earlier)
-        self.assertEqual([(result.chapter, result.title) for result in candidates], [(3098, "Catch 22"), (3097, "Earlier")])
-
-    def test_fire_unlinked_latest_label_cannot_be_hidden_by_an_older_canonical_list(self):
-        self.assert_rejected("NovelFire", '<p>Latest Release: Chapter 3122 Field of Dishonor</p>' + page("NovelFire"))
-
     def test_overlong_titles_are_not_truncated_before_conflict_validation(self):
         for name in PARSERS:
             evidence = OBSERVATIONS[name]
             long_label = evidence["label"].replace(evidence["title"], "Long title " * 30 + "Chapter 9999")
             self.assert_rejected(name, page(name, links=link(name, label=long_label)))
-        for name in ("Novel Phoenix", "NovelFire"):
+        for name in ("Novel Phoenix",):
             label = f'Chapter {OBSERVATIONS[name]["chapter"]} ' + 'A' * 180
             attribute = 'title="' + 'A' * 180 + ' Contradiction"'
             self.assert_rejected(name, page(name, links=link(name, label=label, attribute=attribute)))

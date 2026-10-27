@@ -19,7 +19,7 @@ from shadow_slave_monitor.notifications import merge_pending, NotificationDelive
 
 # Exact previous identities are retained only to exercise migration and rejection.
 OBSOLETE = ("Novel Phoenix", "NovelArrow", "NovelFire", "Novel Live", "Readwn", "ReChapters")
-DISABLED = ("Novel Phoenix", "NovelPing", "NovelFire")
+DISABLED = ("Novel Phoenix", "NovelPing")
 ENABLED = [
     "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
     "SSNovel", "NovelFull", "LightNovelUp", "ReadNovelFull", "FreeWebNovel.net", "Rentry",
@@ -27,6 +27,11 @@ ENABLED = [
 
 
 class InactiveInventoryTests(unittest.TestCase):
+    def test_retired_parser_entry_points_are_absent(self):
+        for name in ("novelfire_candidate_from_anchor", "parse_novelfire_candidates",
+                     "_strip_novelfire_metadata"):
+            self.assertFalse(hasattr(parsers, name), name)
+
     def test_exact_inventory_order_and_disabled_references(self):
         state_manager.validate_source_config()
         self.assertEqual([site.name for site in PUBLIC_SITES], [
@@ -39,8 +44,6 @@ class InactiveInventoryTests(unittest.TestCase):
                          ("novelphoenix.com", "www.novelphoenix.com")),
             SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False,
                          ("novelping.com", "www.novelping.com")),
-            SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False,
-                         ("novelfire.net", "www.novelfire.net")),
         ])
 
     def test_regular_and_recovery_checks_only_schedule_enabled_sources(self):
@@ -130,6 +133,24 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
         for key in previous.keys() - {"public_source_failures", "public_source_failure_revision"}:
             self.assertEqual(clean[key], previous[key], key)
         self.assertEqual(state_manager.validate_state(clean), clean)
+
+    def test_current_revision_preserves_enabled_failures_and_retired_pending_provenance_without_writes(self):
+        state = state_manager.validate_state(self.previous_state())
+        state["pending_notification"].update(
+            sources=["NovelFire"], url="https://novelfire.net/book/shadow-slave/chapter-3225",
+        )
+        before = copy.deepcopy(state)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            path.write_text(json.dumps(state), encoding="utf-8")
+            original = path.read_bytes()
+            with patch.object(state_manager, "atomic_write_json") as write:
+                clean, first = state_manager.load_state(path)
+                state_manager.save_state(clean, path)
+            write.assert_not_called()
+            self.assertFalse(first)
+            self.assertEqual(clean, before)
+            self.assertEqual(path.read_bytes(), original)
 
     def test_older_parser_revisions_keep_existing_reset_behavior(self):
         for revision in (None, 1, 6):

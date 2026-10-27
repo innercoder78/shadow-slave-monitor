@@ -66,7 +66,6 @@ def validate_source_config() -> None:
         "LightNovelUp": True,
         "Novel Phoenix": False,
         "NovelPing": False,
-        "NovelFire": False,
         "SSNovel": True,
         "NovelFull": True,
         "ReadNovelFull": True,

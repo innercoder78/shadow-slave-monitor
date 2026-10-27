@@ -190,11 +190,17 @@ class NewChapterNotificationTests(unittest.TestCase):
         self.assertIn("NovelFull [https://novelfull.com/shadow-slave.html]", body)
         self.assertNotIn("chapter-3182", body)
 
-    def test_updated_sources_use_their_general_source_urls(self) -> None:
+    def test_retired_source_provenance_is_preserved_without_a_configured_url(self) -> None:
         body = notification_body(3116, self.report("Novel Buddy, NovelFire", url="https://chapter.example"))
         self.assertIn("Novel Buddy [https://novelbuddy.me/shadow-slave]", body)
-        self.assertIn("NovelFire [https://novelfire.net/book/shadow-slave]", body)
+        self.assertIn("\nNovelFire", body)
+        self.assertNotIn("novelfire.net", body)
         self.assertNotIn("chapter.example", body)
+
+    def test_retired_single_source_keeps_its_recorded_pending_url(self) -> None:
+        url = "https://novelfire.net/book/shadow-slave/chapter-3117"
+        body = notification_body(3116, self.report("NovelFire", url=url))
+        self.assertIn(f"NovelFire [{url}]", body)
 
     def test_body_size_fallback_stays_within_utf8_limit(self) -> None:
         body = notification_body(1, self.report("Chikari, " + ("界" * 2000), "界" * 2000))

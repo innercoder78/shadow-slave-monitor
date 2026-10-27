@@ -97,7 +97,6 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     # Disabled references only; the previous redirected site parser stays dormant.
     SourceConfig("Novel Phoenix", "https://novelphoenix.com/novel/shadow-slave/chapters", False, ("novelphoenix.com", "www.novelphoenix.com")),
     SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False, ("novelping.com", "www.novelping.com")),
-    SourceConfig("NovelFire", "https://novelfire.net/book/shadow-slave", False, ("novelfire.net", "www.novelfire.net")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),
     SourceConfig("LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True, ("lightnovelup.com", "www.lightnovelup.com")),

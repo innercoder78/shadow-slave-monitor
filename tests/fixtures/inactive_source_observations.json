@@ -18,14 +18,5 @@
     "href": "https://novelping.com/book/shadow-slave/chapter-3227-a-soul-and-a-shadow-walk-into-a-bar",
     "chapter": 3227,
     "title": "A Soul and a Shadow Walk Into a Bar"
-  },
-  "NovelFire": {
-    "evidence": "Existing test_parsers.py examples, not freshly verified markup. Hosted run 40555600098 returned 200 without a trustworthy candidate; its HTML is unavailable.",
-    "label": "Latest Release: Chapter 3098 Catch 22 Updated 2 hours ago",
-    "href": "/book/shadow-slave/chapter-3098",
-    "chapter": 3098,
-    "title": "Catch 22",
-    "listing_label": "Novel Chapters Chapter 3122 Field of Dishonor Updated 3 hours ago",
-    "listing_href": "/book/shadow-slave/chapters"
   }
 }
