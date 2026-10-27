@@ -243,7 +243,7 @@ class WorkerTests(OfflineCase):
         result = contract.validate_evidence(raw, context(), state(), NOW)
         self.assertEqual([item["outcome"] for item in result], ["candidate", "candidate"])
         self.assertCountEqual([call.args[0].name for call in fetch.call_args_list], NAMES)
-        self.assertTrue(all(call.kwargs == {"allow_redirects": False} for call in fetch.call_args_list))
+        self.assertTrue(all(call.kwargs == {"allow_redirects": False, "max_attempts": 1} for call in fetch.call_args_list))
 
     def test_missing_optional_title_survives_without_any_detail_fetch(self):
         site = contract.isolated_sources()[1]
@@ -369,6 +369,35 @@ class WorkerTests(OfflineCase):
                 session.get.assert_called_once()
                 self.assertFalse(session.get.call_args.kwargs["allow_redirects"])
                 self.assertTrue(session.get.call_args.kwargs["stream"])
+
+    def test_retry_after_cannot_delay_successful_peer_or_trigger_extra_attempts(self):
+        for status in (429, 503):
+            def get(url, **kwargs):
+                response = Mock(status_code=status if "novelphoenix" in url else 200,
+                                is_redirect=False, url=url, encoding="utf-8")
+                response.headers = {"Content-Type": "text/html", "Retry-After": "120"}
+                if response.status_code >= 400:
+                    response.raise_for_status.side_effect = requests.HTTPError(response=response)
+                response.iter_content.return_value = [page(NAMES[1]).encode()]
+                return response
+            with patch.object(worker.http_client.requests.Session, "get", side_effect=get) as request, \
+                 patch.object(worker.http_client.time, "sleep", side_effect=AssertionError("worker cannot sleep for retries")) as sleep:
+                raw = worker.produce(context())
+            self.assertEqual(request.call_count, 2)
+            self.assertEqual([e["outcome"] for e in json.loads(raw)["sources"]], ["http_error", "candidate"])
+            sleep.assert_not_called()
+
+    def test_narrowed_attempt_budget_keeps_timeout_bounded_and_rejects_invalid_limits(self):
+        site = contract.isolated_sources()[0]
+        with patch.object(worker.http_client.requests.Session, "get", side_effect=requests.Timeout()) as request, \
+             patch.object(worker.http_client.time, "sleep", side_effect=AssertionError("worker cannot sleep for retries")):
+            self.assertEqual(worker.check_source(site, context())["outcome"], "network_error")
+        request.assert_called_once()
+        for limit in (0, -1, 4, True, "1", 1.5):
+            with patch.object(worker.http_client.requests.Session, "get") as request:
+                with self.assertRaises(ValueError):
+                    worker.http_client.fetch_html(site, max_attempts=limit)
+            request.assert_not_called()
 
     def test_unresolved_non_200_metadata_cannot_be_reported_as_successful_parsing(self):
         site = contract.isolated_sources()[0]

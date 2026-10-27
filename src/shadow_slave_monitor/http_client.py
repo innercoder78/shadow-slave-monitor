@@ -98,10 +98,10 @@ def safe_exception_details(exc: BaseException) -> str:
         fields.append(f"attempts={attempts}")
     return " ".join(fields)
 
-def fetch_html(source: SourceConfig, url: str | None = None, *, allow_redirects: bool = True) -> str:
+def fetch_html(source: SourceConfig, url: str | None = None, *, allow_redirects: bool = True, max_attempts: int | None = None) -> str:
     if source.name == "Rentry":
-        return _fetch_document(source, url, {"text/html", "application/xhtml+xml"}, allow_redirects=False)
-    return _fetch_document(source, url, HTML_TYPES, allow_redirects=allow_redirects)
+        return _fetch_document(source, url, {"text/html", "application/xhtml+xml"}, allow_redirects=False, max_attempts=max_attempts)
+    return _fetch_document(source, url, HTML_TYPES, allow_redirects=allow_redirects, max_attempts=max_attempts)
 
 
 def fetch_json(source: SourceConfig, url: str) -> str:
@@ -111,7 +111,13 @@ def fetch_json(source: SourceConfig, url: str) -> str:
 
 def _fetch_document(
     source: SourceConfig, url: str | None, content_types: set[str], *, allow_redirects: bool = True,
+    max_attempts: int | None = None,
 ) -> str:
+    # A caller may narrow its own retry budget without changing the established
+    # default for any other source, diagnostics, or authority checks.
+    attempts_limit = HTTP_RETRIES if max_attempts is None else max_attempts
+    if type(attempts_limit) is not int or not 1 <= attempts_limit <= HTTP_RETRIES:
+        raise ValueError("invalid_http_attempt_limit")
     target = url or source.url
     try:
         _check_https_and_host(target, source)
@@ -148,7 +154,7 @@ def _fetch_document(
                 break
             if source.name == "Rentry" and response.url != target:
                 raise HttpFetchError("noncanonical_chapter_url", host=_host(response.url), attempts=attempt)
-            if response.status_code in TEMPORARY_STATUSES and attempt < HTTP_RETRIES:
+            if response.status_code in TEMPORARY_STATUSES and attempt < attempts_limit:
                 delay = _retry_after_seconds(response.headers.get("Retry-After")) or min(HTTP_BACKOFF_SECONDS * attempt, 20)
                 logging.info("Temporary HTTP status %s from %s; retrying after %.1fs.", response.status_code, source.name, delay)
                 response.close(); time.sleep(delay); continue
@@ -177,7 +183,7 @@ def _fetch_document(
                 ResponseMetadata(response.status_code, _host(response.url), attempt),
             )
         except (requests.Timeout, requests.ConnectionError) as exc:
-            if attempt < HTTP_RETRIES:
+            if attempt < attempts_limit:
                 delay = min(HTTP_BACKOFF_SECONDS * attempt, 20)
                 logging.info("Temporary %s fetching %s; retrying after %.1fs.", safe_exception_category(exc), source.name, delay)
                 time.sleep(delay); continue

@@ -35,6 +35,11 @@ Only an initialized `watch_free_sites` snapshot with
 First setup, `watch_webnovel`, and emergency operation do not request or consume
 worker evidence. Normal initialization retains its existing history behavior.
 
+Each worker source has one HTTP attempt per poll, without retry-delay sleeps;
+later polls and recovery probes retry failures. This prevents a long server
+`Retry-After` from consuming the worker job budget and discarding its completed
+peer. All existing sources and diagnostics keep their three-attempt policy.
+
 After its existing local public requests finish, the monitor makes one bounded,
 opportunistic GitHub API lookup. It inspects at most five recent worker runs at
 its exact checkout SHA, looking for its own parent-run/attempt artifact name.
@@ -43,7 +48,7 @@ budget, two-second connection/read timeouts, bounded streamed responses, and
 no retries. It does not run before scheduled WebNovel checks. An existing local
 report above the target still uses the existing authority recheck path.
 
-**Timing limitation:** if runner queueing, setup, source retries, or artifact
+**Timing limitation:** if runner queueing, setup, source requests, or artifact
 publication finish after aggregation, the two extra sources do not participate
 in that parent run. Even a successful artifact is never reused in a later run.
 The next normal poll starts a fresh opportunity with its own provenance. Fast

@@ -38,7 +38,9 @@ def check_source(site, context: EvidenceContext) -> dict:
     try:
         # No redirects at all: even same-host redirects can silently change the
         # series context. This uses the existing timeout/retry/size/TLS bounds.
-        document = http_client.fetch_html(site, allow_redirects=False)
+        # Retry-After sleeps must not consume this optional job's budget and
+        # discard a completed peer. Later polls/recovery probes perform retries.
+        document = http_client.fetch_html(site, allow_redirects=False, max_attempts=1)
         metadata = getattr(document, "metadata", None)
         if metadata is not None and metadata.status != 200:
             raise http_client.HttpFetchError("unexpected_status", status=metadata.status)
