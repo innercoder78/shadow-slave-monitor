@@ -1,13 +1,13 @@
 {
-  "latest_seen": 3226,
-  "latest_title": "Raised from the Dead",
-  "latest_url": "https://rentry.co/3226ss",
+  "latest_seen": 3227,
+  "latest_title": "A Soul and a Shadow Walk Into a Bar",
+  "latest_url": "https://chikari.moe/novels/shadow-slave/3227",
   "latest_webnovel": 3227,
   "latest_webnovel_title": "A Soul and a Shadow Walk Into a Bar",
-  "mode": "watch_free_sites",
-  "target_chapter": 3227,
-  "target_title": "A Soul and a Shadow Walk Into a Bar",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 8,
@@ -22,5 +22,5 @@
   "webnovel_success_cycle": 1494225,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-10-27T03:00:31+00:00"
+  "updated_at": "2026-10-27T03:05:23+00:00"
 }
