@@ -2,8 +2,7 @@
 
 The unloaded app exposes its metadata and chapter-list GET endpoints. Its
 chapter records use integral floats; metadata counts are not chapter evidence.
-The navigation source exposes three duplicate title-only Next links, and the
-observed destination has no numeric chapter evidence. No tests access websites.
+No tests access websites.
 """
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ from shadow_slave_monitor.state_manager import load_state, save_state, validate_
 
 
 SOURCE = next(s for s in PUBLIC_SITES if s.name == "Chikari")
-NAVIGATION = next(s for s in PUBLIC_SITES if s.name == "LightNovelUp")
 IDENTITY_URL = "https://chikari.moe/api/series/shadow-slave"
 CHAPTERS_URL = "https://chikari.moe/api/novels/shadow-slave/chapters"
 SHELL = ('<html><head><title>chikari.moe</title></head>'
@@ -55,7 +53,7 @@ def waiting_state():
             "target_title": "Fear of Hope", "target_url": "https://www.webnovel.com/book/catalog",
             "pending_notification": None, "public_source_failures": {},
             "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
-            "source_positions": {}, "updated_at": "2026-10-09T00:00:00+00:00"}
+            "updated_at": "2026-10-09T00:00:00+00:00"}
 
 
 class PublicAPIParserTests(unittest.TestCase):
@@ -75,7 +73,6 @@ class PublicAPIParserTests(unittest.TestCase):
         report = self.check()
         self.assertEqual((report.source, report.chapter, report.title, report.url),
                          ("Chikari", 3210, "Fear of Hope", "https://chikari.moe/novels/shadow-slave/3210"))
-        self.assertIsNone(report.position_url)
 
     def test_highest_descending_record_and_integer_numbers(self):
         data = chapter_page()
@@ -223,34 +220,27 @@ class PublicAPITransportTests(unittest.TestCase):
         self.assertEqual(caught.exception.attempts, 3)
 
 
-class NavigationVerificationTests(unittest.TestCase):
-    cursor = {"chapter": 3188, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3188-lost-soul/"}
-    links = '<a class="btn next_page" href="/novel/shadow-slave/chapter-entertaining-guest/">Next</a>' * 3
-
-    def test_observed_title_only_next_stays_unverified_even_with_authoritative_target(self):
-        html = '<h1 id="chapter-heading">Shadow Slave - Chapter 3188 Lost Soul</h1>' + self.links
-        original = dict(self.cursor)
-        with patch.object(parsers, "fetch_html", return_value=html) as fetch, \
-             patch.object(parsers, "fetch_json", return_value="{}"), \
-             self.assertRaises(parsers.ParseError) as caught:
-            parsers.check_public_site(NAVIGATION, self.cursor, 3210, "Fear of Hope", 3209, "Previous")
-        self.assertEqual(caught.exception.code, "PARSE_CHAPTER_MISMATCH")
-        self.assertEqual(self.cursor, original)
-        fetch.assert_called_once_with(NAVIGATION, self.cursor["url"])
-
-    def test_numbered_cursor_requires_actual_matching_chapter_heading(self):
-        for html in ["<html></html>", "<div id='app'></div>",
-                     "<h1>Shadow Slave - Chapter Entertaining Guest</h1>",
-                     "<h1>Another Series - Chapter 3188 Lost Soul</h1>",
-                     "<p>3188 chapters, 2026 views</p>",
-                     "<h1>Chapter 3188 Lost Soul</h1><h2>Chapter 3188 Different Title</h2>",
-                     "<title>Shadow Slave - Chapter 3187 Previous</title><h1>Chapter 3188 Lost Soul</h1>"]:
-            with self.subTest(html=html), patch.object(parsers, "fetch_html", return_value=html), \
-                 self.assertRaises(parsers.ParseError):
-                parsers.check_lightnovelup(NAVIGATION, self.cursor)
-
-
 class PublicAPIIntegrationTests(unittest.TestCase):
+    def test_recovery_success_resets_only_the_recovered_source_failures(self):
+        peer = next(site for site in PUBLIC_SITES if site.name == "ReadNovelFull")
+        failures = {SOURCE.name: 4, peer.name: 4}
+        result = RunResult()
+        original_check = monitor.check_public_site
+        def check(site, *context):
+            if site == peer:
+                raise requests.Timeout("private failure")
+            return original_check(site, *context)
+        with patch.object(monitor, "PUBLIC_SITES", (SOURCE, peer)), \
+             patch.object(monitor, "public_source_recovery_window_open", return_value=True), \
+             patch.object(monitor, "check_public_site", side_effect=check), \
+             patch.object(parsers, "fetch_html", return_value=SHELL), \
+             patch.object(parsers, "fetch_json", side_effect=[json.dumps(IDENTITY),
+                 json.dumps(chapter_page()), json.dumps(reader_detail())]):
+            reports = monitor.check_public_sites(result, failures)
+        self.assertEqual([report.source for report in reports], [SOURCE.name])
+        self.assertEqual(failures, {peer.name: 4})
+        self.assertEqual(result.status, Health.DEGRADED)
+
     def test_stale_api_result_does_not_notify_or_advance_state(self):
         state = waiting_state()
         original = copy.deepcopy(state)
@@ -277,37 +267,15 @@ class PublicAPIIntegrationTests(unittest.TestCase):
         send.assert_not_called()
         self.assertEqual(state["latest_seen"], 3209)
 
-    def test_recovery_success_resets_failures_and_unverified_navigation_preserves_cursor(self):
-        positions = {"LightNovelUp": dict(NavigationVerificationTests.cursor)}
-        failures = {"Chikari": 4, "LightNovelUp": 4}
-        result = RunResult()
-        def html(site, url=None):
-            return SHELL if site == SOURCE else '<h1>Chapter 3188 Lost Soul</h1>' + NavigationVerificationTests.links
-        def api(site, url):
-            if site == NAVIGATION:
-                return "{}"
-            return json.dumps({IDENTITY_URL: IDENTITY, CHAPTERS_URL: chapter_page(),
-                               CHAPTERS_URL + "/3210/read": reader_detail()}[url])
-        with patch.object(monitor, "PUBLIC_SITES", (SOURCE, NAVIGATION)), \
-             patch.object(monitor, "public_source_recovery_window_open", return_value=True), \
-             patch.object(parsers, "fetch_html", side_effect=html), \
-             patch.object(parsers, "fetch_json", side_effect=api):
-            reports = monitor.check_public_sites(result, failures, positions)
-        self.assertEqual([r.source for r in reports], ["Chikari"])
-        self.assertEqual(failures, {"LightNovelUp": 4})
-        self.assertEqual(positions["LightNovelUp"], NavigationVerificationTests.cursor)
-        self.assertEqual(result.status, Health.DEGRADED)
 
-    def test_parser_revision_migration_preserves_cursor_and_pending_state(self):
+    def test_parser_revision_migration_preserves_pending_state(self):
         state = waiting_state()
         state["public_source_failure_revision"] = 6  # Last revision before these parser repairs.
-        state["public_source_failures"] = {"Chikari": 4, "LightNovelUp": 4}
-        state["source_positions"] = {"LightNovelUp": dict(NavigationVerificationTests.cursor)}
+        state["public_source_failures"] = {"Chikari": 4}
         state["pending_notification"] = pending_from_report(
             3209, ChapterReport("Chikari", 3210, "Fear of Hope", "https://chikari.moe/novels/shadow-slave/3210"))
         migrated = validate_state(state)
         self.assertEqual(migrated["public_source_failures"], {})
-        self.assertEqual(migrated["source_positions"]["LightNovelUp"], NavigationVerificationTests.cursor)
         self.assertEqual(migrated["pending_notification"], state["pending_notification"])
         with TemporaryDirectory() as directory, \
              patch("shadow_slave_monitor.state_manager.iso_now", return_value=migrated["updated_at"]):

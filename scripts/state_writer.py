@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import re
@@ -16,7 +15,7 @@ from typing import Any, Literal
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from shadow_slave_monitor.state_manager import StateError, atomic_write_json, validate_state, validate_watchdog_state  # noqa: E402
+from shadow_slave_monitor.state_manager import StateError, atomic_write_json, retire_legacy_navigation, validate_state, validate_watchdog_state  # noqa: E402
 from shadow_slave_monitor.timeutil import parse_iso_datetime  # noqa: E402
 
 ARTIFACT_STATE_MAP = {
@@ -222,15 +221,6 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
     art_web = artifact.get("latest_webnovel") or 0
     if cur_seen < art_seen or cur_web < art_web:
         return False
-    current_positions = current.get("source_positions", {})
-    artifact_positions = artifact.get("source_positions", {})
-    for source, artifact_position in artifact_positions.items():
-        current_position = current_positions.get(source)
-        if current_position is None or current_position["chapter"] < artifact_position["chapter"]:
-            return False
-        if (current_position["chapter"] == artifact_position["chapter"]
-                and current_position["url"] != artifact_position["url"]):
-            return False
     art_first, art_pending_latest = pending_range(artifact)
     cur_first, cur_pending_latest = pending_range(current)
     if art_pending_latest is not None:
@@ -262,33 +252,6 @@ def monitor_artifact_superseded(current: dict[str, Any], artifact: dict[str, Any
     if max_known_chapter(current) < max_known_chapter(artifact):
         return False
     return True
-
-
-def reconcile_monitor_cursor_advancement(
-    current: dict[str, Any], artifact: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Merge a cursor-only stale artifact without overwriting newer monitor state."""
-    artifact_without_cursor = copy.deepcopy(artifact)
-    artifact_without_cursor["source_positions"] = copy.deepcopy(current.get("source_positions", {}))
-    if not monitor_artifact_superseded(current, artifact_without_cursor):
-        return None
-    merged = copy.deepcopy(current)
-    merged_positions = merged.setdefault("source_positions", {})
-    advanced = False
-    for source, position in artifact.get("source_positions", {}).items():
-        current_position = merged_positions.get(source)
-        if current_position is None or position["chapter"] > current_position["chapter"]:
-            merged_positions[source] = copy.deepcopy(position)
-            advanced = True
-        elif position["chapter"] == current_position["chapter"] and position["url"] != current_position["url"]:
-            return None
-    if not advanced:
-        return None
-    current_updated = timestamp_value(current.get("updated_at"))
-    artifact_updated = timestamp_value(artifact.get("updated_at"))
-    if artifact_updated is not None and (current_updated is None or artifact_updated > current_updated):
-        merged["updated_at"] = artifact["updated_at"]
-    return validate_state(merged)
 
 
 def numeric_id(value: Any) -> int | None:
@@ -411,9 +374,9 @@ def classify_artifact(state_file: str, current_path: Path, current_state: dict[s
     return "conflicting"
 
 
-def apply_state_artifact(state_file: str, artifact_state_path: Path, artifact_state: dict[str, Any]) -> bool:
+def apply_state_artifact(state_file: str, artifact_state: dict[str, Any]) -> bool:
     destination = Path(state_file)
-    if sha256_file(destination) == sha256_file(artifact_state_path):
+    if load_json_object(destination) == artifact_state:
         print("Permitted state file unchanged.")
         return False
     atomic_write_json(destination, artifact_state)
@@ -451,15 +414,15 @@ def persist_with_retries(artifact_dir: Path, state_file: str) -> None:
         classification = classify_artifact(state_file, current_path, current_state, artifact_state_path, artifact_state, metadata)
         if classification == "superseded":
             print(f"Stale {state_file} artifact is semantically superseded by current repository state.")
-            return
+            current_raw = load_json_object(current_path)
+            if state_file != "state/state.json" or retire_legacy_navigation(current_raw) == current_raw:
+                return
+            # Persist only the validated cleanup of the fresh repository state.
+            # Never copy an older artifact over newer monitoring history.
+            artifact_state = current_state
         if classification == "conflicting":
-            merged = (reconcile_monitor_cursor_advancement(current_state, artifact_state)
-                      if state_file == "state/state.json" else None)
-            if merged is None:
-                raise SystemExit(f"stale {state_file} artifact conflicts with current repository state; refusing overwrite")
-            artifact_state = merged
-            atomic_write_json(artifact_state_path, artifact_state)
-        if not apply_state_artifact(state_file, artifact_state_path, artifact_state):
+            raise SystemExit(f"stale {state_file} artifact conflicts with current repository state; refusing overwrite")
+        if not apply_state_artifact(state_file, artifact_state):
             return
         if not commit_state_file(state_file):
             return

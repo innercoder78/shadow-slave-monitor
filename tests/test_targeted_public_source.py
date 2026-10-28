@@ -86,7 +86,7 @@ def watching_state():
 class TargetPageTests(unittest.TestCase):
     def check(self, html=None, chapter=3224, title="First Thunder"):
         with patch.object(parsers, "fetch_html", return_value=page() if html is None else html) as fetch:
-            report = parsers.check_public_site(ENABLED, None, chapter, title)
+            report = parsers.check_public_site(ENABLED, chapter, title)
         fetch.assert_called_once_with(ENABLED, f"https://rentry.co/{chapter}ss", allow_redirects=False)
         return report
 
@@ -94,8 +94,8 @@ class TargetPageTests(unittest.TestCase):
         validate_source_config()
         self.assertEqual((CONFIG.name, CONFIG.url, CONFIG.enabled, CONFIG.allowed_hosts),
                          ("Rentry", "https://rentry.co/", True, ("rentry.co",)))
-        self.assertEqual(PUBLIC_SITE_ORDER["Rentry"], 12)
-        self.assertEqual(sum(site.enabled for site in PUBLIC_SITES[:-1]), 10)
+        self.assertEqual(PUBLIC_SITE_ORDER["Rentry"], 11)
+        self.assertEqual(sum(site.enabled for site in PUBLIC_SITES[:-1]), 9)
 
     def test_generates_only_requested_canonical_candidate(self):
         for chapter, title in ((3224, "First Thunder"), (3225, "The Fourth Warrior")):
@@ -103,13 +103,12 @@ class TargetPageTests(unittest.TestCase):
                 report = self.check(page(chapter, title), chapter, title)
                 self.assertEqual((report.source, report.chapter, report.title, report.url),
                                  ("Rentry", chapter, title, f"https://rentry.co/{chapter}ss"))
-                self.assertIsNone(report.position_chapter)
 
     def test_invalid_target_never_requests(self):
         for value in (True, False, "3224", 3224.0, 0, -1, 10001):
             with self.subTest(value=value), patch.object(parsers, "fetch_html") as fetch:
                 with self.assertRaises(parsers.ParseError):
-                    parsers.check_public_site(ENABLED, None, value, "First Thunder")
+                    parsers.check_public_site(ENABLED, value, "First Thunder")
                 fetch.assert_not_called()
 
     def test_no_target_skips_without_fetch(self):
@@ -268,39 +267,39 @@ class TargetHttpTests(unittest.TestCase):
             redirected.headers["Location"] = destination
             with self.subTest(destination=destination), patch("requests.Session.get", return_value=redirected) as get:
                 with self.assertRaises(HttpFetchError):
-                    parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                    parsers.check_public_site(ENABLED, 3224, "First Thunder")
                 self.assertEqual(get.call_count, 1)
         with patch("requests.Session.get", return_value=response(404, url="https://rentry.co/other")):
             with self.assertRaises(HttpFetchError):
-                parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                parsers.check_public_site(ENABLED, 3224, "First Thunder")
 
     def test_content_type_and_response_size_bounds(self):
         for content_type in ("", "application/json", "text/plain", "application/xml"):
             with self.subTest(content_type=content_type), patch("requests.Session.get", return_value=response(content_type=content_type)):
                 with self.assertRaises(HttpFetchError):
-                    parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                    parsers.check_public_site(ENABLED, 3224, "First Thunder")
         with patch("requests.Session.get", return_value=response()), patch("shadow_slave_monitor.http_client.MAX_HTML_BYTES", 10):
             with self.assertRaisesRegex(HttpFetchError, "response_too_large"):
-                parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                parsers.check_public_site(ENABLED, 3224, "First Thunder")
 
     def test_only_genuine_target_404_is_clean_unavailable(self):
         with patch("requests.Session.get", return_value=response(404)) as get:
-            self.assertIsNone(parsers.check_public_site(ENABLED, None, 3224, "First Thunder"))
+            self.assertIsNone(parsers.check_public_site(ENABLED, 3224, "First Thunder"))
         self.assertEqual(get.call_count, 1)
         with patch.object(parsers, "fetch_html", side_effect=requests.HTTPError("404 without response")):
             with self.assertRaises(requests.HTTPError):
-                parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                parsers.check_public_site(ENABLED, 3224, "First Thunder")
 
     def test_access_denial_rate_limit_server_errors_and_network_retries(self):
         for status in (403, 429, 500, 502, 503, 504):
             with self.subTest(status=status), patch("requests.Session.get", return_value=response(status)) as get, patch("time.sleep"):
                 with self.assertRaises(requests.HTTPError):
-                    parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                    parsers.check_public_site(ENABLED, 3224, "First Thunder")
                 self.assertEqual(get.call_count, 1 if status == 403 else 3)
         for error in (requests.Timeout, requests.ConnectionError):
             with self.subTest(error=error), patch("requests.Session.get", side_effect=error("private")) as get, patch("time.sleep"):
                 with self.assertRaises(error):
-                    parsers.check_public_site(ENABLED, None, 3224, "First Thunder")
+                    parsers.check_public_site(ENABLED, 3224, "First Thunder")
                 self.assertEqual(get.call_count, 3)
 
 
@@ -320,19 +319,18 @@ class TargetMonitorTests(unittest.TestCase):
         self.assertEqual(result.status, Health.HEALTHY)
 
     def test_repeated_missing_target_never_suppresses_and_later_detects(self):
-        failures, positions = {}, {}
+        failures = {}
         with patch.object(monitor, "PUBLIC_SITES", (ENABLED,)), \
              patch.object(monitor, "public_source_recovery_window_open", return_value=False), \
              patch("requests.Session.get", return_value=response(404)) as get:
             for _ in range(8):
                 result = RunResult()
-                self.assertEqual(monitor.check_public_sites(result, failures, positions, 3224, "First Thunder"), [])
+                self.assertEqual(monitor.check_public_sites(result, failures, 3224, "First Thunder"), [])
                 self.assertEqual(result.status, Health.HEALTHY)
                 self.assertEqual(failures, {})
-                self.assertEqual(positions, {})
             self.assertEqual(get.call_count, 8)
         with patch.object(monitor, "PUBLIC_SITES", (ENABLED,)), patch("requests.Session.get", return_value=response()):
-            reports = monitor.check_public_sites(RunResult(), failures, positions, 3224, "First Thunder")
+            reports = monitor.check_public_sites(RunResult(), failures, 3224, "First Thunder")
         self.assertEqual([r.chapter for r in reports], [3224])
 
     def test_placeholders_keep_checking_then_publish_without_state_writes(self):
@@ -357,7 +355,6 @@ class TargetMonitorTests(unittest.TestCase):
         send.assert_called_once()
         self.assertEqual(state["latest_seen"], 3224)
         self.assertEqual(state["public_source_failures"], {})
-        self.assertEqual(state["source_positions"], {})
 
     def test_placeholder_recovers_failure_count_and_diagnostic_is_unavailable(self):
         failures = {"Rentry": 3}

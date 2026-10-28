@@ -17,7 +17,7 @@ from shadow_slave_monitor.config import MAX_CHAPTER, MIN_CHAPTER, TITLE_MAX_LENG
 from shadow_slave_monitor.http_client import fetch_html, fetch_json, safe_exception_category
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
-from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, diagnostic_summary, parser_code
+from shadow_slave_monitor.diagnostics import HtmlDocument, ResponseMetadata, bounded_counters, challenge_suspected, parser_code
 
 class ParseError(RuntimeError):
     """A parser failure with a controlled, log-safe reason."""
@@ -62,9 +62,6 @@ def _with_response_diagnostics(check):
             _response_metadata.reset(token)
     return wrapped
 
-
-LIGHTNOVELUP_BOOTSTRAP_URL = "https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/"
-LIGHTNOVELUP_MAX_TRAVERSAL = 25
 
 def chapter_validity_category(value: Any) -> str | None:
     if isinstance(value, bool):
@@ -964,230 +961,6 @@ def _title_only_report(
     return ChapterReport("", chapter, title, url) if chapter is not None else None
 
 
-def lightnovelup_candidate_from_href(href: Any, base_url: str) -> ChapterReport | None:
-    return _canonical_slug_chapter_url(
-        href,
-        base_url,
-        {"lightnovelup.com", "www.lightnovelup.com"},
-        r"/novel/shadow-slave/chapter-(\d{1,5})-[a-z0-9]+(?:-[a-z0-9]+)*/?",
-    )
-
-
-def _lightnovelup_rejected_href_category(href: Any, base_url: str) -> str:
-    """Describe a rejected navigation href using only bounded, safe categories."""
-    if not isinstance(href, str) or not href:
-        return "unsafe_or_malformed"
-    if "%" in href:
-        return "encoded_path"
-    try:
-        parsed = urlparse(urljoin(base_url, href))
-        hostname = (parsed.hostname or "").casefold()
-    except (TypeError, ValueError):
-        return "unsafe_or_malformed"
-    if parsed.scheme != "https":
-        return "unexpected_scheme"
-    if (hostname not in {"lightnovelup.com", "www.lightnovelup.com"}
-            or parsed.netloc.casefold() != hostname):
-        return "unexpected_authority"
-    if parsed.params or parsed.query or parsed.fragment:
-        return "query_fragment_or_params"
-
-    path = parsed.path.casefold()
-    prefix = "/novel/shadow-slave/"
-    if not path.startswith(prefix):
-        return "unrelated_path"
-    chapter_path = path[len(prefix):].strip("/")
-    if re.fullmatch(r"chapter-\d{1,5}", chapter_path):
-        return "numeric_only_chapter_path"
-    if re.fullmatch(r"chapter-[a-z0-9]+(?:-[a-z0-9]+)*", chapter_path):
-        return "title_only_chapter_path"
-    if chapter_path.startswith("chapter-"):
-        return "malformed_chapter_path"
-    return "recognized_series_nonchapter_path"
-
-
-def parse_lightnovelup_chapter_page(html: str, url: str) -> tuple[ChapterReport, ChapterReport | None]:
-    """Validate one chapter page and its site-provided canonical Next link."""
-    candidate = lightnovelup_candidate_from_href(url, url)
-    if not candidate:
-        raise ParseError("cursor_noncanonical")
-    soup = BeautifulSoup(html, "html.parser")
-    report = _lightnovelup_page_report(soup, candidate)
-    next_markers = [
-        anchor for anchor in soup.find_all("a", href=True)
-        if re.fullmatch(r"\s*Next(?:\s+Chapter)?\s*", anchor.get_text(" ", strip=True), re.IGNORECASE)
-    ]
-    next_candidate = None
-    if next_markers:
-        destinations: dict[tuple[int, str], ChapterReport] = {}
-        categories: dict[str, int] = {}
-        canonical_count = 0
-        for marker in next_markers:
-            validated = lightnovelup_candidate_from_href(marker.get("href"), candidate.url)
-            if validated:
-                destinations[(validated.chapter, validated.url)] = validated
-                canonical_count += 1
-            else:
-                category = _lightnovelup_rejected_href_category(marker.get("href"), candidate.url)
-                categories[category] = categories.get(category, 0) + 1
-        counters = {"next_links": len(next_markers), "canonical_candidates": canonical_count,
-                    "ambiguous": int(len(destinations) > 1),
-                    "nonmonotonic": int(any(item.chapter != candidate.chapter + 1 for item in destinations.values())),
-                    "challenge_indicators": int(challenge_suspected(soup)),
-                    **{"rejected_" + key: value for key, value in categories.items()}}
-        # Unrelated pagination controls must not override an unambiguous chapter
-        # link. Only title-only chapter navigation permits the independent API fallback.
-        if not destinations:
-            summary = ",".join(f"{category}={min(categories[category], 9999)}" for category in sorted(categories))
-            raise ParseError(f"next_link_noncanonical[categories={summary};count={min(len(next_markers), 9999)}]", counters=counters)
-        if len(destinations) != 1:
-            raise ParseError("next_link_ambiguous", counters=counters)
-        next_candidate = next(iter(destinations.values()))
-        if next_candidate.chapter != candidate.chapter + 1:
-            counters["nonmonotonic"] = 1
-            raise ParseError("next_link_non_monotonic", counters=counters)
-    return report, next_candidate
-
-
-def _lightnovelup_page_report(soup: BeautifulSoup, candidate: ChapterReport) -> ChapterReport:
-    """Require a numbered heading and reject conflicting headings/document titles."""
-    possible_titles: list[str] = []
-    heading_confirmed = False
-    for heading in soup.find_all(["h1", "h2"]):
-        text = re.sub(r"\s+", " ", heading.get_text(" ", strip=True)).strip()
-        match = re.fullmatch(r"(?:Shadow\s+Slave\s*[-–—:]?\s*)?Chapter\s+(\d{1,5})\b(.*)", text, re.IGNORECASE)
-        if not match:
-            if parse_chapter_text(text):
-                raise ParseError("chapter_heading_conflict")
-            continue
-        if int(match.group(1)) != candidate.chapter:
-            raise ParseError("chapter_heading_conflict")
-        heading_confirmed = True
-        remainder = re.sub(r"^[\s:;,\.\-–—|]+", "", match.group(2))
-        possible = clean_title(remainder)
-        if possible and not is_non_chapter_title(possible):
-            possible_titles.append(possible)
-    if not heading_confirmed:
-        raise ParseError("chapter_page_confirmation_failed")
-    if len({_normalized_title(title) for title in possible_titles}) > 1:
-        raise ParseError("chapter_heading_conflict")
-    for heading in soup.find_all("title"):
-        numbered = parse_chapter_text(heading.get_text(" ", strip=True))
-        if numbered and numbered[0] != candidate.chapter:
-            raise ParseError("chapter_heading_conflict")
-    return ChapterReport("", candidate.chapter, possible_titles[0] if possible_titles else None, candidate.url)
-
-
-def _check_lightnovelup_api(
-    site: SourceConfig, expected_chapter: int | None, *, newer_than: int | None = None,
-) -> ChapterReport | None:
-    """Read one observed API page; chapter_index and counts are never number evidence."""
-    api_url = "https://lightnovelup.com/api/v1/novels/1883008"
-    data = _fetch_source_json(site, api_url)
-    novel = data.get("novel") if isinstance(data, dict) else None
-    if (not isinstance(novel, dict) or type(novel.get("id")) is not int
-            or novel["id"] != 1883008 or novel.get("title") != "Shadow Slave"
-            or novel.get("permalink") != "https://lightnovelup.com/novel/shadow-slave/"):
-        raise ParseError("series_identity_mismatch")
-    listing = _fetch_source_json(site, api_url + "/chapters")
-    items = listing.get("items") if isinstance(listing, dict) else None
-    if not isinstance(items, list) or len(items) > 50:
-        raise ParseError("chapter_data_invalid")
-    candidates: dict[int, ChapterReport] = {}
-    for item in items:
-        if not isinstance(item, dict) or item.get("post_id") != "1883008":
-            raise ParseError("series_identity_mismatch")
-        slug, name = item.get("chapter_slug"), item.get("chapter_name")
-        if not isinstance(slug, str) or not isinstance(name, str):
-            raise ParseError("chapter_data_invalid")
-        candidate = lightnovelup_candidate_from_href(site.url + slug + "/", site.url)
-        # Ignore title-only and other noncanonical records without guessing a number.
-        if candidate is None:
-            continue
-        numbered = re.fullmatch(r"Chapter\s+([0-9]{1,5})\b\s*(.*)", name.strip(), re.IGNORECASE)
-        if (not numbered or int(numbered.group(1)) != candidate.chapter
-                or chapter_validity_category(candidate.chapter) is not None):
-            raise ParseError("chapter_heading_conflict")
-        if candidate.chapter in candidates:
-            raise ParseError("chapter_candidates_ambiguous")
-        candidates[candidate.chapter] = ChapterReport("", candidate.chapter, clean_title(numbered.group(2)), candidate.url)
-    if not candidates:
-        raise ParseError("chapter_data_missing")
-    if expected_chapter is not None and chapter_validity_category(expected_chapter) is not None:
-        raise ParseError("chapter_data_invalid")
-    selected = candidates.get(expected_chapter) or candidates[max(candidates)]
-    # Optional catch-up needs no page request for an unchanged or older record.
-    # Validate the entire listing first, including duplicates and contradictions.
-    if newer_than is not None and selected.chapter <= newer_than:
-        return None
-    soup = BeautifulSoup(_fetch_source_html(site, selected.url, allow_redirects=False), "html.parser")
-    # The observed numbered reader page identifies the series in its H1 and
-    # canonical link, and contains paragraph text within the reading container.
-    headings = soup.select("h1#chapter-heading")
-    canonical = soup.select('link[rel="canonical"]')
-    if (len(headings) != 1 or not re.fullmatch(
-            rf"Shadow\s+Slave\s*-\s*Chapter\s+{selected.chapter}\b.*",
-            headings[0].get_text(" ", strip=True), re.IGNORECASE)
-            or len(canonical) != 1 or canonical[0].get("href") != selected.url
-            or challenge_suspected(soup)
-            or not any(p.get_text(" ", strip=True) for p in soup.select(".reading-content p"))):
-        raise ParseError("chapter_page_confirmation_failed")
-    report = _lightnovelup_page_report(soup, selected)
-    if selected.title and _normalized_title(report.title) != _normalized_title(selected.title):
-        raise ParseError("chapter_heading_conflict")
-    return ChapterReport(site.name, report.chapter, report.title, report.url,
-                         "LightNovelUp:verified_api_record", report.chapter, report.url)
-
-
-@_with_response_diagnostics
-def check_lightnovelup(
-    site: SourceConfig, position: dict[str, Any] | None = None, expected_chapter: int | None = None,
-) -> ChapterReport:
-    """Walk bounded canonical Next links from a validated cursor or bootstrap anchor."""
-    start_url = LIGHTNOVELUP_BOOTSTRAP_URL
-    if position is not None:
-        chapter = position.get("chapter")
-        url = position.get("url")
-        candidate = lightnovelup_candidate_from_href(url, site.url)
-        if not candidate or candidate.chapter != chapter:
-            raise ParseError("cursor_noncanonical")
-        start_url = candidate.url
-
-    current_url = start_url
-    visited: set[str] = set()
-    for _ in range(LIGHTNOVELUP_MAX_TRAVERSAL):
-        if current_url in visited:
-            raise ParseError("navigation_cycle")
-        visited.add(current_url)
-        try:
-            report, next_candidate = parse_lightnovelup_chapter_page(_fetch_source_html(site, current_url), current_url)
-        except ParseError as exc:
-            if exc.code != "PARSE_NONCANONICAL_NEXT" or not exc.counters.get("rejected_title_only_chapter_path"):
-                raise
-            return _check_lightnovelup_api(site, expected_chapter)
-        if next_candidate is None:
-            if (chapter_validity_category(expected_chapter) is None
-                    and expected_chapter > report.chapter):
-                # Navigation already verified this position. A failed optional
-                # lookup must not discard it or suppress an otherwise healthy source.
-                try:
-                    recovered = _check_lightnovelup_api(site, expected_chapter, newer_than=report.chapter)
-                except Exception as exc:
-                    logging.warning("Optional public source catch-up retained verified position: %s",
-                                    diagnostic_summary(site, exc))
-                else:
-                    if recovered is not None:
-                        return recovered
-            return ChapterReport(
-                site.name, report.chapter, report.title, report.url,
-                "LightNovelUp:canonical_navigation", report.chapter, report.url,
-            )
-        if next_candidate.url in visited:
-            raise ParseError("navigation_cycle")
-        current_url = next_candidate.url
-    raise ParseError("traversal_limit")
-
-
 def _inactive_visible(node: Any) -> bool:
     """Exclude non-content and explicitly hidden evidence without mutating the DOM."""
     return all(
@@ -1989,8 +1762,6 @@ def iter_public_candidates(
         return parse_shadowslave_space_candidates(soup, base_url)
     if site_name == "FreeWebNovel":
         return parse_freewebnovel_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
-    if site_name == "LightNovelUp":
-        return []
     if site_name == "NovelFull":
         return parse_novelfull_candidates(soup, base_url, expected_chapter, expected_title, previous_chapter, previous_title)
     if site_name == "ReadNovelFull":
@@ -2090,8 +1861,6 @@ def _safe_success_url(site: SourceConfig, report: ChapterReport) -> str | None:
         return None
     if site.name == "Chikari":
         candidate = chikari_candidate_from_href(url, site.url)
-    elif site.name == "LightNovelUp":
-        candidate = lightnovelup_candidate_from_href(url, site.url)
     elif site.name == "Telegram":
         candidate = parse_telegram_telegra_link(url)
     elif site.name == "Rentry":
@@ -2299,7 +2068,7 @@ def check_rentry(
 
 @_with_response_diagnostics
 def check_public_site(
-    site: SourceConfig, source_position: dict[str, Any] | None = None,
+    site: SourceConfig,
     expected_chapter: int | None = None, expected_title: str | None = None,
     previous_chapter: int | None = None, previous_title: str | None = None,
 ) -> ChapterReport | None:
@@ -2310,10 +2079,6 @@ def check_public_site(
         report = check_rentry(site, expected_chapter, expected_title)
         if report is not None:
             _log_public_success(site, report)
-        return report
-    if site.name == "LightNovelUp":
-        report = check_lightnovelup(site, source_position, expected_chapter)
-        _log_public_success(site, report)
         return report
     soup = BeautifulSoup(_fetch_source_html(site), "html.parser")
     raw_candidates = iter_public_candidates(soup, site.url, site.name, expected_chapter, expected_title,

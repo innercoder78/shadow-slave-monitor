@@ -807,7 +807,6 @@ class EmergencyStateTests(unittest.TestCase):
                                   (initialized(), active()), (active(), initialized())):
             with self.subTest(current=current["webnovel_failures"], artifact=artifact["webnovel_failures"]):
                 self.assertFalse(state_writer.monitor_artifact_superseded(current, artifact))
-                self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, artifact))
                 with TemporaryDirectory() as tmp:
                     current_path, artifact_path = Path(tmp) / "current", Path(tmp) / "artifact"
                     current_path.write_text(json.dumps(current))
@@ -844,7 +843,6 @@ class EmergencyStateTests(unittest.TestCase):
             self.assertEqual(validate_state(current), current)
             self.assertEqual(validate_state(artifact), artifact)
             self.assertFalse(state_writer.monitor_artifact_superseded(current, artifact))
-            self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, artifact))
 
     def test_watchdog_labels_degraded_and_failed_emergency_runs_distinctly(self):
         now = START.isoformat()

@@ -1,7 +1,6 @@
 """Read-only manual check of one exact configured public source name."""
 from __future__ import annotations
 
-import copy
 import logging
 import os
 from pathlib import Path
@@ -26,11 +25,10 @@ def diagnose_source(name: str, *, state_path: Path = STATE_PATH) -> int:
     except (StateError, OSError):
         logging.error("Diagnostic setup failed: code=DIAGNOSTIC_STATE_ERROR stage=setup")
         return 2
-    position = copy.deepcopy(state.get("source_positions", {}).get(site.name))
     expected = parse_int(state.get("target_chapter")) if state.get("mode") == "watch_free_sites" else None
     try:
         report = check_public_site(
-            site, position, expected, state.get("target_title") if expected is not None else None,
+            site, expected, state.get("target_title") if expected is not None else None,
             parse_int(state.get("latest_seen")) if expected is not None else None,
             state.get("latest_title") if expected is not None else None,
         )

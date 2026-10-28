@@ -25,12 +25,6 @@ PARSE_CODES = {
     "chapter_data_missing": "PARSE_NO_CHAPTER_LINKS",
     "chapter_candidates_ambiguous": "PARSE_AMBIGUOUS_CHAPTER",
     "series_identity_mismatch": "PARSE_CHAPTER_MISMATCH",
-    "cursor_noncanonical": "PARSE_NONCANONICAL_CURSOR",
-    "next_link_noncanonical": "PARSE_NONCANONICAL_NEXT",
-    "next_link_ambiguous": "PARSE_AMBIGUOUS_NEXT",
-    "next_link_non_monotonic": "PARSE_NONMONOTONIC_NEXT",
-    "navigation_cycle": "PARSE_NAVIGATION_CYCLE",
-    "traversal_limit": "PARSE_TRAVERSAL_LIMIT",
     "chapter_heading_conflict": "PARSE_CHAPTER_MISMATCH",
     "chapter_page_confirmation_failed": "PARSE_CHAPTER_MISMATCH",
     "WebNovel parsed chapter is outside the trusted range": "PARSE_CHAPTER_INVALID",
@@ -38,15 +32,9 @@ PARSE_CODES = {
     "chapter heading did not confirm expected target title": "PARSE_CHAPTER_MISMATCH",
     "Could not find WebNovel Latest Release chapter in catalog page.": "PARSE_NO_CHAPTER_LINKS",
 }
-REJECTION_CATEGORIES = frozenset({
-    "unsafe_or_malformed", "encoded_path", "unexpected_scheme", "unexpected_authority",
-    "query_fragment_or_params", "unrelated_path", "numeric_only_chapter_path",
-    "title_only_chapter_path", "malformed_chapter_path", "recognized_series_nonchapter_path",
-})
 COUNTER_NAMES = frozenset({
     "links_inspected", "series_path_links", "canonical_chapter_links", "invalid_chapters",
-    "next_links", "canonical_candidates", "ambiguous", "nonmonotonic", "challenge_indicators",
-    *("rejected_" + category for category in REJECTION_CATEGORIES),
+    "challenge_indicators",
 })
 MAX_COUNTER = 9999
 
@@ -104,8 +92,6 @@ def challenge_suspected(soup: BeautifulSoup) -> bool:
 
 
 def parser_code(reason: str) -> str:
-    if reason.startswith("next_link_noncanonical[categories="):
-        return "PARSE_NONCANONICAL_NEXT"
     if reason.startswith("Could not find any chapter links on "):
         return "PARSE_NO_CHAPTER_LINKS"
     return PARSE_CODES.get(reason, "PARSE_OTHER")
@@ -142,15 +128,10 @@ def diagnostic_summary(source: SourceConfig, exc: BaseException) -> str:
                 reason = raw_reason
             elif code == "PARSE_NO_CHAPTER_LINKS":
                 reason = "no_trustworthy_chapter_links"
-            elif code == "PARSE_NONCANONICAL_NEXT":
-                reason = "next_link_noncanonical"
         if code == "PARSE_NO_CHAPTER_LINKS" and getattr(exc, "code", None) == "PARSE_CHAPTER_INVALID":
             code, reason = "PARSE_CHAPTER_INVALID", "chapter_outside_trusted_range"
         if code in {"PARSE_CHAPTER_MISMATCH", "PARSE_CHAPTER_INVALID", "PARSE_AMBIGUOUS_CHAPTER"}:
             stage = "chapter_validation"
-        elif code in {"PARSE_NONCANONICAL_CURSOR", "PARSE_NONCANONICAL_NEXT", "PARSE_AMBIGUOUS_NEXT",
-                      "PARSE_NONMONOTONIC_NEXT", "PARSE_NAVIGATION_CYCLE", "PARSE_TRAVERSAL_LIMIT"}:
-            stage = "navigation"
         if code == "PARSE_NO_CHAPTER_LINKS" and getattr(exc, "challenge", False) is True:
             code, reason = "PAGE_CHALLENGE_SUSPECTED", "recognizable_challenge_indicators"
     if status is None:

@@ -24,17 +24,16 @@ class NewSourceConfigurationTests(unittest.TestCase):
     def test_exact_configs_are_appended_without_reordering_existing_sources(self) -> None:
         validate_source_config()
         names = [site.name for site in PUBLIC_SITES]
-        self.assertEqual(names[10:12], ["ReadNovelFull", "FreeWebNovel.net"])
-        self.assertEqual(names[:10], [
+        self.assertEqual(names[9:11], ["ReadNovelFull", "FreeWebNovel.net"])
+        self.assertEqual(names[:9], [
             "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
             "Novel Phoenix", "NovelPing", "SSNovel", "NovelFull",
-            "LightNovelUp",
         ])
         expected = {
             "ReadNovelFull": SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
             "FreeWebNovel.net": SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
         }
-        self.assertEqual({site.name: site for site in PUBLIC_SITES[10:12]}, expected)
+        self.assertEqual({site.name: site for site in PUBLIC_SITES[9:11]}, expected)
         self.assertEqual([PUBLIC_SITE_ORDER[name] for name in names], list(range(len(names))))
 
     def test_com_and_net_are_distinct_config_and_failure_identities(self) -> None:
@@ -94,11 +93,11 @@ class ReadNovelFullTests(unittest.TestCase):
         listing = '<section><h3>Latest chapter</h3><a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a></section>'
         self.assertEqual(self.parse(listing), [])
         with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Entertaining Guest</h1>']):
-            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
+            report = check_public_site(self.source, 3189, "Entertaining Guest")
         self.assertEqual((report.chapter, report.title), (3189, "Entertaining Guest"))
         with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing, '<h1>Chapter Wrong Guest</h1>']):
             with self.assertRaises(ParseError):
-                check_public_site(self.source, None, 3189, "Entertaining Guest")
+                check_public_site(self.source, 3189, "Entertaining Guest")
 
     def test_title_only_latest_rejects_wrong_target_and_ambiguity(self) -> None:
         link = '<a href="/shadow-slave/chapter-entertaining-guest.html">Chapter Entertaining Guest</a>'
@@ -151,7 +150,7 @@ class FreeWebNovelNetTests(unittest.TestCase):
             <a href="/shadow-slave/chapter-{predecessor}-lost-soul.html">Chapter {predecessor} Lost Soul</a></section>'''
         self.assertEqual(max(c.chapter for c in self.parse(listing())), 3188)
         with patch("shadow_slave_monitor.parsers.fetch_html", side_effect=[listing(), '<h2>Chapter Entertaining Guest</h2>']):
-            report = check_public_site(self.source, None, 3189, "Entertaining Guest")
+            report = check_public_site(self.source, 3189, "Entertaining Guest")
         self.assertEqual(report.chapter, 3189)
         rejected = parse_freewebnovel_net_candidates(
             BeautifulSoup(listing(3187), "html.parser"), self.source.url, 3189, "Entertaining Guest")
@@ -166,7 +165,7 @@ class FreeWebNovelNetTests(unittest.TestCase):
                 self.assertFalse(any(c.chapter == 3189 for c in reports))
         with patch("shadow_slave_monitor.parsers.fetch_html",
                    side_effect=[listing(), "<h2>Chapter Wrong Title</h2>"]), self.assertRaises(ParseError):
-            check_public_site(self.source, None, 3189, "Entertaining Guest")
+            check_public_site(self.source, 3189, "Entertaining Guest")
 
     def test_target_context_accepts_numbered_first_latest_entry(self) -> None:
         html = '''
@@ -239,7 +238,7 @@ class NewSourceIntegrationTests(unittest.TestCase):
         self.assertIn("optional public sources failed", result.degraded_reasons[0])
 
     def test_notifications_use_configured_general_urls(self) -> None:
-        for site in PUBLIC_SITES[10:12]:
+        for site in PUBLIC_SITES[9:11]:
             report = ChapterReport(site.name, 3186, "Title", "https://chapter.invalid/private")
             body = notification_body(3185, report)
             self.assertIn(f"{site.name} [{site.url}]", body)
