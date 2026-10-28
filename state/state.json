@@ -1,13 +1,13 @@
 {
-  "latest_seen": 3227,
-  "latest_title": "A Soul and a Shadow Walk Into a Bar",
-  "latest_url": "https://chikari.moe/novels/shadow-slave/3227",
+  "latest_seen": 3228,
+  "latest_title": "Abandoned Throne",
+  "latest_url": "https://rentry.co/3228ss",
   "latest_webnovel": 3228,
   "latest_webnovel_title": "Abandoned Throne",
-  "mode": "watch_free_sites",
-  "target_chapter": 3228,
-  "target_title": "Abandoned Throne",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 8,
@@ -22,5 +22,5 @@
   "webnovel_success_cycle": 1494294,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-10-28T02:00:25+00:00"
+  "updated_at": "2026-10-28T02:10:29+00:00"
 }
