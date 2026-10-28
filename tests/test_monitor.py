@@ -31,7 +31,6 @@ def base_state() -> dict:
         "pending_notification": None,
         "public_source_failures": {},
         "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
-        "source_positions": {},
         "updated_at": "2026-06-11T00:00:00+00:00",
     }
 
@@ -68,7 +67,7 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
         report = ChapterReport("Chikari", 3182, "Plight of Gods",
                                "https://chikari.moe/novels/shadow-slave/3182")
 
-        def check(site: SourceConfig, source_position=None) -> ChapterReport:
+        def check(site: SourceConfig) -> ChapterReport:
             if site is failed:
                 raise RuntimeError("untrusted template")
             return report
@@ -83,18 +82,18 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
 
     def test_new_sources_participate_in_order_and_degrade_independently(self) -> None:
         readnovelfull = next(site for site in PUBLIC_SITES if site.name == "ReadNovelFull")
-        lightnovelup = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
-        report = ChapterReport("LightNovelUp", 3174, "Tatal's Basilisk",
-                               "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk")
+        novelfull = next(site for site in PUBLIC_SITES if site.name == "NovelFull")
+        report = ChapterReport("NovelFull", 3174, "Tatal's Basilisk",
+                               "https://novelfull.com/shadow-slave/chapter-3174.html")
 
-        def check(site: SourceConfig, source_position=None) -> ChapterReport:
+        def check(site: SourceConfig) -> ChapterReport:
             if site.name == "ReadNovelFull":
                 raise RuntimeError("template changed")
             return report
 
         result = monitor.RunResult()
         failures: dict[str, int] = {}
-        with patch.object(monitor, "PUBLIC_SITES", (readnovelfull, lightnovelup)), \
+        with patch.object(monitor, "PUBLIC_SITES", (readnovelfull, novelfull)), \
              patch.object(monitor, "check_public_site", side_effect=check):
             reports = monitor.check_public_sites(result, failures)
 
@@ -102,31 +101,6 @@ class PublicSourceFailureLoggingTests(unittest.TestCase):
         self.assertEqual(failures, {"ReadNovelFull": 1})
         self.assertEqual(result.degraded_reasons, ["optional public sources failed: ReadNovelFull"])
 
-    def test_lightnovelup_position_is_updated_only_in_controlling_thread(self) -> None:
-        source = next(site for site in PUBLIC_SITES if site.name == "LightNovelUp")
-        old = {"chapter": 3173, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/"}
-        positions = {"LightNovelUp": dict(old)}
-        report = ChapterReport(
-            "LightNovelUp", 3174, "Tatal’s Basilisk",
-            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/",
-            "LightNovelUp:canonical_navigation", 3174,
-            "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/",
-        )
-
-        def check(site: SourceConfig, supplied: dict) -> ChapterReport:
-            self.assertIsNot(supplied, positions["LightNovelUp"])
-            self.assertEqual(supplied, old)
-            return report
-
-        with patch.object(monitor, "PUBLIC_SITES", (source,)), \
-             patch.object(monitor, "check_public_site", side_effect=check):
-            self.assertEqual(monitor.check_public_sites(monitor.RunResult(), {}, positions), [report])
-        self.assertEqual(positions["LightNovelUp"], {"chapter": 3174, "url": report.position_url})
-
-        with patch.object(monitor, "PUBLIC_SITES", (source,)), \
-             patch.object(monitor, "check_public_site", return_value=report):
-            monitor.check_public_sites(monitor.RunResult(), {}, positions)
-        self.assertEqual(positions["LightNovelUp"], {"chapter": 3174, "url": report.position_url})
 
     def test_http_failure_logs_sanitized_diagnostics_and_degrades(self) -> None:
         failed = SourceConfig("Failed", "https://example.com/private?token=secret", True, ("example.com",))
@@ -496,7 +470,7 @@ class WatchFreeSitesTests(unittest.TestCase):
         with patch.object(monitor, "check_public_sites", return_value=[report]) as check_public_sites, \
              patch.object(monitor, "send_new_chapter") as send_new_chapter:
             run_main_with_state(state)
-        self.assertEqual(check_public_sites.call_args.args[3:], (11, "Chapter Eleven", 10, "Chapter Ten"))
+        self.assertEqual(check_public_sites.call_args.args[2:], (11, "Chapter Eleven", 10, "Chapter Ten"))
         send_new_chapter.assert_called_once()
         self.assertEqual((state["latest_seen"], state["mode"]), (11, "watch_webnovel"))
 
@@ -548,26 +522,6 @@ class PendingNotificationTests(unittest.TestCase):
 
 
 class StateMigrationTests(unittest.TestCase):
-    def test_missing_source_positions_migrates_to_empty_mapping(self) -> None:
-        state = base_state()
-        del state["source_positions"]
-        self.assertEqual(validate_state(state)["source_positions"], {})
-
-    def test_source_positions_require_recognized_source_and_canonical_matching_url(self) -> None:
-        invalid_positions = (
-            [],
-            {"Unknown": {"chapter": 3174, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-title/"}},
-            {"LightNovelUp": {"chapter": 3174}},
-            {"LightNovelUp": {"chapter": 3174, "url": "https://evil.example/novel/shadow-slave/chapter-3174-title/"}},
-            {"LightNovelUp": {"chapter": 3174, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3173-title/"}},
-            {"LightNovelUp": {"chapter": 3174, "url": "https://lightnovelup.com:443/novel/shadow-slave/chapter-3174-title/"}},
-        )
-        for positions in invalid_positions:
-            state = base_state()
-            state["source_positions"] = positions
-            with self.subTest(positions=positions), self.assertRaises(StateError):
-                validate_state(state)
-
     def test_missing_public_source_failures_migrates_to_empty_mapping(self) -> None:
         state = base_state()
         del state["public_source_failures"]

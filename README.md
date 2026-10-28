@@ -74,7 +74,7 @@ In **Actions**, select **Public source diagnostics**, click **Run workflow**, ch
 repository branch to check, and enter the exact enabled public source name from
 `src/shadow_slave_monitor/config.py` (including spaces and capitalization). The workflow
 uses that selected checkout and makes a real, read-only source check, even when normal
-monitor checks are suppressed. It reads the existing cursor and target context without
+monitor checks are suppressed. It reads the existing target context without
 saving state, updating failure counters, or sending ntfy notifications. No notification
 secrets or write permissions are required.
 
@@ -89,9 +89,8 @@ Read the `Diagnostic outcome` line in the check step's logs:
 - `HTTP_UNSAFE_REDIRECT` and `HTTP_UNSUPPORTED_CONTENT_TYPE` identify HTTP policy failures.
 - `PAGE_CHALLENGE_SUSPECTED` means an unusable page contained specific challenge
   indicators. This is evidence of a suspected challenge, not proof of bot blocking.
-- `PARSE_NO_CHAPTER_LINKS`, `PARSE_NONCANONICAL_NEXT`, `PARSE_AMBIGUOUS_NEXT`,
-  `PARSE_NONMONOTONIC_NEXT`, `PARSE_CHAPTER_MISMATCH`, and `PARSE_CHAPTER_INVALID`
-  describe missing trustworthy links, rejected navigation, or chapter validation failures.
+- `PARSE_NO_CHAPTER_LINKS`, `PARSE_CHAPTER_MISMATCH`, and `PARSE_CHAPTER_INVALID`
+  describe missing trustworthy links or chapter validation failures.
   `PARSE_OTHER` covers unknown reasons from an expected parser failure;
   `CHECK_INTERNAL_ERROR` identifies an unexpected internal exception. A parser error
   alone does not establish a site redesign or blocking.
@@ -105,7 +104,7 @@ Expected source failures are diagnostic outcomes and leave the workflow successf
 invalid source names, invalid state, dependency/setup failures, or internal errors fail
 it. This workflow is independent of the scheduled monitor and watchdog.
 
-The 11 enabled public sources retain their configuration and relative priority.
+The 10 enabled public sources retain their configuration and relative priority.
 The two disabled references are excluded from scheduled checks, recovery probes,
 and enabled-source manual diagnostics; their parsers are available only through
 the isolated `inactive_sources` diagnostics. Loading older state can discard a
@@ -113,6 +112,13 @@ validated formerly enabled reference counter, but unconfigured failure-counter
 names fail closed at every revision and require explicit operator reconciliation.
 Revision 7 and current-revision enabled counters are preserved; older parser
 revisions retain their existing reset behavior. Chapter history, pending delivery,
-authority tracking, source cursors, and emergency state are preserved. Pending
+authority tracking and emergency state are preserved. Pending
 notifications retain unknown source attribution without exposing stored chapter
 URLs; configured general URLs and target-specific Rentry links remain available.
+
+The obsolete chapter-navigation schema is retired through a validated one-time
+migration, with unrelated fields preserved. The previous inventory is read as data
+from an immutable Git revision; malformed or unknown historical identities fail
+closed. Valid historical artifacts are normalized before writes and cannot restore
+retired data. See [state schema retirement](docs/state-schema-retirement.md) for
+persistence, history availability, and concurrent production state updates.

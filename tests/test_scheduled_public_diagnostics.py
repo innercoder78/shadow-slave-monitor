@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / '.github/workflows/scheduled-public-diagnostics.yml'
 NAMES = ('Novel Phoenix', 'NovelPing')
 ENABLED = ('Chikari', 'Telegram', 'Novel Buddy', 'ShadowSlave.Space', 'FreeWebNovel',
-           'SSNovel', 'NovelFull', 'LightNovelUp', 'ReadNovelFull', 'FreeWebNovel.net', 'Rentry')
+           'SSNovel', 'NovelFull', 'ReadNovelFull', 'FreeWebNovel.net', 'Rentry')
 
 
 def document(site, *, bad_host=False):

@@ -1,11 +1,13 @@
 """State loading, validation, migration, and atomic persistence."""
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import logging
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,9 @@ from shadow_slave_monitor.emergency import telegram_emergency_evidence_url
 
 VALID_MODES = {"watch_webnovel", "watch_free_sites"}
 LEGACY_TIMING_FIELDS = {"last_webnovel_check", "webnovel_skip_count"}
+# Immutable reference for the previous monitor schema. Read data from Git;
+# never import or execute historical Python code.
+LEGACY_MONITOR_SCHEMA_REF = "d98fa84891c7b571f824d7c5d18c1c8800cedcd4"
 
 MONITOR_STATE_FIELDS = {
     "latest_seen",
@@ -31,7 +36,6 @@ MONITOR_STATE_FIELDS = {
     "pending_notification",
     "public_source_failures",
     "public_source_failure_revision",
-    "source_positions",
     "webnovel_failures",
     "webnovel_failure_cycle",
     "webnovel_success_cycle",
@@ -63,7 +67,6 @@ def validate_source_config() -> None:
         "Novel Buddy": True,
         "ShadowSlave.Space": True,
         "FreeWebNovel": True,
-        "LightNovelUp": True,
         "Novel Phoenix": False,
         "NovelPing": False,
         "SSNovel": True,
@@ -101,6 +104,94 @@ def validate_watchdog_state(data: dict[str, Any]) -> dict[str, Any]:
 class StateError(RuntimeError):
     pass
 
+
+class LoadedState(dict[str, Any]):
+    """Operational state with a nonserialized, read-only-load migration signal."""
+
+    needs_persistence: bool = False
+
+
+def historical_public_inventory() -> dict[str, tuple[str, bool, tuple[str, ...]]]:
+    """Recover the trusted previous inventory without a compatibility alias."""
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{LEGACY_MONITOR_SCHEMA_REF}:src/shadow_slave_monitor/config.py"],
+            cwd=Path(__file__).resolve().parents[2], check=True, capture_output=True,
+            encoding="utf-8", timeout=10,
+        )
+        tree = ast.parse(result.stdout)
+        assignment = next(node for node in tree.body if isinstance(node, ast.AnnAssign)
+                          and isinstance(node.target, ast.Name) and node.target.id == "PUBLIC_SITES")
+        if not isinstance(assignment.value, ast.Tuple):
+            raise ValueError("invalid inventory")
+        inventory = {}
+        for node in assignment.value.elts:
+            if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name)
+                    or node.func.id != "SourceConfig" or len(node.args) != 4 or node.keywords):
+                raise ValueError("invalid inventory entry")
+            name, url, enabled, hosts = (ast.literal_eval(arg) for arg in node.args)
+            if (not isinstance(name, str) or name in inventory or not isinstance(url, str)
+                    or type(enabled) is not bool or not isinstance(hosts, tuple)
+                    or not hosts or any(not isinstance(host, str) for host in hosts)):
+                raise ValueError("invalid inventory fields")
+            inventory[name] = (url, enabled, hosts)
+        return inventory
+    except (OSError, subprocess.SubprocessError, SyntaxError, ValueError, StopIteration) as exc:
+        raise StateError("trusted historical state schema is unavailable; refusing migration") from exc
+
+
+def retire_legacy_navigation(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate the old inventory before deleting only retired operational data."""
+    failures = data.get("public_source_failures", {})
+    configured = {site.name for site in PUBLIC_SITES}
+    unknown_failures = set(failures) - configured if isinstance(failures, dict) else set()
+    if "source_positions" not in data and not unknown_failures:
+        return data
+    revision = data.get("public_source_failure_revision")
+    if revision is not None and (type(revision) is not int or not 1 <= revision <= PUBLIC_SOURCE_PARSER_REVISION):
+        raise StateError("legacy navigation state has an incompatible schema revision")
+    historical = historical_public_inventory()
+    current = {site.name: (site.url, site.enabled, site.allowed_hosts) for site in PUBLIC_SITES}
+    if any(historical.get(name) != config for name, config in current.items()):
+        raise StateError("current inventory disagrees with trusted historical state schema")
+    retired = {name: config for name, config in historical.items() if name not in current}
+    if len(retired) != 1 or not all(config[1] for config in retired.values()):
+        raise StateError("historical inventory retirement is ambiguous")
+    positions = data.get("source_positions", {})
+    if not isinstance(positions, dict):
+        raise StateError("legacy navigation state must be an object")
+    for name, position in positions.items():
+        if name not in retired or not isinstance(position, dict) or set(position) != {"chapter", "url"}:
+            raise StateError("legacy navigation state contains an unknown source or invalid fields")
+        chapter = valid_chapter(position["chapter"], allow_none=False)
+        url = position["url"]
+        if not isinstance(url, str) or "%" in url or any(ord(char) < 33 for char in url):
+            raise StateError("legacy navigation state contains an invalid URL")
+        try:
+            parsed = urlparse(url)
+            base = urlparse(retired[name][0])
+            host = (parsed.hostname or "").casefold()
+        except ValueError as exc:
+            raise StateError("legacy navigation state contains an invalid URL") from exc
+        # This is the previous schema's numbered chapter-slug shape, scoped to
+        # the series path and hosts read from the immutable inventory.
+        pattern = re.escape(base.path.rstrip("/")) + r"/chapter-([0-9]{1,5})-[a-z0-9]+(?:-[a-z0-9]+)*/?"
+        match = re.fullmatch(pattern, parsed.path, re.IGNORECASE)
+        if (parsed.scheme != "https" or host not in retired[name][2]
+                or parsed.netloc.casefold() != host or parsed.params or parsed.query or parsed.fragment
+                or not match or int(match.group(1)) != chapter):
+            raise StateError("legacy navigation state contains a noncanonical URL")
+    clean = copy.deepcopy(data)
+    clean.pop("source_positions", None)
+    if isinstance(failures, dict):
+        for name in retired:
+            if name in failures:
+                count = failures[name]
+                if type(count) is not int or not 1 <= count <= PUBLIC_SITE_CONSECUTIVE_FAILURE_LIMIT:
+                    raise StateError("retired failure count is invalid")
+                del clean["public_source_failures"][name]
+    return clean
+
 def parse_int(value: Any) -> int | None:
     if isinstance(value, bool):
         return None
@@ -132,7 +223,6 @@ def initial_state() -> dict[str, Any]:
         "pending_notification": None,
         "public_source_failures": {},
         "public_source_failure_revision": PUBLIC_SOURCE_PARSER_REVISION,
-        "source_positions": {},
         "webnovel_failures": 0,
         "webnovel_failure_cycle": None,
         "webnovel_success_cycle": None,
@@ -253,6 +343,7 @@ def validate_emergency_state(state: dict[str, Any]) -> None:
 
 def validate_state(data: dict[str, Any]) -> dict[str, Any]:
     validate_source_config()
+    data = retire_legacy_navigation(data)
     unknown = set(data) - MONITOR_STATE_FIELDS - LEGACY_TIMING_FIELDS
     if unknown:
         raise StateError(f"state.json contains unknown fields: {sorted(unknown)}")
@@ -311,33 +402,6 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
         clean_failures = {}
     state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
     state["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION
-    positions = state.get("source_positions")
-    if not isinstance(positions, dict):
-        raise StateError("source_positions must be an object")
-    clean_positions: dict[str, dict[str, Any]] = {}
-    for source, position in positions.items():
-        if source != "LightNovelUp" or not isinstance(position, dict) or set(position) != {"chapter", "url"}:
-            raise StateError("source_positions contains an unknown source or invalid fields")
-        chapter = valid_chapter(position.get("chapter"), allow_none=False)
-        url = position.get("url")
-        if not isinstance(url, str) or "%" in url:
-            raise StateError("source_positions contains an invalid URL")
-        try:
-            parsed = urlparse(url)
-        except ValueError as exc:
-            raise StateError("source_positions contains an invalid URL") from exc
-        host = (parsed.hostname or "").casefold()
-        match = re.fullmatch(
-            r"/novel/shadow-slave/chapter-(\d{1,5})-[a-z0-9]+(?:-[a-z0-9]+)*/?",
-            parsed.path,
-            flags=re.IGNORECASE,
-        )
-        if (parsed.scheme != "https" or host not in {"lightnovelup.com", "www.lightnovelup.com"}
-                or parsed.netloc.casefold() != host or parsed.params or parsed.query or parsed.fragment
-                or not match or int(match.group(1)) != chapter):
-            raise StateError("source_positions contains a noncanonical URL")
-        clean_positions[source] = {"chapter": chapter, "url": url}
-    state["source_positions"] = clean_positions
     return state
 
 def load_state(path: Path = STATE_PATH) -> tuple[dict[str, Any], bool]:
@@ -356,7 +420,9 @@ def load_state(path: Path = STATE_PATH) -> tuple[dict[str, Any], bool]:
         raise StateError(f"state.json is malformed JSON at line {exc.lineno} column {exc.colno}") from exc
     if not isinstance(loaded, dict):
         raise StateError("state.json must contain a JSON object")
-    state = validate_state(loaded)
+    retired = retire_legacy_navigation(loaded)
+    state = LoadedState(validate_state(retired))
+    state.needs_persistence = retired != loaded
     # A previous setup may have reached the authority but failed all public
     # checks. Resume initialization without notifying historical chapters.
     first_setup = state["latest_seen"] is None and state["pending_notification"] is None
@@ -384,7 +450,14 @@ def save_state(state: dict[str, Any], path: Path = STATE_PATH) -> None:
     if path.exists():
         existing, _ = load_state(path)
         if all(clean[key] == existing[key] for key in clean if key != "updated_at"):
-            logging.info("No operational state changes to persist.")
+            if not getattr(existing, "needs_persistence", False):
+                logging.info("No operational state changes to persist.")
+                return
+            # A quiet run still persists the one-time schema retirement. Keep
+            # its operational timestamp rather than inventing a chapter event.
+            clean["updated_at"] = existing["updated_at"]
+            atomic_write_json(path, clean)
+            logging.info("Persisted validated state schema retirement atomically.")
             return
     clean["updated_at"] = iso_now()
     atomic_write_json(path, clean)

@@ -99,7 +99,6 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("NovelPing", "https://novelping.com/book/shadow-slave", False, ("novelping.com", "www.novelping.com")),
     SourceConfig("SSNovel", "https://ssnovel.app", True, ("ssnovel.app", "www.ssnovel.app")),
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),
-    SourceConfig("LightNovelUp", "https://lightnovelup.com/novel/shadow-slave/", True, ("lightnovelup.com", "www.lightnovelup.com")),
     SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
     SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
     # Target-only verification requires authoritative title corroboration when

@@ -82,8 +82,8 @@ without the observed structure, long unrelated prose, and malformed pages remain
 errors. A page already carrying a chapter title but too little prose also remains
 an error until a corresponding unpublished template is established by evidence.
 
-Clean unavailability returns `None`, creates no report or notification, advances
-no cursor, and accumulates no failures. Checks repeat on the next scheduled run.
+Clean unavailability returns `None`, creates no report or notification,
+and accumulates no failures. Checks repeat on the next scheduled run.
 It clears a prior failure entry when checked (including a recovery probe), and
 otherwise causes no state changes or commits. Genuine errors retain existing
 failure isolation, suppression, retry, and recovery handling. The read-only

@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from shadow_slave_monitor.state_manager import initial_state, initial_watchdog_state
+from shadow_slave_monitor.state_manager import LEGACY_MONITOR_SCHEMA_REF, initial_state, initial_watchdog_state
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,40 +32,6 @@ def chdir(path: Path):
 
 
 class StateWriterValidationTests(unittest.TestCase):
-    def test_monitor_cursor_supersession_never_discards_a_newer_artifact_cursor(self) -> None:
-        current = state_writer.validate_state(json.loads((ROOT / "state" / "state.json").read_text()))
-        artifact = json.loads(json.dumps(current))
-        current["source_positions"] = {
-            "LightNovelUp": {"chapter": 3174, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"}
-        }
-        artifact["source_positions"] = {
-            "LightNovelUp": {"chapter": 3175, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3175-new-chapter/"}
-        }
-        self.assertFalse(state_writer.monitor_artifact_superseded(current, artifact))
-        self.assertTrue(state_writer.monitor_artifact_superseded(artifact, current))
-        current["public_source_failures"] = {"ReadNovelFull": 1}
-        merged = state_writer.reconcile_monitor_cursor_advancement(current, artifact)
-        self.assertEqual(merged["source_positions"], artifact["source_positions"])
-        self.assertEqual(merged["public_source_failures"], {"ReadNovelFull": 1})
-
-    def test_cursor_reconciliation_rejects_regressions_and_other_conflicts(self) -> None:
-        current = state_writer.validate_state(json.loads((ROOT / "state" / "state.json").read_text()))
-        current["source_positions"] = {
-            "LightNovelUp": {"chapter": 3175, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3175-new-chapter/"}
-        }
-        older = json.loads(json.dumps(current))
-        older["source_positions"]["LightNovelUp"] = {
-            "chapter": 3174, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/"
-        }
-        self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, older))
-
-        conflicting = json.loads(json.dumps(current))
-        conflicting["latest_webnovel"] = (current.get("latest_webnovel") or 1) + 1
-        conflicting["source_positions"]["LightNovelUp"] = {
-            "chapter": 3176, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3176-another-chapter/"
-        }
-        self.assertIsNone(state_writer.reconcile_monitor_cursor_advancement(current, conflicting))
-
     def write_metadata(self, artifact_dir: Path, state_file: str = "state/state.json", *, base_sha256: str | None = None) -> None:
         artifact_type = "monitor" if state_file == "state/state.json" else "watchdog"
         state_name = "state.json" if state_file == "state/state.json" else "watchdog_state.json"
@@ -185,6 +151,90 @@ class StateWriterValidationTests(unittest.TestCase):
 
 
 class StateWriterPersistenceTests(unittest.TestCase):
+    def legacy_production_state(self) -> dict:
+        return json.loads(subprocess.check_output(
+            ["git", "show", f"{LEGACY_MONITOR_SCHEMA_REF}:state/state.json"], cwd=ROOT, encoding="utf-8"))
+
+    def test_fresh_historical_artifact_persists_retirement_once_and_cannot_restore_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            legacy = self.legacy_production_state()
+            self.initialize_repo(repo, monitor_state=legacy)
+            state_file = "state/state.json"
+            artifact_dir = Path(tmp) / "artifact"
+            self.write_artifact(repo, artifact_dir, state_file, legacy, self.sha256(repo / state_file))
+            expected = state_writer.validate_state(legacy)
+            watchdog = (repo / "state/watchdog_state.json").read_bytes()
+            push_calls: list[list[str]] = []
+            with chdir(repo):
+                self.persist(artifact_dir, state_file, push_calls)
+                self.assertEqual(json.loads((repo / state_file).read_text(encoding="utf-8")), expected)
+                self.persist(artifact_dir, state_file, push_calls)
+            self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
+            self.assertEqual((repo / "state/watchdog_state.json").read_bytes(), watchdog)
+
+    def test_superseded_artifact_cleans_only_newer_repository_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            legacy = self.legacy_production_state()
+            self.initialize_repo(repo, monitor_state=legacy)
+            state_file = "state/state.json"
+            artifact_dir = Path(tmp) / "artifact"
+            self.write_artifact(repo, artifact_dir, state_file, legacy, self.sha256(repo / state_file))
+            # An ordinary state-only commit advances production after capture.
+            current = json.loads(json.dumps(legacy))
+            current.update(latest_seen=3229, latest_webnovel=3229, latest_title="New delivered",
+                           latest_webnovel_title="New authoritative", latest_url="https://rentry.co/3229ss",
+                           public_source_failures={"Chikari": 3}, updated_at="2026-10-28T12:00:00+00:00")
+            self.write_json(repo / state_file, current)
+            self.run_git(repo, "add", state_file)
+            self.run_git(repo, "commit", "-m", "Update state")
+            expected = state_writer.validate_state(current)
+            push_calls: list[list[str]] = []
+            with chdir(repo):
+                self.persist(artifact_dir, state_file, push_calls)
+                self.persist(artifact_dir, state_file, push_calls)
+            self.assertEqual(json.loads((repo / state_file).read_text(encoding="utf-8")), expected)
+            self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
+
+    def test_conflicting_historical_artifact_cannot_erase_newer_authority_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            repo.mkdir()
+            legacy = self.legacy_production_state()
+            current = json.loads(json.dumps(legacy))
+            current.update(webnovel_failures=1, webnovel_failure_cycle=current["webnovel_success_cycle"] + 1)
+            self.initialize_repo(repo, monitor_state=current)
+            state_file = "state/state.json"
+            before = (repo / state_file).read_bytes()
+            artifact_dir = Path(tmp) / "artifact"
+            self.write_artifact(repo, artifact_dir, state_file, legacy, "0" * 64)
+            push_calls: list[list[str]] = []
+            with chdir(repo), self.assertRaisesRegex(SystemExit, "conflicts"):
+                self.persist(artifact_dir, state_file, push_calls)
+            self.assertEqual(push_calls, [])
+            self.assertEqual((repo / state_file).read_bytes(), before)
+
+    def test_legacy_cursor_artifacts_never_reenter_repository_state(self) -> None:
+        for cursor in ({"Unknown": {}}, {"Archived Source": {"chapter": 3193, "url": "https://archived.example/3193"}}):
+            with self.subTest(cursor=cursor), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp) / "repo"
+                repo.mkdir()
+                self.initialize_repo(repo)
+                state_file = "state/state.json"
+                before = (repo / state_file).read_bytes()
+                state_data = json.loads(before)
+                state_data["source_positions"] = cursor
+                artifact_dir = Path(tmp) / "artifact"
+                self.write_artifact(repo, artifact_dir, state_file, state_data, self.sha256(repo / state_file))
+                push_calls: list[list[str]] = []
+                with chdir(repo), self.assertRaisesRegex(SystemExit, "unknown source"):
+                    self.persist(artifact_dir, state_file, push_calls)
+                self.assertEqual(push_calls, [])
+                self.assertEqual((repo / state_file).read_bytes(), before)
+
     def run_git(self, repo: Path, *args: str) -> None:
         subprocess.run(["git", *args], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
@@ -373,30 +423,6 @@ class StateWriterPersistenceTests(unittest.TestCase):
             ).stdout.splitlines()
             self.assertEqual(changed, ["state/state.json"])
             self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
-
-    def test_cursor_only_advancement_commits_and_reaches_push_path(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "repo"
-            repo.mkdir()
-            self.initialize_repo(repo)
-            state_file = "state/state.json"
-            state_data = json.loads((repo / state_file).read_text(encoding="utf-8"))
-            state_data["source_positions"] = {
-                "LightNovelUp": {
-                    "chapter": 3174,
-                    "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3174-tatals-basilisk/",
-                }
-            }
-            artifact_dir = Path(tmp) / "artifact"
-            self.write_artifact(repo, artifact_dir, state_file, state_data, self.sha256(repo / state_file))
-            push_calls: list[list[str]] = []
-
-            with chdir(repo):
-                self.persist(artifact_dir, state_file, push_calls)
-
-            self.assertEqual(push_calls, [["git", "push", "origin", "HEAD:main"]])
-            persisted = json.loads((repo / state_file).read_text(encoding="utf-8"))
-            self.assertEqual(persisted["source_positions"], state_data["source_positions"])
 
 
 if __name__ == "__main__":

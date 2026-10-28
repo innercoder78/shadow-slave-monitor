@@ -29,7 +29,8 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-          fetch-depth: 1
+          # Legacy state migration validates an immutable historical inventory.
+          fetch-depth: 0
 
       - name: Synchronize checker checkout
         run: |
@@ -131,6 +132,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: main
+          # Legacy state migration validates an immutable historical inventory.
+          fetch-depth: 0
 
       - name: Update to latest main
         run: git pull --ff-only origin main

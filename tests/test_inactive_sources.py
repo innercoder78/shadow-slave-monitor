@@ -23,7 +23,7 @@ UNCONFIGURED = ("Archived Source", "Former Source", "Unknown")
 DISABLED = ("Novel Phoenix", "NovelPing")
 ENABLED = [
     "Chikari", "Telegram", "Novel Buddy", "ShadowSlave.Space", "FreeWebNovel",
-    "SSNovel", "NovelFull", "LightNovelUp", "ReadNovelFull", "FreeWebNovel.net", "Rentry",
+    "SSNovel", "NovelFull", "ReadNovelFull", "FreeWebNovel.net", "Rentry",
 ]
 
 
@@ -46,7 +46,6 @@ class InactiveInventoryTests(unittest.TestCase):
         for recovery in (False, True):
             with self.subTest(recovery=recovery):
                 failures = {name: 4 for name in ENABLED} if recovery else {}
-                positions = {}
                 result = RunResult()
 
                 def check(site, *args):
@@ -56,11 +55,10 @@ class InactiveInventoryTests(unittest.TestCase):
                 with patch.object(monitor, "public_source_recovery_window_open", return_value=recovery), \
                      patch.object(monitor, "check_public_site", side_effect=check) as checker, \
                      patch.object(monitor, "send_new_chapter") as notify:
-                    reports = monitor.check_public_sites(result, failures, positions, 3225, "Target", 3224, "Baseline")
+                    reports = monitor.check_public_sites(result, failures, 3225, "Target", 3224, "Baseline")
                 self.assertCountEqual([call.args[0].name for call in checker.call_args_list], ENABLED)
                 self.assertEqual([report.source for report in reports], ENABLED)
                 self.assertEqual(failures, {})
-                self.assertEqual(positions, {})
                 self.assertEqual(result.status, Health.HEALTHY)
                 aggregate = monitor.aggregate_reports_for_chapter(reports, 3224)
                 self.assertEqual(aggregate.source, ", ".join(ENABLED))
@@ -78,7 +76,7 @@ class InactiveInventoryTests(unittest.TestCase):
                 # Even a stale caller setting enabled=True cannot activate an identity.
                 for site in (configured, replace(configured, enabled=True)):
                     with self.assertRaises(parsers.ParseError):
-                        parsers.check_public_site(site, None, 3225, "Target")
+                        parsers.check_public_site(site, 3225, "Target")
                 self.assertEqual(parsers.iter_public_candidates(soup, configured.url, name, 3225, "Target"), [])
                 html.assert_not_called()
                 api.assert_not_called()
@@ -101,10 +99,7 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
                      target_chapter=3226, target_title="Target", target_url="https://www.webnovel.com/target",
                      public_source_failure_revision=7, webnovel_success_cycle=99,
                      updated_at="2026-10-25T12:00:00+00:00")
-        state["public_source_failures"] = {"Novel Phoenix": 4, "Chikari": 2, "LightNovelUp": 4}
-        state["source_positions"] = {"LightNovelUp": {
-            "chapter": 3224, "url": "https://lightnovelup.com/novel/shadow-slave/chapter-3224-baseline/",
-        }}
+        state["public_source_failures"] = {"Novel Phoenix": 4, "Chikari": 2}
         state["pending_notification"] = merge_pending(
             None, 3224, ChapterReport("Former Source", 3225, "Pending", "https://retired.example/"),
             NotificationDeliveryError("http_error", 503, 600),
@@ -122,7 +117,7 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
             self.assertFalse(first)
             self.assertEqual(path.read_bytes(), original)
         self.assertEqual(previous, before)
-        self.assertEqual(clean["public_source_failures"], {"Chikari": 2, "LightNovelUp": 4})
+        self.assertEqual(clean["public_source_failures"], {"Chikari": 2})
         self.assertEqual(clean["public_source_failure_revision"], PUBLIC_SOURCE_PARSER_REVISION)
         for key in previous.keys() - {"public_source_failures", "public_source_failure_revision"}:
             self.assertEqual(clean[key], previous[key], key)
@@ -288,7 +283,7 @@ class PreviousInventoryMigrationTests(unittest.TestCase):
             state_manager.save_state(clean, path)
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(saved["public_source_failure_revision"], PUBLIC_SOURCE_PARSER_REVISION)
-            self.assertEqual(saved["public_source_failures"], {"Chikari": 3, "LightNovelUp": 4})
+            self.assertEqual(saved["public_source_failures"], {"Chikari": 3})
             self.assertEqual(saved["pending_notification"], clean["pending_notification"])
 
     def test_monitor_startup_migration_does_not_advance_or_duplicate_pending_delivery(self):

@@ -75,14 +75,12 @@ def public_source_recovery_window_open() -> bool:
 def check_public_sites(
     result: RunResult,
     failure_counts: dict[str, int] | None = None,
-    source_positions: dict[str, dict[str, Any]] | None = None,
     expected_chapter: int | None = None,
     expected_title: str | None = None,
     previous_chapter: int | None = None,
     previous_title: str | None = None,
 ) -> list[ChapterReport]:
     failure_counts = failure_counts if failure_counts is not None else {}
-    source_positions = source_positions if source_positions is not None else {}
     enabled = [s for s in PUBLIC_SITES if s.enabled]
     for site in PUBLIC_SITES:
         if not site.enabled:
@@ -115,16 +113,9 @@ def check_public_sites(
     with ThreadPoolExecutor(max_workers=min(PUBLIC_SITE_WORKERS, len(eligible) or 1)) as executor:
         futures = {}
         for site in eligible:
-            if site.name == "LightNovelUp":
-                target_args = (expected_chapter, expected_title) if expected_chapter is not None else ()
+            if site.name in TARGET_AWARE_PUBLIC_SOURCES and expected_chapter is not None:
                 future = executor.submit(
-                    check_public_site, site,
-                    dict(source_positions[site.name]) if site.name in source_positions else None,
-                    *target_args,
-                )
-            elif site.name in TARGET_AWARE_PUBLIC_SOURCES and expected_chapter is not None:
-                future = executor.submit(
-                    check_public_site, site, None, expected_chapter, expected_title,
+                    check_public_site, site, expected_chapter, expected_title,
                     previous_chapter, previous_title,
                 )
             else:
@@ -149,13 +140,6 @@ def check_public_sites(
         elif site.name in reports_by_name:
             report = reports_by_name[site.name]
             reports.append(report)
-            if report.position_chapter is not None and report.position_url is not None:
-                previous = source_positions.get(site.name)
-                if previous is None or report.position_chapter > previous["chapter"]:
-                    source_positions[site.name] = {
-                        "chapter": report.position_chapter,
-                        "url": report.position_url,
-                    }
             failure_counts.pop(site.name, None)
         else:
             exc = errors[site.name]
@@ -275,7 +259,7 @@ def first_setup(state: dict[str, Any], result: RunResult) -> None:
     if official is None:
         return
     public_reports = check_public_sites(
-        result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {})
+        result, state.setdefault("public_source_failures", {})
     )
     if result.status == Health.FAILED and not public_reports:
         return
@@ -412,7 +396,7 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
         set_watch_webnovel(state)
         return
     reports = check_public_sites(
-        result, state.setdefault("public_source_failures", {}), state.setdefault("source_positions", {}),
+        result, state.setdefault("public_source_failures", {}),
         target, state.get("target_title"), parse_int(state.get("latest_seen")), state.get("latest_title"),
     )
     if not reports:
@@ -464,7 +448,8 @@ def main() -> None:
             run_watch_webnovel(state, result)
         else:
             result.fail("critical configuration value mode is invalid")
-        if state is not None and json.dumps(state, sort_keys=True, default=str) != original_state_json:
+        if state is not None and (getattr(state, "needs_persistence", False)
+                                  or json.dumps(state, sort_keys=True, default=str) != original_state_json):
             save_state(state)
         elif state is not None:
             logging.info("No operational state changes to persist.")

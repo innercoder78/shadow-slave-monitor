@@ -18,7 +18,7 @@ from shadow_slave_monitor.diagnostics import (
 )
 from shadow_slave_monitor.http_client import HttpFetchError, fetch_html, safe_exception_details
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
-from shadow_slave_monitor.parsers import ParseError, check_public_site, parse_lightnovelup_chapter_page
+from shadow_slave_monitor.parsers import ParseError, check_public_site
 
 
 CHALLENGE = '<title>Just a moment...</title><form id="challenge-form">private body token=secret</form>'
@@ -175,7 +175,6 @@ class DiagnosticCodeTests(unittest.TestCase):
 
     def test_reason_attributes_cannot_disguise_an_internal_error(self):
         for reason in ('chapter_heading_conflict', 'unexpected_content_type',
-                       'next_link_noncanonical[categories=private secret]',
                        'Could not find any chapter links on private secret.'):
             error = RuntimeError('private secret')
             error.reason = reason
@@ -197,15 +196,15 @@ class DiagnosticCodeTests(unittest.TestCase):
 
     def test_allowlisted_and_bounded_fields(self):
         error = ParseError('unknown private exception', counters={
-            'links_inspected': 10**10, 'next_links': -10, 'private_token_secret': 9000,
-            'ambiguous': 1, 'canonical_candidates': 'secret',
+            'links_inspected': 10**10, 'invalid_chapters': -10, 'private_token_secret': 9000,
+            'challenge_indicators': 1, 'series_path_links': 'secret',
         })
         error.host = 'example.com\n::warning::private secret'
         error.attempts = 'secret'
         error.status = 'private secret'
         summary = diagnostic_summary(self.source, error)
         self.assertIn('links_inspected=9999', summary)
-        self.assertIn('next_links=0', summary)
+        self.assertIn('invalid_chapters=0', summary)
         self.assertNotIn('host=', summary)
         self.assertNotIn('status=', summary)
         self.assertNotIn('attempts=', summary)
@@ -217,8 +216,6 @@ class DiagnosticCodeTests(unittest.TestCase):
 
 class ParserDiagnosticTests(unittest.TestCase):
     source = next(site for site in PUBLIC_SITES if site.name == 'Chikari')
-    navigation = next(site for site in PUBLIC_SITES if site.name == 'LightNovelUp')
-    chapter_url = 'https://lightnovelup.com/novel/shadow-slave/chapter-3173-life-goes-on/'
 
     def failed_check(self, html, source=None):
         with patch('shadow_slave_monitor.parsers.fetch_html', return_value=html), self.assertRaises(ParseError) as caught:
@@ -295,67 +292,6 @@ class ParserDiagnosticTests(unittest.TestCase):
         with patch('shadow_slave_monitor.parsers.fetch_html', return_value=html):
             self.assertEqual(check_public_site(self.source).chapter, 3173)
 
-    def navigation_failure(self, links, heading='<h1>Chapter 3173: Life Goes On</h1>'):
-        html = heading + ''.join(f'<a href="{href}">Next Chapter</a>' for href in links)
-        with self.assertRaises(ParseError) as caught:
-            parse_lightnovelup_chapter_page(html, self.chapter_url)
-        return caught.exception
-
-    def test_rejected_next_categories_are_counted_without_leaking_hrefs(self):
-        error = self.navigation_failure([
-            '/novel/shadow-slave/chapter-future-title/',
-            '/novel/shadow-slave/chapter-3174/',
-            'https://user:secret@lightnovelup.com/novel/shadow-slave/chapter-3174-valid/',
-            '/novel/shadow-slave/chapter-3174-valid/?token=secret',
-        ])
-        self.assertEqual(error.code, 'PARSE_NONCANONICAL_NEXT')
-        self.assertEqual(error.counters['next_links'], 4)
-        self.assertEqual(error.counters['canonical_candidates'], 0)
-        for category in ('title_only_chapter_path', 'numeric_only_chapter_path', 'unexpected_authority', 'query_fragment_or_params'):
-            self.assertEqual(error.counters['rejected_' + category], 1)
-        summary = diagnostic_summary(self.navigation, error)
-        for forbidden in ('future-title', 'user:', 'secret', 'token='):
-            self.assertNotIn(forbidden, summary)
-
-    def test_ambiguous_navigation_retains_rejected_counters(self):
-        error = self.navigation_failure([
-            '/novel/shadow-slave/chapter-3174-first/', '/novel/shadow-slave/chapter-3174-second/',
-            '/novel/shadow-slave/chapter-future-title/',
-        ], heading=CHALLENGE + '<h1>Chapter 3173: Life Goes On</h1>')
-        self.assertEqual(error.code, 'PARSE_AMBIGUOUS_NEXT')
-        self.assertEqual(error.counters['ambiguous'], 1)
-        self.assertEqual(error.counters['canonical_candidates'], 2)
-        self.assertEqual(error.counters['rejected_title_only_chapter_path'], 1)
-        self.assertNotIn('PAGE_CHALLENGE_SUSPECTED', diagnostic_summary(self.navigation, error))
-
-    def test_nonmonotonic_and_heading_mismatch_codes(self):
-        error = self.navigation_failure(['/novel/shadow-slave/chapter-3175-jump/'])
-        self.assertEqual(error.code, 'PARSE_NONMONOTONIC_NEXT')
-        self.assertEqual(error.counters['nonmonotonic'], 1)
-        self.assertEqual(error.counters['ambiguous'], 0)
-        error = self.navigation_failure([], heading='<h1>Chapter 3172: private title secret</h1>')
-        summary = diagnostic_summary(self.navigation, error)
-        self.assertIn('code=PARSE_CHAPTER_MISMATCH stage=chapter_validation', summary)
-        self.assertNotIn('private', summary)
-        self.assertNotIn('secret', summary)
-
-    def test_secondary_page_failure_uses_its_metadata(self):
-        first = HtmlDocument('<h1>Chapter 3173</h1><a href="/novel/shadow-slave/chapter-3174-next/">Next</a>',
-                             ResponseMetadata(200, 'lightnovelup.com', 1))
-        second = HtmlDocument('<h1>Chapter 3172</h1>', ResponseMetadata(202, 'lightnovelup.com', 2))
-        with patch('shadow_slave_monitor.parsers.fetch_html', side_effect=[first, second]), self.assertRaises(ParseError) as caught:
-            check_public_site(self.navigation)
-        summary = diagnostic_summary(self.navigation, caught.exception)
-        self.assertIn('status=202', summary)
-        self.assertIn('attempts=2', summary)
-
-    def test_failed_secondary_fetch_does_not_reuse_success_status(self):
-        first = HtmlDocument('<h1>Chapter 3173</h1><a href="/novel/shadow-slave/chapter-3174-next/">Next</a>',
-                             ResponseMetadata(200, 'lightnovelup.com', 1))
-        with patch('shadow_slave_monitor.parsers.fetch_html', side_effect=[first, requests.Timeout('private secret')]):
-            with self.assertRaises(requests.Timeout) as caught:
-                check_public_site(self.navigation)
-        self.assertNotIn('status=', diagnostic_summary(self.navigation, caught.exception))
 
     def test_response_context_is_isolated_between_threads_and_checks(self):
         barrier = Barrier(2)
@@ -437,8 +373,7 @@ class ManualDiagnosticTests(unittest.TestCase):
         self.state = state_manager.initial_state()
         self.state.update(latest_seen=3173, latest_webnovel=3174, target_chapter=3174,
                           mode='watch_free_sites', target_title='Next Title', latest_title='Previous Title')
-        self.state['public_source_failures'] = {'Chikari': 4, 'LightNovelUp': 4}
-        self.state['source_positions'] = {'LightNovelUp': {'chapter': 3173, 'url': ParserDiagnosticTests.chapter_url}}
+        self.state['public_source_failures'] = {'Chikari': 4}
         self.path.write_text(json.dumps(self.state), encoding='utf-8')
         self.original = self.path.read_bytes()
 
@@ -447,19 +382,18 @@ class ManualDiagnosticTests(unittest.TestCase):
         self.assertEqual([file.name for file in self.path.parent.iterdir()], ['state.json'])
 
     def test_manual_success_bypasses_suppression_and_does_not_notify_or_write(self):
-        report = ChapterReport('LightNovelUp', 3174, 'private title secret', 'https://lightnovelup.com/private?token=secret')
+        report = ChapterReport('Chikari', 3174, 'private title secret', 'https://chikari.moe/private?token=secret')
         loaded = copy.deepcopy(self.state)
-        def check(site, position, *context):
-            self.assertEqual(site.name, 'LightNovelUp')
+        def check(site, *context):
+            self.assertEqual(site.name, 'Chikari')
             self.assertEqual(context, (3174, 'Next Title', 3173, 'Previous Title'))
-            position['chapter'] = 9999  # The diagnostic passes an isolated cursor copy.
             return report
         with patch.object(diagnose_source, 'load_state', return_value=(loaded, False)), \
              patch.object(diagnose_source, 'check_public_site', side_effect=check) as checker, \
              patch('shadow_slave_monitor.notifications.send_new_chapter') as notify, \
              patch.object(state_manager, 'save_state') as save, \
              patch.object(state_manager, 'atomic_write_json') as write, self.assertLogs(level='INFO') as captured:
-            self.assertEqual(diagnose_source.diagnose_source('LightNovelUp', state_path=self.path), 0)
+            self.assertEqual(diagnose_source.diagnose_source('Chikari', state_path=self.path), 0)
         checker.assert_called_once()
         notify.assert_not_called()
         save.assert_not_called()
