@@ -1,13 +1,13 @@
 {
-  "latest_seen": 3229,
-  "latest_title": "Audience with the Abyss",
-  "latest_url": "https://rentry.co/3229ss",
+  "latest_seen": 3230,
+  "latest_title": "The Kids Are Not Alright",
+  "latest_url": "https://rentry.co/3230ss",
   "latest_webnovel": 3230,
   "latest_webnovel_title": "The Kids Are Not Alright",
-  "mode": "watch_free_sites",
-  "target_chapter": 3230,
-  "target_title": "The Kids Are Not Alright",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 8,
@@ -16,5 +16,5 @@
   "webnovel_success_cycle": 1494478,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-10-30T15:20:24+00:00"
+  "updated_at": "2026-10-30T15:25:20+00:00"
 }
