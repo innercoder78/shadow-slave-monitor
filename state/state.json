@@ -1,22 +1,20 @@
 {
-  "latest_seen": 3235,
-  "latest_title": "Bitter Fate",
-  "latest_url": "https://rentry.co/3235ss",
+  "latest_seen": 3236,
+  "latest_title": "Toto, We're Not in the Shadow Realm Anymore",
+  "latest_url": "https://rentry.co/3236ss",
   "latest_webnovel": 3236,
   "latest_webnovel_title": "Toto, We're Not in the Shadow Realm Anymore",
-  "mode": "watch_free_sites",
-  "target_chapter": 3236,
-  "target_title": "Toto, We're Not in the Shadow Realm Anymore",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Buddy": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 8,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1494903,
   "webnovel_success_cycle": 1494912,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-05T16:35:20+00:00"
+  "updated_at": "2026-11-05T18:15:23+00:00"
 }
