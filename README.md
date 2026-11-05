@@ -6,13 +6,11 @@ I find it much better than repeatedly refreshing several websites whenever new c
 
 ## HOW DOES IT WORK?
 
-The main workflow is triggered every five minutes through cron-job.org.
-
-While waiting for a new chapter, the monitor checks WebNovel approximately every 20 minutes. When the paid source confirms a new chapter, the monitor begins checking public free sources until that exact chapter becomes available.
+While waiting for a new chapter, the monitor checks the paid website (the source for this novel) approximately every 20 minutes. When the paid source confirms a new chapter, the monitor begins checking public free sources every 5 minutes until that exact chapter becomes available.
 
 Once the chapter is found, the monitor sends a notification through ntfy and returns to watching the paid source for new chapters.
 
-If an ntfy notification fails, it is saved and retried later. The monitor continues checking for newer chapters in the meantime and can combine several pending chapters into one notification.
+If an ntfy notification fails, it is saved and retried later (but it is VERY rare for the ntfy service to have problems). The monitor continues checking for newer chapters in the meantime and can combine several pending chapters into one notification.
 
 After four distinct failed scheduled checks of the paid source, a persistent
 emergency fallback can detect independently verified chapters from the configured
