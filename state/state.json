@@ -11,7 +11,7 @@
   "pending_notification": null,
   "public_source_failures": {
     "Novel Buddy": 4,
-    "Rentry": 3
+    "Rentry": 4
   },
   "public_source_failure_revision": 8,
   "webnovel_failures": 0,
@@ -19,5 +19,5 @@
   "webnovel_success_cycle": 1494940,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-06T02:45:26+00:00"
+  "updated_at": "2026-11-06T02:50:22+00:00"
 }
