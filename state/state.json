@@ -2,12 +2,12 @@
   "latest_seen": 3236,
   "latest_title": "Toto, We're Not in the Shadow Realm Anymore",
   "latest_url": "https://rentry.co/3236ss",
-  "latest_webnovel": 3236,
-  "latest_webnovel_title": "Toto, We're Not in the Shadow Realm Anymore",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3237,
+  "latest_webnovel_title": "Illustruous Guests",
+  "mode": "watch_free_sites",
+  "target_chapter": 3237,
+  "target_title": "Illustruous Guests",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 8,
@@ -16,5 +16,5 @@
   "webnovel_success_cycle": 1494940,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-06T01:20:20+00:00"
+  "updated_at": "2026-11-06T01:25:21+00:00"
 }
