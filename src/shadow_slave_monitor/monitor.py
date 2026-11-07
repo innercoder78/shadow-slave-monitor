@@ -427,6 +427,11 @@ def run_watch_free_sites(state: dict[str, Any], result: RunResult) -> None:
     if latest_webnovel is not None and exact.chapter > latest_webnovel:
         result.fail("public source attempted to advance beyond WebNovel")
         return
+    if exact.title is None and "Rentry" in exact.source.split(", ") and state.get("target_title"):
+        # Publication was verified separately; the title belongs to WebNovel,
+        # not to the title-less public page. Keep the parser report unmodified.
+        logging.info("Using WebNovel-confirmed title for verified chapter %s.", target)
+        exact = ChapterReport(exact.source, exact.chapter, state["target_title"], exact.url, exact.strategy)
     if state.get("pending_notification") is None:
         queue_or_send(state, exact, result)
     else:

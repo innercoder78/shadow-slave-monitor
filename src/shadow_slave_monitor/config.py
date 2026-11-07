@@ -35,8 +35,8 @@ PUBLIC_SOURCE_RECOVERY_PROBE_INTERVAL = timedelta(minutes=30)
 PUBLIC_SOURCE_RECOVERY_PROBE_WINDOW = timedelta(minutes=5)
 # Bump when materially changed public-source parsing should invalidate failure
 # suppression accumulated under an older parser implementation.
-# Revision 8 retires source identities; parsing for remaining sources is unchanged.
-PUBLIC_SOURCE_PARSER_REVISION = 8
+# Revision 9 adds verified title-less continuity for the target-only source.
+PUBLIC_SOURCE_PARSER_REVISION = 9
 MIN_CHAPTER = 1
 MAX_CHAPTER = 10000
 TITLE_MAX_LENGTH = 180
@@ -101,8 +101,8 @@ PUBLIC_SITES: tuple[SourceConfig, ...] = (
     SourceConfig("NovelFull", "https://novelfull.com/shadow-slave.html", True, ("novelfull.com", "www.novelfull.com")),
     SourceConfig("ReadNovelFull", "https://readnovelfull.com/shadow-slave.html", True, ("readnovelfull.com", "www.readnovelfull.com")),
     SourceConfig("FreeWebNovel.net", "https://freewebnovel.net/shadow-slave.html", True, ("freewebnovel.net", "www.freewebnovel.net")),
-    # Target-only verification requires authoritative title corroboration when
-    # the rendered chapter has no explicit novel identity.
+    # Target-only verification requires title corroboration or independently
+    # verified predecessor continuity when the page has no explicit identity.
     SourceConfig("Rentry", "https://rentry.co/", True, ("rentry.co",)),
 )
 
