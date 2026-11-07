@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from shadow_slave_monitor import monitor, parsers, state_manager
-from shadow_slave_monitor.config import PUBLIC_SITES, SourceConfig
+from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SOURCE_PARSER_REVISION, SourceConfig
 from shadow_slave_monitor.models import ChapterReport
 from shadow_slave_monitor.notifications import pending_from_report
 from shadow_slave_monitor.state_manager import StateError, initial_state, validate_state
@@ -58,9 +58,14 @@ class StateSchemaRetirementTests(unittest.TestCase):
         api.assert_not_called()
 
     def test_repository_state_uses_current_schema_without_changing_history(self):
-        state = json.loads((ROOT / "state/state.json").read_text(encoding="utf-8"))
+        path = ROOT / "state/state.json"
+        before = path.read_bytes()
+        state = json.loads(before)
         self.assertNotIn("source_positions", state)
-        self.assertEqual(validate_state(state), state)
+        expected = copy.deepcopy(state)
+        expected["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION
+        self.assertEqual(validate_state(state), expected)
+        self.assertEqual(path.read_bytes(), before)
 
     def test_immutable_reference_migrates_previous_production_shape(self):
         raw = subprocess.check_output(
@@ -69,6 +74,7 @@ class StateSchemaRetirementTests(unittest.TestCase):
         historical = json.loads(raw)
         expected = copy.deepcopy(historical)
         del expected["source_positions"]
+        expected["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION
         self.assertEqual(validate_state(historical), expected)
         self.assertEqual(json.loads(raw), historical)
 
@@ -83,7 +89,7 @@ class StateSchemaRetirementTests(unittest.TestCase):
             self.assertEqual(state, before)
 
     def test_unknown_failure_identity_fails_closed_at_every_supported_revision(self):
-        for revision in (6, 7, 8):
+        for revision in (6, 7, 8, PUBLIC_SOURCE_PARSER_REVISION):
             state = self.initialized()
             state.update(public_source_failure_revision=revision,
                          public_source_failures={"Unknown": 4})

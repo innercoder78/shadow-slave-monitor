@@ -12,13 +12,13 @@ import json
 from dataclasses import replace
 from pathlib import Path
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import requests
 from bs4 import BeautifulSoup
 
 from shadow_slave_monitor import diagnose_source, monitor, parsers
-from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SITE_ORDER
+from shadow_slave_monitor.config import PUBLIC_SITES, PUBLIC_SITE_ORDER, PUBLIC_SOURCE_PARSER_REVISION
 from shadow_slave_monitor.http_client import HttpFetchError, fetch_html
 from shadow_slave_monitor.models import ChapterReport, Health, RunResult
 from shadow_slave_monitor.notifications import NotificationDeliveryError, notification_body
@@ -244,6 +244,203 @@ class TargetPageTests(unittest.TestCase):
         before = state_path.read_bytes()
         validate_state(json.loads(before))
         self.assertEqual(state_path.read_bytes(), before)
+
+
+class TitlelessContinuityTests(unittest.TestCase):
+    """Synthetic prose in the observed wrapper; never a real chapter capture.
+
+    Read-only inspection on 2026-11-07 confirmed numbered h2 headings, one
+    article div, canonical metadata and adjacent absolute links on 3238/3239.
+    The forward link on 3239 still read '3240ss'. No historical HTML is assumed.
+    """
+
+    def check(self, target=None, previous=None, chapter=3240, previous_chapter=3239,
+              previous_title="Trusted Baseline"):
+        with patch.object(parsers, "fetch_html", side_effect=[
+            page(chapter, None) if target is None else target,
+            page(previous_chapter, previous_title) if previous is None else previous,
+        ]) as fetch:
+            report = parsers.check_public_site(CONFIG, chapter, "Future Title", previous_chapter, previous_title)
+        return report, fetch
+
+    def test_titleless_current_and_future_targets_use_verified_continuity(self):
+        for chapter in (3240, 3241, 3500):
+            with self.subTest(chapter=chapter):
+                previous = page(chapter - 1, "Trusted Baseline").replace("Next chapter", f"{chapter}ss")
+                report, fetch = self.check(previous=previous, chapter=chapter, previous_chapter=chapter - 1)
+                self.assertEqual((report.chapter, report.title, report.url),
+                                 (chapter, None, parsers.rentry_chapter_url(chapter)))
+                self.assertEqual(fetch.call_args_list, [
+                    call(CONFIG, parsers.rentry_chapter_url(chapter), allow_redirects=False),
+                    call(CONFIG, parsers.rentry_chapter_url(chapter - 1), allow_redirects=False),
+                ])
+
+    def test_length_number_url_and_adjacent_links_cannot_establish_identity(self):
+        # Plausible, lengthy invented prose passes every content threshold.
+        # It still needs evidence outside the candidate itself.
+        for number, title in ((None, None), (3238, "Trusted Baseline"), (3239, None),
+                              (True, "Trusted Baseline")):
+            with self.subTest(number=number, title=title), \
+                 patch.object(parsers, "fetch_html", return_value=page(3240, None)) as fetch:
+                with self.assertRaisesRegex(parsers.ParseError, "series_identity_mismatch"):
+                    parsers.check_public_site(CONFIG, 3240, "Future Title", number, title)
+                self.assertEqual(fetch.call_count, 1)
+
+    def test_unverified_or_contradictory_predecessor_cannot_anchor_identity(self):
+        cases = (
+            page(3239, "Wrong Title"), page(3239, None),
+            page(3239, None, identity="Shadow Slave"),
+            page(3239, "Trusted Baseline", identity="Other Novel"),
+            placeholder(3239), page(3239, "Trusted Baseline", body=False),
+            page(3239, "Trusted Baseline").replace('href="https://rentry.co/3239ss"',
+                                                   'href="https://rentry.co/3238ss"'),
+            page(3239, "Trusted Baseline").replace('<p><a href="https://rentry.co/3240ss">Next chapter</a></p>', ''),
+            page(3239, "Trusted Baseline").replace('https://rentry.co/3240ss', 'https://evil.example/3240ss'),
+            page(3239, "Trusted Baseline").replace('<p><a href="https://rentry.co/3240ss">',
+                                                   '<p hidden><a href="https://rentry.co/3240ss">'),
+            '<title>Just a moment...</title><form id="challenge-form"></form>',
+        )
+        for index, previous in enumerate(cases):
+            with self.subTest(case=index), self.assertRaises(parsers.ParseError):
+                self.check(previous=previous)
+
+    def test_target_contradictions_never_trigger_continuity_fetch(self):
+        cases = (
+            page(3240, "Wrong Title"), page(3240, None, identity="Other Novel"),
+            page(3240, None).replace('<h2>3240</h2>', '<h2>3241</h2>'),
+            page(3240, None).replace('<h2>3240</h2>', '<p>3240</p>'),
+            page(3240, None).replace('<h2>3240</h2>', '<h1>3240</h1>'),
+            page(3240, None).replace('href="https://rentry.co/3240ss"', 'href="https://rentry.co/3241ss"'),
+            page(3240, None).replace('<p><a href="https://rentry.co/3239ss">Previous chapter</a></p>', ''),
+            page(3240, None).replace('https://rentry.co/3239ss', 'https://evil.example/3239ss'),
+            page(3240, None).replace('<title>3240</title>', '<title>Another Novel</title>'),
+        )
+        for index, target in enumerate(cases):
+            with self.subTest(case=index), patch.object(parsers, "fetch_html", return_value=target) as fetch:
+                with self.assertRaises(parsers.ParseError):
+                    parsers.check_public_site(CONFIG, 3240, "Future Title", 3239, "Trusted Baseline")
+                self.assertEqual(fetch.call_count, 1)
+
+    def test_navigation_does_not_publish_placeholder_and_titled_pages_need_no_anchor(self):
+        for target, available in ((placeholder(3240), False), (page(3240, "Future Title"), True),
+                                  (page(3240, None, identity="Shadow Slave"), True)):
+            with self.subTest(available=available):
+                report, fetch = self.check(target=target)
+                self.assertEqual(report is not None, available)
+                self.assertEqual(fetch.call_count, 1)
+
+    def test_predecessor_http_errors_redirects_and_timeouts_are_failures(self):
+        for status in (302, 404, 403, 503):
+            with self.subTest(status=status), patch("time.sleep"), \
+                 patch("requests.Session.get", side_effect=[
+                     response(html=page(3240, None), url=parsers.rentry_chapter_url(3240)),
+                     *[response(status, url=parsers.rentry_chapter_url(3239)) for _ in range(3)],
+                 ]):
+                with self.assertRaises((requests.HTTPError, HttpFetchError)):
+                    parsers.check_public_site(CONFIG, 3240, "Future Title", 3239, "Trusted Baseline")
+        with patch("time.sleep"), patch("requests.Session.get", side_effect=[
+            response(html=page(3240, None), url=parsers.rentry_chapter_url(3240)),
+            *[requests.Timeout("private") for _ in range(3)],
+        ]):
+            with self.assertRaises(requests.Timeout):
+                parsers.check_public_site(CONFIG, 3240, "Future Title", 3239, "Trusted Baseline")
+
+    def test_placeholder_then_titleless_publication_and_metadata_edit_notify_once(self):
+        state = watching_state()
+        state["latest_title"] = "Trusted Baseline"
+        html = placeholder(3224)
+        def fetch(site, url, **kwargs):
+            return html if url == parsers.rentry_chapter_url(3224) else page(3223, "Trusted Baseline")
+        official = ChapterReport("WebNovel", 3224, "First Thunder", "https://www.webnovel.com/")
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch.object(parsers, "fetch_html", side_effect=fetch) as get, \
+             patch.object(monitor, "send_new_chapter") as send, \
+             patch.object(monitor, "webnovel_due", return_value=True), \
+             patch.object(monitor, "check_webnovel", return_value=official):
+            for _ in range(8):
+                monitor.run_watch_free_sites(state, RunResult())
+            self.assertEqual(state["latest_seen"], 3223)
+            self.assertEqual(state["public_source_failures"], {})
+            send.assert_not_called()
+            html = page(3224, None)
+            monitor.run_watch_free_sites(state, RunResult())
+            delivered = copy.deepcopy(state)
+            report = send.call_args.args[2]
+            self.assertEqual((report.title, report.source, report.url),
+                             ("First Thunder", "Rentry", parsers.rentry_chapter_url(3224)))
+            self.assertIn("First Thunder", notification_body(3223, report))
+            self.assertEqual(state["latest_seen"], 3224)
+            self.assertEqual(state["mode"], "watch_webnovel")
+            html = page(3224, "First Thunder")
+            count = get.call_count
+            for _ in range(3):
+                monitor.run_watch_webnovel(state, RunResult())
+            send.assert_called_once()
+            self.assertEqual(get.call_count, count)
+            for key in ("latest_seen", "latest_title", "latest_url", "pending_notification", "mode"):
+                self.assertEqual(state[key], delivered[key])
+
+    def test_invalid_identity_never_advances_history_or_clears_failures(self):
+        state = watching_state()
+        state["latest_title"] = "Trusted Baseline"
+        state["public_source_failures"] = {"Rentry": 3}
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch.object(parsers, "fetch_html", side_effect=[page(3224, None), page(3223, "Wrong Title")]), \
+             patch.object(monitor, "send_new_chapter") as send:
+            monitor.run_watch_free_sites(state, RunResult())
+        send.assert_not_called()
+        self.assertEqual(state["latest_seen"], 3223)
+        self.assertIsNone(state["pending_notification"])
+        self.assertEqual(state["public_source_failures"], {"Rentry": 4})
+
+    def test_titleless_delivery_failure_retains_authoritative_title_for_retry(self):
+        state = watching_state()
+        state["latest_title"] = "Trusted Baseline"
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch.object(parsers, "fetch_html", side_effect=[page(3224, None), page(3223, "Trusted Baseline")]), \
+             patch.object(monitor, "send_new_chapter", side_effect=NotificationDeliveryError("http_error", 503)):
+            monitor.run_watch_free_sites(state, RunResult())
+        self.assertEqual(state["latest_seen"], 3223)
+        self.assertEqual(state["pending_notification"]["title"], "First Thunder")
+        self.assertEqual(state["pending_notification"]["sources"], ["Rentry"])
+        state = validate_state(json.loads(json.dumps(state)))
+        with patch.object(monitor, "pending_due", return_value=True), \
+             patch.object(monitor, "send_new_chapter") as send, patch.object(parsers, "fetch_html") as fetch:
+            monitor.run_watch_free_sites(state, RunResult())
+        fetch.assert_not_called()
+        send.assert_called_once()
+        self.assertEqual(send.call_args.args[2].title, "First Thunder")
+        self.assertEqual(state["latest_seen"], 3224)
+        self.assertIsNone(state["pending_notification"])
+
+    def test_suppressed_valid_page_waits_for_existing_recovery_window(self):
+        failures = {"Rentry": 4}
+        with patch.object(monitor, "PUBLIC_SITES", (CONFIG,)), \
+             patch.object(parsers, "fetch_html", side_effect=[page(3224, None), page(3223, "Trusted Baseline")]) as fetch:
+            with patch.object(monitor, "public_source_recovery_window_open", return_value=False):
+                self.assertEqual(monitor.check_public_sites(RunResult(), failures, 3224, "First Thunder",
+                                                           3223, "Trusted Baseline"), [])
+                fetch.assert_not_called()
+                self.assertEqual(failures, {"Rentry": 4})
+            with patch.object(monitor, "public_source_recovery_window_open", return_value=True):
+                reports = monitor.check_public_sites(RunResult(), failures, 3224, "First Thunder", 3223, "Trusted Baseline")
+        self.assertEqual([r.chapter for r in reports], [3224])
+        self.assertEqual(failures, {})
+
+    def test_revision_migration_only_invalidates_changed_source_once(self):
+        for revision in (7, 8):
+            state = watching_state()
+            state.update(public_source_failure_revision=revision,
+                         public_source_failures={"Rentry": 4, OTHER.name: 3})
+            original = copy.deepcopy(state)
+            migrated = validate_state(state)
+            self.assertEqual(state, original)
+            self.assertEqual(migrated["public_source_failures"], {OTHER.name: 3})
+            self.assertEqual(migrated["public_source_failure_revision"], PUBLIC_SOURCE_PARSER_REVISION)
+            for key in state.keys() - {"public_source_failures", "public_source_failure_revision"}:
+                self.assertEqual(migrated[key], state[key])
+            migrated["public_source_failures"]["Rentry"] = 4
+            self.assertEqual(validate_state(migrated), migrated)
 
 
 class TargetHttpTests(unittest.TestCase):

@@ -396,9 +396,11 @@ def validate_state(data: dict[str, Any]) -> dict[str, Any]:
             )
         if source in enabled_names:
             clean_failures[source] = count
-    # Revision 7 already uses the current parsers for remaining sources. Preserve
-    # their suppression; earlier parser revisions retain the existing reset.
-    if revision not in (7, PUBLIC_SOURCE_PARSER_REVISION):
+    # Only the target-only parser changed since revisions 7/8. Invalidate its
+    # old failures once without disturbing other sources or delivery history.
+    if revision in (7, 8):
+        clean_failures.pop("Rentry", None)
+    elif revision != PUBLIC_SOURCE_PARSER_REVISION:
         clean_failures = {}
     state["public_source_failures"] = {key: clean_failures[key] for key in sorted(clean_failures)}
     state["public_source_failure_revision"] = PUBLIC_SOURCE_PARSER_REVISION

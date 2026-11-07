@@ -1918,12 +1918,22 @@ def rentry_chapter_url(chapter: int) -> str:
     return f"https://rentry.co/{chapter}ss"
 
 
+class _RentryContinuityRequired(ParseError):
+    """A substantial title-less page needs an independently verified predecessor."""
+
+    def __init__(self):
+        super().__init__("series_identity_mismatch")
+
+
 def parse_rentry_chapter_page(
     html: str, url: str, expected_chapter: int, expected_title: str | None,
+    *, previous_html: str | None = None, previous_chapter: int | None = None,
+    previous_title: str | None = None, _required_navigation: str | None = None,
 ) -> ChapterReport | None:
     """Verify rendered content, independently of the predictable URL.
 
-    An absent series label requires exact authoritative title corroboration.
+    An absent series label requires exact title corroboration or, only for a
+    title-less page, reciprocal continuity with a separately verified predecessor.
     Only the observed bare-heading/navigation template can mean unpublished;
     unfamiliar short pages and contradictory evidence remain errors.
     """
@@ -1998,8 +2008,10 @@ def parse_rentry_chapter_page(
         if href not in adjacent_urls:
             raise ParseError("chapter_page_confirmation_failed")
         navigation.add(href)
-    # Navigation is evidence of template shape only; these links are never
-    # requested. Remove it before counting meaningful, visible prose.
+    if _required_navigation is not None and _required_navigation not in navigation:
+        raise ParseError("chapter_page_confirmation_failed")
+    # Destinations can support continuity, but labels never prove publication.
+    # Remove navigation before counting meaningful, visible prose.
     for link in list(article.find_all("a")):
         link.decompose()
     for label in list(article.find_all(["h1", "h2", "h3", "p"])):
@@ -2041,16 +2053,37 @@ def parse_rentry_chapter_page(
                 and len(re.findall(r"[^\W\d_]+", " ".join(unknown_text))) <= 40):
             return None
         raise ParseError("chapter_data_missing")
-    if not identity and (heading.name != "h2" or heading.parent.name != "div"
-                         or heading.parent.parent is not article
-                         or not title or not _normalized_title(expected_title)
-                         or _normalized_title(title) != _normalized_title(expected_title)):
-        raise ParseError("series_identity_mismatch")
+    if not identity:
+        if (heading.name != "h2" or heading.parent.name != "div"
+                or heading.parent.parent is not article):
+            raise ParseError("series_identity_mismatch")
+        if title:
+            if not _normalized_title(expected_title) or _normalized_title(title) != _normalized_title(expected_title):
+                raise ParseError("series_identity_mismatch")
+        else:
+            if not template_shape or navigation != adjacent_urls:
+                raise ParseError("series_identity_mismatch")
+            if previous_html is None:
+                raise _RentryContinuityRequired()
+            if (chapter_validity_category(previous_chapter) is not None
+                    or previous_chapter != expected_chapter - 1
+                    or not _normalized_title(previous_title)):
+                raise ParseError("series_identity_mismatch")
+            # No recursive continuity: this anchor must have its own matching
+            # stored title and all existing publication safeguards.
+            previous = parse_rentry_chapter_page(
+                previous_html, rentry_chapter_url(previous_chapter), previous_chapter,
+                previous_title, _required_navigation=url,
+            )
+            if (previous is None or not previous.title
+                    or _normalized_title(previous.title) != _normalized_title(previous_title)):
+                raise ParseError("series_identity_mismatch")
     return ChapterReport("Rentry", expected_chapter, title, url, "Rentry:verified_target")
 
 
 def check_rentry(
     site: SourceConfig, expected_chapter: int | None, expected_title: str | None,
+    previous_chapter: int | None = None, previous_title: str | None = None,
 ) -> ChapterReport | None:
     # No authoritative target is a clean skip, including first setup.
     if expected_chapter is None:
@@ -2063,7 +2096,20 @@ def check_rentry(
         if exc.response is not None and exc.response.status_code == 404 and exc.response.url == url:
             return None
         raise
-    return parse_rentry_chapter_page(html, url, expected_chapter, expected_title)
+    try:
+        return parse_rentry_chapter_page(html, url, expected_chapter, expected_title)
+    except _RentryContinuityRequired:
+        if (chapter_validity_category(previous_chapter) is not None
+                or previous_chapter != expected_chapter - 1
+                or not _normalized_title(previous_title)):
+            raise
+    # Fetch only the immediately preceding confirmed chapter, never follow an
+    # untrusted href or scan future candidates. Anchor failures remain failures.
+    previous_html = _fetch_source_html(site, rentry_chapter_url(previous_chapter), allow_redirects=False)
+    return parse_rentry_chapter_page(
+        html, url, expected_chapter, expected_title, previous_html=previous_html,
+        previous_chapter=previous_chapter, previous_title=previous_title,
+    )
 
 
 @_with_response_diagnostics
@@ -2076,7 +2122,7 @@ def check_public_site(
         raise ParseError("public source is disabled or unconfigured")
     logging.info("Checking %s.", site.name)
     if site.name == "Rentry":
-        report = check_rentry(site, expected_chapter, expected_title)
+        report = check_rentry(site, expected_chapter, expected_title, previous_chapter, previous_title)
         if report is not None:
             _log_public_success(site, report)
         return report
