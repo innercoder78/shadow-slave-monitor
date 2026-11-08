@@ -9,12 +9,14 @@
   "target_title": "Burden of Choice",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Novel Buddy": 1
+  },
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1494903,
   "webnovel_success_cycle": 1495082,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-08T00:40:21+00:00"
+  "updated_at": "2026-11-08T00:45:23+00:00"
 }
