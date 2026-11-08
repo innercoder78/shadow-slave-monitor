@@ -1,22 +1,20 @@
 {
-  "latest_seen": 3239,
-  "latest_title": "The Oracle of Thetis",
-  "latest_url": "https://rentry.co/3239ss",
+  "latest_seen": 3240,
+  "latest_title": "Burden of Choice",
+  "latest_url": "https://rentry.co/3240ss",
   "latest_webnovel": 3240,
   "latest_webnovel_title": "Burden of Choice",
-  "mode": "watch_free_sites",
-  "target_chapter": 3240,
-  "target_title": "Burden of Choice",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Buddy": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1494903,
   "webnovel_success_cycle": 1495082,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-08T01:00:31+00:00"
+  "updated_at": "2026-11-08T01:15:20+00:00"
 }
