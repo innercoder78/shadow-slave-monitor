@@ -26,7 +26,7 @@
     "last_http_status": 429
   },
   "public_source_failures": {
-    "Novel Buddy": 2
+    "Novel Buddy": 3
   },
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
@@ -34,5 +34,5 @@
   "webnovel_success_cycle": 1495156,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-09T01:35:22+00:00"
+  "updated_at": "2026-11-09T01:40:23+00:00"
 }
