@@ -2,12 +2,12 @@
   "latest_seen": 3240,
   "latest_title": "Burden of Choice",
   "latest_url": "https://rentry.co/3240ss",
-  "latest_webnovel": 3240,
-  "latest_webnovel_title": "Burden of Choice",
-  "mode": "watch_webnovel",
-  "target_chapter": null,
-  "target_title": null,
-  "target_url": null,
+  "latest_webnovel": 3241,
+  "latest_webnovel_title": "Guiding Light",
+  "mode": "watch_free_sites",
+  "target_chapter": 3241,
+  "target_title": "Guiding Light",
+  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 9,
@@ -16,5 +16,5 @@
   "webnovel_success_cycle": 1495156,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-09T01:20:20+00:00"
+  "updated_at": "2026-11-09T01:25:20+00:00"
 }
