@@ -1,23 +1,20 @@
 {
-  "latest_seen": 3242,
-  "latest_title": "Vessels of Divinity",
-  "latest_url": "https://rentry.co/3242ss",
+  "latest_seen": 3243,
+  "latest_title": "Prism of Eternity",
+  "latest_url": "https://rentry.co/3243ss",
   "latest_webnovel": 3243,
   "latest_webnovel_title": "Prism of Eternity",
-  "mode": "watch_free_sites",
-  "target_chapter": 3243,
-  "target_title": "Prism of Eternity",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Buddy": 4,
-    "Rentry": 1
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1494903,
   "webnovel_success_cycle": 1495344,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-11T16:25:35+00:00"
+  "updated_at": "2026-11-11T16:30:31+00:00"
 }
