@@ -1,13 +1,13 @@
 {
-  "latest_seen": 3243,
-  "latest_title": "Prism of Eternity",
-  "latest_url": "https://rentry.co/3243ss",
+  "latest_seen": 3244,
+  "latest_title": "Three Fortunes",
+  "latest_url": "https://rentry.co/3244ss",
   "latest_webnovel": 3244,
   "latest_webnovel_title": "Three Fortunes",
-  "mode": "watch_free_sites",
-  "target_chapter": 3244,
-  "target_title": "Three Fortunes",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 9,
@@ -16,5 +16,5 @@
   "webnovel_success_cycle": 1495374,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-12T02:00:25+00:00"
+  "updated_at": "2026-11-12T02:05:20+00:00"
 }
