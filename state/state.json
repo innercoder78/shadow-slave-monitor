@@ -1,13 +1,13 @@
 {
-  "latest_seen": 3244,
-  "latest_title": "Three Fortunes",
-  "latest_url": "https://rentry.co/3244ss",
+  "latest_seen": 3245,
+  "latest_title": "God Heart",
+  "latest_url": "https://rentry.co/3245ss",
   "latest_webnovel": 3245,
   "latest_webnovel_title": "God Heart",
-  "mode": "watch_free_sites",
-  "target_chapter": 3245,
-  "target_title": "God Heart",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 9,
@@ -16,5 +16,5 @@
   "webnovel_success_cycle": 1495447,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-13T02:20:20+00:00"
+  "updated_at": "2026-11-13T02:25:19+00:00"
 }
