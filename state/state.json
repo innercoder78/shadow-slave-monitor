@@ -9,12 +9,14 @@
   "target_title": "Abysmal Reunion",
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
-  "public_source_failures": {},
+  "public_source_failures": {
+    "Novel Buddy": 1
+  },
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1495519,
   "webnovel_success_cycle": 1495520,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-14T02:40:29+00:00"
+  "updated_at": "2026-11-14T02:45:22+00:00"
 }
