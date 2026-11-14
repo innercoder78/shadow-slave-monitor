@@ -1,22 +1,20 @@
 {
-  "latest_seen": 3245,
-  "latest_title": "God Heart",
-  "latest_url": "https://rentry.co/3245ss",
+  "latest_seen": 3246,
+  "latest_title": "Abysmal Reunion",
+  "latest_url": "https://rentry.co/3246ss",
   "latest_webnovel": 3246,
   "latest_webnovel_title": "Abysmal Reunion",
-  "mode": "watch_free_sites",
-  "target_chapter": 3246,
-  "target_title": "Abysmal Reunion",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "Novel Buddy": 2
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1495519,
   "webnovel_success_cycle": 1495520,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-14T02:50:20+00:00"
+  "updated_at": "2026-11-14T02:55:23+00:00"
 }
