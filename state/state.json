@@ -1,24 +1,20 @@
 {
-  "latest_seen": 3251,
-  "latest_title": "Life is Desire",
-  "latest_url": "https://rentry.co/3251ss",
+  "latest_seen": 3252,
+  "latest_title": "Preventative Measures",
+  "latest_url": "https://rentry.co/3252ss",
   "latest_webnovel": 3252,
   "latest_webnovel_title": "Preventative Measures",
-  "mode": "watch_free_sites",
-  "target_chapter": 3252,
-  "target_title": "Preventative Measures",
-  "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
+  "mode": "watch_webnovel",
+  "target_chapter": null,
+  "target_title": null,
+  "target_url": null,
   "pending_notification": null,
-  "public_source_failures": {
-    "FreeWebNovel": 4,
-    "Novel Buddy": 4,
-    "NovelFull": 4
-  },
+  "public_source_failures": {},
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
   "webnovel_failure_cycle": 1495871,
   "webnovel_success_cycle": 1495874,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-19T05:35:28+00:00"
+  "updated_at": "2026-11-19T05:40:31+00:00"
 }
