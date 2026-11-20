@@ -11,10 +11,10 @@
   "pending_notification": null,
   "public_source_failures": {},
   "public_source_failure_revision": 9,
-  "webnovel_failures": 1,
+  "webnovel_failures": 0,
   "webnovel_failure_cycle": 1495966,
-  "webnovel_success_cycle": 1495965,
+  "webnovel_success_cycle": 1495966,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-20T07:20:31+00:00"
+  "updated_at": "2026-11-20T07:25:17+00:00"
 }
