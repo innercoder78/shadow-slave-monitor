@@ -10,9 +10,7 @@
   "target_url": "https://www.webnovel.com/book/22196546206090805/catalog",
   "pending_notification": null,
   "public_source_failures": {
-    "FreeWebNovel": 1,
-    "Novel Buddy": 1,
-    "NovelFull": 1
+    "Novel Buddy": 2
   },
   "public_source_failure_revision": 9,
   "webnovel_failures": 0,
@@ -20,5 +18,5 @@
   "webnovel_success_cycle": 1496167,
   "emergency_last_check_ok": null,
   "emergency_provenance": null,
-  "updated_at": "2026-11-23T02:30:34+00:00"
+  "updated_at": "2026-11-23T02:35:16+00:00"
 }
